@@ -167,19 +167,13 @@ export async function loadTradingMarket(
     const assetScVal = TradingMarket.assetToScVal(asset);
 
     const keys = [
-        // Market config
         persistentLedgerKey(tradingId, [
-            xdr.ScVal.scvVec([
-                xdr.ScVal.scvSymbol('Market'),
-                assetScVal
-            ])
+            xdr.ScVal.scvSymbol('MarketConfig'),
+            assetScVal
         ]),
-        // Market data
         persistentLedgerKey(tradingId, [
-            xdr.ScVal.scvVec([
-                xdr.ScVal.scvSymbol('MarketData'),
-                assetScVal
-            ])
+            xdr.ScVal.scvSymbol('MarketData'),
+            assetScVal
         ])
     ];
 
@@ -196,7 +190,6 @@ export async function loadTradingMarket(
         return null;
     }
 }
-
 /**
  * Load a single trading position
  */
@@ -207,12 +200,12 @@ export async function loadPosition(
 ): Promise<Position | null> {
     const stellarRpc = new rpc.Server(network.rpc, network.opts);
 
-    const key = persistentLedgerKey(tradingId, [
-        xdr.ScVal.scvVec([
+    const key = persistentLedgerKey(tradingId,
+        [
             xdr.ScVal.scvSymbol('Position'),
             xdr.ScVal.scvU32(positionId)
-        ])
-    ]);
+        ]
+    );
 
     try {
         const response = await stellarRpc.getLedgerEntries(key);
@@ -244,10 +237,8 @@ export async function loadPositions(
         const batchIds = positionIds.slice(i, i + batchSize);
         const keys = batchIds.map(id =>
             persistentLedgerKey(tradingId, [
-                xdr.ScVal.scvVec([
-                    xdr.ScVal.scvSymbol('Position'),
-                    xdr.ScVal.scvU32(id)
-                ])
+                xdr.ScVal.scvSymbol('Position'),
+                xdr.ScVal.scvU32(id)
             ])
         );
 
@@ -281,10 +272,8 @@ export async function loadUserPositionIds(
     const stellarRpc = new rpc.Server(network.rpc, network.opts);
 
     const key = persistentLedgerKey(tradingId, [
-        xdr.ScVal.scvVec([
-            xdr.ScVal.scvSymbol('UserPositions'),
-            Address.fromString(userId).toScVal()
-        ])
+        xdr.ScVal.scvSymbol('UserPositions'),
+        Address.fromString(userId).toScVal()
     ]);
 
     try {
