@@ -6,7 +6,7 @@ export class VaultWithdrawal {
         /** Number of shares to be withdrawn */
         public shares: number,
         /** Timestamp when the withdrawal was queued (seconds) */
-        public queuedAt: number
+        public unlockTime: number
     ) { }
 
     static fromScVal(val: xdr.ScVal): VaultWithdrawal {
@@ -16,7 +16,7 @@ export class VaultWithdrawal {
         }
 
         let shares: bigint | undefined;
-        let queuedAt: bigint | undefined;
+        let unlockTime: bigint | undefined;
 
         map.forEach((entry) => {
             const key = entry.key().sym().toString();
@@ -24,30 +24,19 @@ export class VaultWithdrawal {
                 case 'shares':
                     shares = scValToBigInt(entry.val());
                     break;
-                case 'queued_at':
-                    queuedAt = scValToBigInt(entry.val());
+                case 'unlock_time':
+                    unlockTime = scValToBigInt(entry.val());
                     break;
             }
         });
 
-        if (shares === undefined || queuedAt === undefined) {
+        if (shares === undefined || unlockTime === undefined) {
             throw new Error('Missing required withdrawal fields');
         }
 
         return new VaultWithdrawal(
             descale(shares, 7),
-            Number(queuedAt) // Already in seconds
+            Number(unlockTime) // Already in seconds
         );
-    }
-
-    /**
-     * Get time remaining until withdrawal can be processed
-     * @param currentTime - Current timestamp in seconds
-     * @param processingTime - Processing time required in seconds
-     * @returns Seconds remaining, or 0 if ready
-     */
-    timeRemaining(currentTime: number, processingTime: number): number {
-        const readyTime = this.queuedAt + processingTime;
-        return currentTime >= readyTime ? 0 : readyTime - currentTime;
     }
 }

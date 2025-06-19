@@ -4,7 +4,8 @@ import {
     loadTradingConfig,
     loadVaultState,
     loadTradingMarket,
-    Asset
+    Asset,
+    loadVaultWithdrawal
 } from '../dist/esm/index.js';
 
 // Contract addresses from zenex-ui/.env.local
@@ -124,6 +125,10 @@ async function main() {
         console.log('   Token Asset:', CONTRACTS.TOKEN_ASSET);
         console.log('   Token Issuer:', CONTRACTS.TOKEN_ISSUER);
         console.log('   All data loaded successfully! ✨');
+
+        const withdrawal = await loadVaultWithdrawal(network, CONTRACTS.VAULT_CONTRACT, "GA7ABH5TCTZ4KHR3KLAFHONMWHLOYX5NFFYZNTS5L27XEDF3S6ITRAAH");
+        console.log('\n💰 Withdrawal Details:')
+        console.log(withdrawal);
 
     } catch (error) {
         console.error('\n❌ Error loading contract data:', error);

@@ -109,12 +109,13 @@ export async function loadVaultWithdrawal(
     const stellarRpc = new rpc.Server(network.rpc, network.opts);
 
     const key = persistentLedgerKey(vaultId, [
-        xdr.ScVal.scvSymbol('Withdrawal'),
+        xdr.ScVal.scvSymbol('WithdrawalRequest'),
         Address.fromString(userId).toScVal()
     ]);
 
     try {
         const response = await stellarRpc.getLedgerEntries(key);
+        console.log('Vault withdrawal response:', response);
         if (response.entries.length === 0) return null;
 
         return VaultWithdrawal.fromScVal(response.entries[0].val.contractData().val());
