@@ -21,6 +21,7 @@ import { TradingMarket } from './trading/trading_market.js';
 import { Position } from './trading/trading_position.js';
 import { TokenMetadata } from './token.js';
 import type { Asset } from './trading/trading_contract.js';
+import { descale } from './utils/scaling.js';
 
 // Re-export classes for convenience
 export { VaultState, VaultWithdrawal, TradingConfig, TradingMarket, Position, TokenMetadata };
@@ -122,6 +123,65 @@ export async function loadVaultWithdrawal(
     } catch {
         return null;
     }
+}
+
+/**
+ * Load strategy net impacts for a vault
+ * Returns a map of strategy addresses to their net impact (P&L) values
+ */
+export async function loadVaultStrategiesImpact(
+    network: Network,
+    vaultId: string,
+    strategies: string[]
+): Promise<Record<string, number>> {
+    if (strategies.length === 0) {
+        return {};
+    }
+
+    const stellarRpc = new rpc.Server(network.rpc, network.opts);
+    const impacts: Record<string, number> = {};
+
+    // Build all the ledger keys for batch fetching
+    const ledgerKeys: xdr.LedgerKey[] = strategies.map(strategy => {
+        return persistentLedgerKey(vaultId, [
+            xdr.ScVal.scvSymbol('Strategy'),
+            Address.fromString(strategy).toScVal()
+        ]);
+    });
+
+    try {
+        // Fetch all strategy impacts in one batch request
+        const response = await stellarRpc.getLedgerEntries(...ledgerKeys);
+
+        response.entries.forEach((entry, index) => {
+            const strategy = strategies[index];
+
+            if (entry) {
+                try {
+                    // Extract the i128 value from the contract data
+                    const val = entry.val.contractData().val();
+                    const impactBigInt = scValToBigInt(val);
+
+                    // Convert from stroops (7 decimals) to regular number
+                    impacts[strategy] = descale(impactBigInt, 7);
+                } catch (error) {
+                    console.warn(`Failed to parse impact for strategy ${strategy}:`, error);
+                    impacts[strategy] = 0;
+                }
+            } else {
+                // No entry means no net impact (0)
+                impacts[strategy] = 0;
+            }
+        });
+    } catch (error) {
+        console.error('Failed to load vault strategies impact:', error);
+        // Return all zeros on error
+        strategies.forEach(strategy => {
+            impacts[strategy] = 0;
+        });
+    }
+
+    return impacts;
 }
 
 // ============================

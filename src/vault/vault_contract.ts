@@ -124,10 +124,10 @@ export class VaultContract extends Contract {
     /**
      * Complete a queued withdrawal
      */
-    withdraw(owner: Address | string): string {
+    withdraw(user: Address | string): string {
         return this.call(
             'withdraw',
-            ...VaultContract.spec.funcArgsToScVals('withdraw', { owner })
+            ...VaultContract.spec.funcArgsToScVals('withdraw', { user })
         ).toXDR('base64');
     }
 
