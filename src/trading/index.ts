@@ -5,3 +5,4 @@ export * from './trading_contract.js';
 export * from './trading_config.js';
 export * from './trading_market.js';
 export * from './trading_position.js';
+export * from './trading_market_estimates.js';
