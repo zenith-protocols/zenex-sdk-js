@@ -1,5 +1,6 @@
 import { rpc, scValToNative, xdr, Address } from '@stellar/stellar-sdk';
 import { i128, u64 } from '../index.js';
+import { BaseZenexEvent, ZenexContractType } from '../base_event.js';
 
 export enum VaultEventType {
     Deposit = 'deposit',
@@ -11,7 +12,7 @@ export enum VaultEventType {
     TransferFrom = 'transfer_from'
 }
 
-export interface BaseVaultEvent {
+export interface BaseVaultEvent extends BaseZenexEvent {
     id: string;
     contractId: string;
     eventType: VaultEventType;
@@ -102,6 +103,7 @@ export function vaultEventFromEventResponse(
         const baseEvent: BaseVaultEvent = {
             id: eventResponse.id,
             contractId: eventResponse.contractId,
+            contractType: ZenexContractType.Vault,
             eventType: eventType as VaultEventType,
             ledger: eventResponse.ledger,
             ledgerClosedAt: eventResponse.ledgerClosedAt,
