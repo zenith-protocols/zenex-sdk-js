@@ -6,7 +6,7 @@ import {
     TransactionBuilder,
     xdr,
 } from '@stellar/stellar-sdk';
-import { Network } from './index.ts';
+import { Network } from './index.js';
 
 export async function simulateAndParse<T>(
     network: Network,

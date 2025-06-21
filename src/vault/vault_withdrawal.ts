@@ -1,5 +1,5 @@
 import { Address, xdr, scValToBigInt, rpc } from '@stellar/stellar-sdk';
-import { Network } from '../index.ts';
+import { Network } from '../index.js';
 import { persistentLedgerKey } from '../ledger_entry_helper.js';
 import { descale } from '../utils/scaling.js';
 

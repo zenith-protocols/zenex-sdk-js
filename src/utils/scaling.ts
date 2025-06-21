@@ -1,6 +1,6 @@
 
 // src/utils/scaling.ts
-import { i128 } from '../index.ts';
+import { i128 } from '../index.js';
 
 /**
  * Descale a bigint value to a JavaScript number

@@ -1,10 +1,8 @@
 import { Address, xdr, scValToBigInt, rpc } from '@stellar/stellar-sdk';
-import { Network } from '../index.ts';
+import { getTokenBalance, i128, Network } from '../index.js';
 import { contractInstanceLedgerKey } from '../ledger_entry_helper.js';
 import { decodeEntryKey } from '../ledger_entry_helper.js';
 import { descale } from '../utils/scaling.js';
-import { i128 } from '../index.ts';
-import { loadTokenBalance } from '../loader.js'; // You'll need to export this
 
 /**
  * VaultState contains all vault configuration and state data
@@ -58,16 +56,16 @@ export class VaultState {
         }
 
         // Get token balance using simulation
-        const balance = await loadTokenBalance(network, tokenId, vaultId);
+        const balance = await getTokenBalance(network, tokenId, vaultId);
 
-        return VaultState.fromInstanceStorageAndBalance(storage, balance || 0n);
+        return VaultState.fromInstanceStorageAndBalance(storage, balance || 0);
     }
 
     /**
      * Create a VaultState from raw storage entries and balance
      * @internal
      */
-    static fromInstanceStorageAndBalance(storage: xdr.ScMapEntry[], balance: i128): VaultState {
+    static fromInstanceStorageAndBalance(storage: xdr.ScMapEntry[], balance: number): VaultState {
         let token: string | undefined;
         let shareToken: string | undefined;
         let strategies: string[] = [];
@@ -113,7 +111,7 @@ export class VaultState {
             Number(lockTime), // Already in seconds
             descale(penaltyRate, 7),
             descale(totalShares, 7),
-            descale(balance, 7)
+            balance
         );
     }
 }

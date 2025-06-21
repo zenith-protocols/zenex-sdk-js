@@ -9,6 +9,12 @@ import { Asset } from './trading_contract.js';
 import { descale } from '../utils/scaling.js';
 import { simulateAndParse } from '../simulation_helper.js';
 
+export interface PriceData {
+    price: bigint;
+    timestamp: number;
+}
+
+
 export class TradingOracle {
     constructor(
         public oracleId: string,

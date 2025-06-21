@@ -1,5 +1,5 @@
 import { Address, Contract, contract } from "@stellar/stellar-sdk";
-import { i128, u64 } from "../index.ts";
+import { i128, u64 } from "../index.js";
 
 export interface WithdrawalRequest {
     shares: i128;

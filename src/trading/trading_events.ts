@@ -1,5 +1,5 @@
 import { rpc, scValToNative, xdr, Address } from '@stellar/stellar-sdk';
-import { i128, u32, u64, Asset } from '../index.ts';
+import { i128, u32, u64, Asset } from '../index.js';
 import { BaseZenexEvent, ZenexContractType } from '../base_event.js';
 
 export enum TradingEventType {

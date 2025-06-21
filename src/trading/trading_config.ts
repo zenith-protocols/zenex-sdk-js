@@ -1,5 +1,5 @@
 import { Address, rpc, xdr, scValToNative, scValToBigInt } from '@stellar/stellar-sdk';
-import { Network, i128, u32 } from '../index.ts';
+import { Network, i128, u32 } from '../index.js';
 import { decodeEntryKey, contractInstanceLedgerKey } from '../ledger_entry_helper.js';
 import { Asset } from './trading_contract.js';
 import { descale } from '../utils/scaling.js';

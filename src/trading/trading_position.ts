@@ -1,9 +1,8 @@
 import { Address, rpc, xdr, scValToBigInt } from '@stellar/stellar-sdk';
-import { Network } from '../index.ts';
+import { Network, i128, u32, u64 } from '../index.js';
 import { Asset } from './trading_contract.js';
 import { descale } from '../utils/scaling.js';
 import { persistentLedgerKey } from '../ledger_entry_helper.js';
-import { i128, u32, u64 } from '../index.ts';
 
 export enum PositionStatus {
     Pending = 'Pending',
