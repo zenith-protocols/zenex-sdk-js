@@ -1,7 +1,10 @@
-import { Address, xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { Address, xdr, scValToBigInt, rpc } from '@stellar/stellar-sdk';
+import { Network } from '../index.ts';
+import { contractInstanceLedgerKey } from '../ledger_entry_helper.js';
 import { decodeEntryKey } from '../ledger_entry_helper.js';
 import { descale } from '../utils/scaling.js';
-import { i128 } from '../index.js';
+import { i128 } from '../index.ts';
+import { loadTokenBalance } from '../loader.js'; // You'll need to export this
 
 /**
  * VaultState contains all vault configuration and state data
@@ -25,6 +28,45 @@ export class VaultState {
         public balance: number
     ) { }
 
+    /**
+     * Load vault state including configuration and current balance
+     * @param network - The Stellar network to connect to
+     * @param vaultId - The vault contract address
+     * @param tokenId - The token contract address
+     * @returns A new VaultState instance with current data
+     */
+    public static async load(
+        network: Network,
+        vaultId: string,
+        tokenId: string
+    ): Promise<VaultState> {
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+
+        // Load vault instance storage
+        const instanceKey = contractInstanceLedgerKey(vaultId);
+        const response = await stellarRpc.getLedgerEntries(instanceKey);
+
+        if (response.entries.length === 0) {
+            throw new Error('Vault not found');
+        }
+
+        const contractData = response.entries[0].val.contractData();
+        const contractInstance = contractData.val().instance();
+        const storage = contractInstance.storage();
+        if (!storage) {
+            throw new Error('Vault instance storage is empty');
+        }
+
+        // Get token balance using simulation
+        const balance = await loadTokenBalance(network, tokenId, vaultId);
+
+        return VaultState.fromInstanceStorageAndBalance(storage, balance || 0n);
+    }
+
+    /**
+     * Create a VaultState from raw storage entries and balance
+     * @internal
+     */
     static fromInstanceStorageAndBalance(storage: xdr.ScMapEntry[], balance: i128): VaultState {
         let token: string | undefined;
         let shareToken: string | undefined;

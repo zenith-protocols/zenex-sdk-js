@@ -1,47 +1,51 @@
-// src/trading/trading_market.ts
-import { Address, xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { Address, rpc, xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { Network } from '../index.ts';
 import { Asset } from './trading_contract.js';
 import { descale } from '../utils/scaling.js';
-import { i128, u32, u64 } from '../index.js';
+import { persistentLedgerKey } from '../ledger_entry_helper.js';
 
 /**
- * Manages ledger data for a single trading market.
- * All numeric values are automatically descaled to JavaScript numbers.
+ * TradingMarket contains both configuration and dynamic data for a trading market.
+ * All monetary values are automatically descaled to JavaScript numbers
  */
 export class TradingMarket {
     constructor(
-        /** The asset being traded in this market */
+        // Core market identity
         public asset: Asset,
 
-        // === Market Configuration ===
-        /** Whether the market is enabled */
+        // Market configuration (changes rarely)
+        /** Whether trading is enabled for this market */
         public enabled: boolean,
-        /** Maximum leverage allowed (e.g., 10 for 10x) */
+        /** Maximum allowed leverage (e.g., 10 = 10x) */
         public maxLeverage: number,
-        /** Maximum payout per position */
+        /** Maximum payout rate (e.g., 0.9 = 90%) */
         public maxPayout: number,
-        /** Minimum collateral required */
+        /** Minimum collateral amount required */
         public minCollateral: number,
-        /** Maximum collateral allowed */
+        /** Maximum collateral amount allowed */
         public maxCollateral: number,
-        /** Liquidation threshold (0-1, e.g., 0.05 = 5%) */
+        /** Liquidation threshold (e.g., 0.85 = 85%) */
         public liquidationThreshold: number,
-        /** Total funds available for this market as percentage (0-1) */
+        /** Total available liquidity for this market */
         public totalAvailable: number,
-        /** Base fee rate (0-1, e.g., 0.0005 = 0.05%) */
+
+        // Fee configuration
+        /** Base trading fee (e.g., 0.001 = 0.1%) */
         public baseFee: number,
-        /** Price impact scalar for fee calculation */
+        /** Price impact scalar for slippage calculation */
         public priceImpactScalar: number,
-        /** Minimum hourly borrowing rate */
+
+        // Interest rate configuration
+        /** Minimum hourly funding rate */
         public minHourlyRate: number,
-        /** Maximum hourly borrowing rate */
+        /** Maximum hourly funding rate */
         public maxHourlyRate: number,
-        /** Target hourly borrowing rate at target utilization */
+        /** Target hourly funding rate */
         public targetHourlyRate: number,
-        /** Target utilization threshold (0-1, e.g., 0.8 = 80%) */
+        /** Target utilization ratio (0-1) */
         public targetUtilization: number,
 
-        // === Market Data ===
+        // Dynamic market data (changes frequently)
         /** Total collateral in long positions */
         public longCollateral: number,
         /** Total borrowed amount for long positions */
@@ -54,16 +58,123 @@ export class TradingMarket {
         public shortBorrowed: number,
         /** Number of open short positions */
         public shortCount: number,
-        /** Current long interest index (kept as bigint - 18 decimals) */
-        public longInterestIndex: bigint,
-        /** Current short interest index (kept as bigint - 18 decimals) */
-        public shortInterestIndex: bigint,
-        /** Last update timestamp (seconds) */
+        /** Accumulated interest index for longs */
+        public longInterestIndex: bigint, // Keep as bigint for precision
+        /** Accumulated interest index for shorts */
+        public shortInterestIndex: bigint, // Keep as bigint for precision
+        /** Last update timestamp in seconds */
         public lastUpdate: number
     ) { }
 
     /**
-     * Create a TradingMarket instance from raw config and data ScVals
+     * Load trading market data from the blockchain
+     * @param network - The Stellar network to connect to
+     * @param tradingId - The trading contract address
+     * @param asset - The asset to load market data for
+     * @returns A new TradingMarket instance with current data, or null if not found
+     */
+    public static async load(
+        network: Network,
+        tradingId: string,
+        asset: Asset
+    ): Promise<TradingMarket | null> {
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+
+        // Convert asset to ScVal
+        const assetScVal = TradingMarket.assetToScVal(asset);
+
+        const keys = [
+            persistentLedgerKey(tradingId, [
+                xdr.ScVal.scvSymbol('MarketConfig'),
+                assetScVal
+            ]),
+            persistentLedgerKey(tradingId, [
+                xdr.ScVal.scvSymbol('MarketData'),
+                assetScVal
+            ])
+        ];
+
+        try {
+            const response = await stellarRpc.getLedgerEntries(...keys);
+
+            if (response.entries.length < 2) return null;
+
+            const configScVal = response.entries[0].val.contractData().val();
+            const dataScVal = response.entries[1].val.contractData().val();
+
+            return TradingMarket.fromScVals(asset, configScVal, dataScVal);
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Load multiple trading markets in a single RPC call
+     * @param network - The Stellar network to connect to
+     * @param tradingId - The trading contract address
+     * @param assets - Array of assets to load market data for
+     * @returns Array of TradingMarket instances (only includes successfully loaded markets)
+     */
+    public static async loadMultiple(
+        network: Network,
+        tradingId: string,
+        assets: Asset[]
+    ): Promise<TradingMarket[]> {
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+        const markets: TradingMarket[] = [];
+
+        // Build all keys for all assets (2 keys per asset: config and data)
+        const keys: xdr.LedgerKey[] = [];
+        assets.forEach((asset) => {
+            const assetScVal = TradingMarket.assetToScVal(asset);
+
+            // Config key
+            keys.push(persistentLedgerKey(tradingId, [
+                xdr.ScVal.scvSymbol('MarketConfig'),
+                assetScVal
+            ]));
+
+            // Data key
+            keys.push(persistentLedgerKey(tradingId, [
+                xdr.ScVal.scvSymbol('MarketData'),
+                assetScVal
+            ]));
+        });
+
+        try {
+            const response = await stellarRpc.getLedgerEntries(...keys);
+
+            // Process pairs of entries (config + data)
+            for (let i = 0; i < assets.length; i++) {
+                const configIndex = i * 2;
+                const dataIndex = i * 2 + 1;
+
+                // Check if we have both config and data for this asset
+                if (configIndex < response.entries.length && dataIndex < response.entries.length) {
+                    try {
+                        const configScVal = response.entries[configIndex].val.contractData().val();
+                        const dataScVal = response.entries[dataIndex].val.contractData().val();
+                        const market = TradingMarket.fromScVals(assets[i], configScVal, dataScVal);
+                        markets.push(market);
+                    } catch (error) {
+                        console.error(`Failed to parse market for asset ${i}:`, error);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load markets:', error);
+        }
+
+        return markets;
+    }
+
+    /**
+     * Create a TradingMarket from raw ScVal data
+     * @internal
+     * @param asset - The asset this market represents
+     * @param configVal - The ScVal containing market configuration
+     * @param dataVal - The ScVal containing market data
+     * @returns Parsed TradingMarket
      */
     static fromScVals(
         asset: Asset,
@@ -130,229 +241,146 @@ export class TradingMarket {
 
     /**
      * Parse MarketConfig from contract storage value.
+     * @internal
      * @param val - The ScVal containing the market config.
      * @returns The parsed MarketConfig.
      */
-    private static parseMarketConfig(val: xdr.ScVal): {
-        enabled: boolean;
-        maxLeverage: number;
-        maxPayout: number;
-        minCollateral: number;
-        maxCollateral: number;
-        liquidationThreshold: number;
-        totalAvailable: number;
-        baseFee: number;
-        priceImpactScalar: number;
-        minHourlyRate: number;
-        maxHourlyRate: number;
-        targetHourlyRate: number;
-        targetUtilization: number;
-    } {
+    private static parseMarketConfig(val: xdr.ScVal): any {
         const map = val.map();
         if (!map) {
-            throw new Error('Invalid market config: expected map');
+            throw new Error('Invalid market config data');
         }
 
-        let enabled: boolean | undefined;
-        let maxLeverage: u32 | undefined;
-        let maxPayout: i128 | undefined;
-        let minCollateral: i128 | undefined;
-        let maxCollateral: i128 | undefined;
-        let liquidationThreshold: i128 | undefined;
-        let totalAvailable: i128 | undefined;
-        let baseFee: i128 | undefined;
-        let priceImpactScalar: i128 | undefined;
-        let minHourlyRate: i128 | undefined;
-        let maxHourlyRate: i128 | undefined;
-        let targetHourlyRate: i128 | undefined;
-        let targetUtilization: i128 | undefined;
+        const config: any = {};
 
         map.forEach((entry) => {
             const key = entry.key().sym().toString();
+            const value = entry.val();
 
             switch (key) {
                 case 'enabled':
-                    enabled = entry.val().b();
+                    config.enabled = value.b();
                     break;
                 case 'max_leverage':
-                    maxLeverage = entry.val().u32();
+                    config.maxLeverage = value.u32() / 100; // Convert from 1000 to 10.0
                     break;
                 case 'max_payout':
-                    maxPayout = scValToBigInt(entry.val());
+                    config.maxPayout = descale(scValToBigInt(value), 7);
                     break;
                 case 'min_collateral':
-                    minCollateral = scValToBigInt(entry.val());
+                    config.minCollateral = descale(scValToBigInt(value), 7);
                     break;
                 case 'max_collateral':
-                    maxCollateral = scValToBigInt(entry.val());
+                    config.maxCollateral = descale(scValToBigInt(value), 7);
                     break;
                 case 'liquidation_threshold':
-                    liquidationThreshold = scValToBigInt(entry.val());
+                    config.liquidationThreshold = descale(scValToBigInt(value), 7);
                     break;
                 case 'total_available':
-                    totalAvailable = scValToBigInt(entry.val());
+                    config.totalAvailable = descale(scValToBigInt(value), 7);
                     break;
                 case 'base_fee':
-                    baseFee = scValToBigInt(entry.val());
+                    config.baseFee = descale(scValToBigInt(value), 7);
                     break;
                 case 'price_impact_scalar':
-                    priceImpactScalar = scValToBigInt(entry.val());
+                    config.priceImpactScalar = descale(scValToBigInt(value), 7);
                     break;
                 case 'min_hourly_rate':
-                    minHourlyRate = scValToBigInt(entry.val());
+                    config.minHourlyRate = descale(scValToBigInt(value), 7);
                     break;
                 case 'max_hourly_rate':
-                    maxHourlyRate = scValToBigInt(entry.val());
+                    config.maxHourlyRate = descale(scValToBigInt(value), 7);
                     break;
                 case 'target_hourly_rate':
-                    targetHourlyRate = scValToBigInt(entry.val());
+                    config.targetHourlyRate = descale(scValToBigInt(value), 7);
                     break;
                 case 'target_utilization':
-                    targetUtilization = scValToBigInt(entry.val());
+                    config.targetUtilization = descale(scValToBigInt(value), 7);
                     break;
             }
         });
 
-        // Validate all required fields
-        if (
-            enabled === undefined ||
-            maxLeverage === undefined ||
-            maxPayout === undefined ||
-            minCollateral === undefined ||
-            maxCollateral === undefined ||
-            liquidationThreshold === undefined ||
-            totalAvailable === undefined ||
-            baseFee === undefined ||
-            priceImpactScalar === undefined ||
-            minHourlyRate === undefined ||
-            maxHourlyRate === undefined ||
-            targetHourlyRate === undefined ||
-            targetUtilization === undefined
-        ) {
-            throw new Error('Missing required market config fields');
-        }
-
-        return {
-            enabled: enabled,
-            maxLeverage: Number(maxLeverage) / 100, // Convert 200 to 2.0
-            maxPayout: descale(maxPayout, 7),
-            minCollateral: descale(minCollateral, 7),
-            maxCollateral: descale(maxCollateral, 7),
-            liquidationThreshold: descale(liquidationThreshold, 7),
-            totalAvailable: descale(totalAvailable, 7),
-            baseFee: descale(baseFee, 7),
-            priceImpactScalar: descale(priceImpactScalar, 7),
-            minHourlyRate: descale(minHourlyRate, 7),
-            maxHourlyRate: descale(maxHourlyRate, 7),
-            targetHourlyRate: descale(targetHourlyRate, 7),
-            targetUtilization: descale(targetUtilization, 7),
-        };
+        return config;
     }
 
     /**
      * Parse MarketData from contract storage value.
+     * @internal
      * @param val - The ScVal containing the market data.
      * @returns The parsed MarketData.
      */
-    private static parseMarketData(val: xdr.ScVal): {
-        longCollateral: number;
-        longBorrowed: number;
-        longCount: number;
-        shortCollateral: number;
-        shortBorrowed: number;
-        shortCount: number;
-        longInterestIndex: bigint;
-        shortInterestIndex: bigint;
-        lastUpdate: number;
-    } {
+    private static parseMarketData(val: xdr.ScVal): any {
         const map = val.map();
         if (!map) {
-            throw new Error('Invalid market data: expected map');
+            throw new Error('Invalid market data');
         }
 
-        let longCollateral: i128 | undefined;
-        let longBorrowed: i128 | undefined;
-        let longCount: u32 | undefined;
-        let shortCollateral: i128 | undefined;
-        let shortBorrowed: i128 | undefined;
-        let shortCount: u32 | undefined;
-        let longInterestIndex: i128 | undefined;
-        let shortInterestIndex: i128 | undefined;
-        let lastUpdate: u64 | undefined;
+        const data: any = {};
 
         map.forEach((entry) => {
             const key = entry.key().sym().toString();
+            const value = entry.val();
 
             switch (key) {
                 case 'long_collateral':
-                    longCollateral = scValToBigInt(entry.val());
+                    data.longCollateral = descale(scValToBigInt(value), 7);
                     break;
                 case 'long_borrowed':
-                    longBorrowed = scValToBigInt(entry.val());
+                    data.longBorrowed = descale(scValToBigInt(value), 7);
                     break;
                 case 'long_count':
-                    longCount = entry.val().u32();
+                    data.longCount = value.u32();
                     break;
                 case 'short_collateral':
-                    shortCollateral = scValToBigInt(entry.val());
+                    data.shortCollateral = descale(scValToBigInt(value), 7);
                     break;
                 case 'short_borrowed':
-                    shortBorrowed = scValToBigInt(entry.val());
+                    data.shortBorrowed = descale(scValToBigInt(value), 7);
                     break;
                 case 'short_count':
-                    shortCount = entry.val().u32();
+                    data.shortCount = value.u32();
                     break;
                 case 'long_interest_index':
-                    longInterestIndex = scValToBigInt(entry.val());
+                    data.longInterestIndex = scValToBigInt(value);
                     break;
                 case 'short_interest_index':
-                    shortInterestIndex = scValToBigInt(entry.val());
+                    data.shortInterestIndex = scValToBigInt(value);
                     break;
                 case 'last_update':
-                    lastUpdate = scValToBigInt(entry.val());
+                    data.lastUpdate = Number(scValToBigInt(value));
                     break;
             }
         });
 
-        // Validate required fields
-        if (
-            longCollateral === undefined ||
-            longBorrowed === undefined ||
-            longCount === undefined ||
-            shortCollateral === undefined ||
-            shortBorrowed === undefined ||
-            shortCount === undefined ||
-            longInterestIndex === undefined ||
-            shortInterestIndex === undefined ||
-            lastUpdate === undefined
-        ) {
-            throw new Error('Missing required market data fields');
-        }
-
-        return {
-            longCollateral: descale(longCollateral, 7),
-            longBorrowed: descale(longBorrowed, 7),
-            longCount: Number(longCount),
-            shortCollateral: descale(shortCollateral, 7),
-            shortBorrowed: descale(shortBorrowed, 7),
-            shortCount: Number(shortCount),
-            longInterestIndex: longInterestIndex, // Keep as bigint (18 decimals)
-            shortInterestIndex: shortInterestIndex, // Keep as bigint (18 decimals)
-            lastUpdate: Number(lastUpdate),
-        };
+        return data;
     }
 
     /**
-     * Calculate current utilization rate for this market
-     * @returns Utilization rate as a decimal (0-1)
+     * Get total collateral across both long and short positions
      */
-    get utilization(): number {
-        const totalBorrowed = this.longBorrowed + this.shortBorrowed;
-        if (totalBorrowed === 0) return 0;
+    getTotalCollateral(): number {
+        return this.longCollateral + this.shortCollateral;
+    }
 
-        // Since totalAvailable is already a percentage, we need to consider
-        // the actual allocated liquidity based on vault balance
-        // This is a simplified calculation - actual implementation would need vault balance
-        return Math.min(totalBorrowed / (this.totalAvailable * 1000000), 1); // Placeholder
+    /**
+     * Get total borrowed across both long and short positions
+     */
+    getTotalBorrowed(): number {
+        return this.longBorrowed + this.shortBorrowed;
+    }
+
+    /**
+     * Get current utilization ratio (0-1)
+     */
+    getUtilization(): number {
+        if (this.totalAvailable === 0) return 0;
+        return this.getTotalBorrowed() / this.totalAvailable;
+    }
+
+    /**
+     * Get total number of positions (long + short)
+     */
+    getTotalPositions(): number {
+        return this.longCount + this.shortCount;
     }
 }

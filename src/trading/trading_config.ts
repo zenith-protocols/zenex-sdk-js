@@ -1,5 +1,5 @@
 import { Address, rpc, xdr, scValToNative, scValToBigInt } from '@stellar/stellar-sdk';
-import { Network, i128, u32 } from '../index.js';
+import { Network, i128, u32 } from '../index.ts';
 import { decodeEntryKey, contractInstanceLedgerKey } from '../ledger_entry_helper.js';
 import { Asset } from './trading_contract.js';
 import { descale } from '../utils/scaling.js';
@@ -33,8 +33,38 @@ export class TradingConfig {
     ) { }
 
     /**
+     * Load trading configuration from the blockchain
+     * @param network - The Stellar network to connect to
+     * @param tradingId - The trading contract address
+     * @returns A new TradingConfig instance with current data
+     */
+    public static async load(
+        network: Network,
+        tradingId: string
+    ): Promise<TradingConfig> {
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+
+        // Load trading instance storage
+        const instanceKey = contractInstanceLedgerKey(tradingId);
+        const response = await stellarRpc.getLedgerEntries(instanceKey);
+
+        if (response.entries.length === 0) {
+            throw new Error('Trading contract not found');
+        }
+
+        const contractData = response.entries[0].val.contractData();
+        const contractInstance = contractData.val().instance();
+        const storage = contractInstance.storage();
+        if (!storage) {
+            throw new Error('Trading instance storage is empty');
+        }
+
+        return TradingConfig.fromInstanceStorage(storage);
+    }
+
+    /**
      * Parse trading configuration from instance storage
-     * @param tradingId - The trading contract ID
+     * @internal
      * @param storage - The instance storage ScMap
      * @returns Parsed TradingConfig
      */
@@ -133,6 +163,7 @@ export class TradingConfig {
                     break;
             }
         });
+
         // Validate all required fields are loaded
         if (
             status === undefined ||

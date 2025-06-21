@@ -7,7 +7,7 @@ import {
     TransactionBuilder,
     xdr,
 } from '@stellar/stellar-sdk';
-import { Network } from './index.js';
+import { Network } from './index.ts';
 
 export interface PriceData {
     price: bigint;

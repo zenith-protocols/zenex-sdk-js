@@ -1,7 +1,9 @@
-import { Address, xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { Address, rpc, xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { Network } from '../index.ts';
 import { Asset } from './trading_contract.js';
 import { descale } from '../utils/scaling.js';
-import { i128, u32, u64 } from '../index.js';
+import { persistentLedgerKey } from '../ledger_entry_helper.js';
+import { i128, u32, u64 } from '../index.ts';
 
 export enum PositionStatus {
     Pending = 'Pending',
@@ -30,7 +32,126 @@ export class Position {
     ) { }
 
     /**
+     * Load a single trading position from the blockchain
+     * @param network - The Stellar network to connect to
+     * @param tradingId - The trading contract address
+     * @param positionId - The position ID to load
+     * @returns A new Position instance with current data, or null if not found
+     */
+    public static async load(
+        network: Network,
+        tradingId: string,
+        positionId: number
+    ): Promise<Position | null> {
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+
+        const key = persistentLedgerKey(tradingId, [
+            xdr.ScVal.scvSymbol('Position'),
+            xdr.ScVal.scvU32(positionId)
+        ]);
+
+        try {
+            const response = await stellarRpc.getLedgerEntries(key);
+            if (response.entries.length === 0) return null;
+
+            return Position.fromScVal(response.entries[0].val.contractData().val());
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Load multiple positions in a single RPC call
+     * @param network - The Stellar network to connect to
+     * @param tradingId - The trading contract address
+     * @param positionIds - Array of position IDs to load
+     * @returns Array of Position instances (only includes successfully loaded positions)
+     */
+    public static async loadMultiple(
+        network: Network,
+        tradingId: string,
+        positionIds: number[]
+    ): Promise<Position[]> {
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+        const positions: Position[] = [];
+
+        // Build keys for all positions
+        const keys = positionIds.map(id =>
+            persistentLedgerKey(tradingId, [
+                xdr.ScVal.scvSymbol('Position'),
+                xdr.ScVal.scvU32(id)
+            ])
+        );
+
+        try {
+            const response = await stellarRpc.getLedgerEntries(...keys);
+
+            response.entries.forEach((entry) => {
+                try {
+                    const position = Position.fromScVal(entry.val.contractData().val());
+                    positions.push(position);
+                } catch (error) {
+                    console.error('Failed to parse position:', error);
+                }
+            });
+        } catch (error) {
+            console.error('Failed to load positions:', error);
+        }
+
+        return positions;
+    }
+
+    /**
+     * Load user's position IDs
+     * @param network - The Stellar network to connect to
+     * @param tradingId - The trading contract address
+     * @param userId - The user's address
+     * @returns Array of position IDs
+     */
+    public static async loadUserPositionIds(
+        network: Network,
+        tradingId: string,
+        userId: string
+    ): Promise<number[]> {
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+
+        const key = persistentLedgerKey(tradingId, [
+            xdr.ScVal.scvSymbol('UserPositions'),
+            Address.fromString(userId).toScVal()
+        ]);
+
+        try {
+            const response = await stellarRpc.getLedgerEntries(key);
+            if (response.entries.length === 0) return [];
+
+            const vec = response.entries[0].val.contractData().val().vec();
+            if (!vec) return [];
+
+            return vec.map(v => v.u32());
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * Load all positions for a user
+     * @param network - The Stellar network to connect to
+     * @param tradingId - The trading contract address
+     * @param userId - The user's address
+     * @returns Array of Position instances
+     */
+    public static async loadUserPositions(
+        network: Network,
+        tradingId: string,
+        userId: string
+    ): Promise<Position[]> {
+        const positionIds = await Position.loadUserPositionIds(network, tradingId, userId);
+        return Position.loadMultiple(network, tradingId, positionIds);
+    }
+
+    /**
      * Parse Position from ScVal
+     * @internal
      * @param val - The ScVal containing the position data
      * @returns The parsed Position
      */
@@ -159,5 +280,45 @@ export class Position {
             positionIndex!, // Keep as bigint
             Number(timestamp!)
         );
+    }
+
+    /**
+     * Calculate the position size (notional value)
+     */
+    getNotionalValue(): number {
+        return this.collateral * this.leverage;
+    }
+
+    /**
+     * Check if position is active (open or pending)
+     */
+    isActive(): boolean {
+        return this.status === PositionStatus.Open || this.status === PositionStatus.Pending;
+    }
+
+    /**
+     * Check if position was closed by user or system
+     */
+    isClosed(): boolean {
+        return !this.isActive() && this.status !== PositionStatus.Cancelled;
+    }
+
+    /**
+     * Get human-readable position direction
+     */
+    getDirection(): string {
+        return this.isLong ? 'Long' : 'Short';
+    }
+
+    /**
+     * Format asset name for display
+     */
+    getAssetName(): string {
+        if (this.asset.tag === 'Other') {
+            return this.asset.values[0];
+        } else if (this.asset.tag === 'Stellar') {
+            return `Stellar:${this.asset.values[0]}`;
+        }
+        return 'Unknown';
     }
 }

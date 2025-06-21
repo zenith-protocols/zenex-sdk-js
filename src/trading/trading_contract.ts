@@ -1,5 +1,5 @@
 import { Address, Contract, contract } from '@stellar/stellar-sdk';
-import { i128, u32, u64 } from '../index.js';
+import { i128, u32, u64 } from '../index.ts';
 
 // @dev ENCODING REQUIRES PROPERTY NAMES TO MATCH RUST NAMES
 

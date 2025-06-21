@@ -8,7 +8,7 @@ import {
     TransactionBuilder,
     xdr,
 } from '@stellar/stellar-sdk';
-import { Network } from './index.js';
+import { Network } from './index.ts';
 import { decodeEntryKey } from './ledger_entry_helper.js';
 
 /**

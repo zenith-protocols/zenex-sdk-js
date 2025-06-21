@@ -1,5 +1,5 @@
 import { rpc, scValToNative, xdr, Address } from '@stellar/stellar-sdk';
-import { i128, u64 } from '../index.js';
+import { i128, u64 } from '../index.ts';
 import { BaseZenexEvent, ZenexContractType } from '../base_event.js';
 
 export enum VaultEventType {
