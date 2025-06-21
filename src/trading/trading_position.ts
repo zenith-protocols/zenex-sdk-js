@@ -14,6 +14,13 @@ export enum PositionStatus {
     Cancelled = 'Cancelled',
 }
 
+export interface PositionPnL {
+    pnl: number;
+    interest: number;
+    netPnl: number;
+}
+
+
 export class Position {
     constructor(
         public id: number,
@@ -98,54 +105,6 @@ export class Position {
         }
 
         return positions;
-    }
-
-    /**
-     * Load user's position IDs
-     * @param network - The Stellar network to connect to
-     * @param tradingId - The trading contract address
-     * @param userId - The user's address
-     * @returns Array of position IDs
-     */
-    public static async loadUserPositionIds(
-        network: Network,
-        tradingId: string,
-        userId: string
-    ): Promise<number[]> {
-        const stellarRpc = new rpc.Server(network.rpc, network.opts);
-
-        const key = persistentLedgerKey(tradingId, [
-            xdr.ScVal.scvSymbol('UserPositions'),
-            Address.fromString(userId).toScVal()
-        ]);
-
-        try {
-            const response = await stellarRpc.getLedgerEntries(key);
-            if (response.entries.length === 0) return [];
-
-            const vec = response.entries[0].val.contractData().val().vec();
-            if (!vec) return [];
-
-            return vec.map(v => v.u32());
-        } catch {
-            return [];
-        }
-    }
-
-    /**
-     * Load all positions for a user
-     * @param network - The Stellar network to connect to
-     * @param tradingId - The trading contract address
-     * @param userId - The user's address
-     * @returns Array of Position instances
-     */
-    public static async loadUserPositions(
-        network: Network,
-        tradingId: string,
-        userId: string
-    ): Promise<Position[]> {
-        const positionIds = await Position.loadUserPositionIds(network, tradingId, userId);
-        return Position.loadMultiple(network, tradingId, positionIds);
     }
 
     /**
@@ -319,5 +278,116 @@ export class Position {
             return `Stellar:${this.asset.values[0]}`;
         }
         return 'Unknown';
+    }
+
+    /**
+     * Calculate the position's profit and loss including interest
+     * @param currentPrice - The current market price of the asset
+     * @param currentIndex - The current position index for interest calculation
+     * @returns The position's PnL breakdown
+     */
+    calculatePnL(currentPrice: number, currentIndex: bigint): PositionPnL {
+        // Only calculate PnL for active positions
+        if (!this.isActive()) {
+            return {
+                pnl: 0,
+                interest: 0,
+                netPnl: 0
+            };
+        }
+
+        // Calculate position size (notional value)
+        const positionSize = this.collateral * this.leverage;
+
+        // Calculate price difference and raw PnL
+        const priceDiff = this.isLong
+            ? currentPrice - this.entryPrice
+            : this.entryPrice - currentPrice;
+
+        // PnL = (size * priceDiff) / entryPrice
+        const pnl = (positionSize * priceDiff) / this.entryPrice;
+
+        // Calculate interest/borrowing fee based on index growth
+        let interest = 0;
+        // const borrowedAmount = this.collateral * (this.leverage - 1); // Amount borrowed from vault
+
+        // if (borrowedAmount > 0 && currentIndex > this.positionIndex) {
+        //     // Calculate index growth ratio
+        //     // Both indices use 18 decimal precision in the contract
+        //     const indexRatio = Number(currentIndex) / Number(this.positionIndex);
+        //     const growthFactor = indexRatio - 1;
+
+        //     // Interest = borrowed amount * growth factor
+        //     interest = borrowedAmount * growthFactor;
+        // }
+
+        // Calculate net PnL (raw PnL minus interest)
+        const netPnl = pnl - interest;
+
+        return {
+            pnl: pnl,
+            interest: interest,
+            netPnl: netPnl
+        };
+    }
+
+    /**
+     * Calculate the liquidation price for the position
+     * @param currentPnL - The current PnL state of the position (includes netPnL)
+     * @param liquidationThreshold - The liquidation threshold (default: 0.05 = 5%)
+     * @returns The liquidation price level
+     */
+    getLiquidationPrice(
+        currentPnL: PositionPnL,
+        liquidationThreshold: number = 0.05
+    ): number {
+        // Only calculate for active positions
+        if (!this.isActive()) {
+            return 0;
+        }
+
+        // The contract's can_liquidate logic:
+        // remaining_value = collateral + netPnl
+        // minimum_required = collateral * liquidation_threshold
+        // can_liquidate when: remaining_value < minimum_required
+
+        // Current remaining value
+        const currentRemainingValue = this.collateral + currentPnL.netPnl;
+        const minimumRequired = this.collateral * liquidationThreshold;
+
+        // Check if already liquidatable
+        if (currentRemainingValue < minimumRequired) {
+            return 0; // Already past liquidation point
+        }
+
+        // Calculate how much more loss is needed to reach liquidation
+        const additionalLossNeeded = currentRemainingValue - minimumRequired;
+
+        // Total PnL at liquidation point would be
+        const liquidationNetPnl = currentPnL.netPnl - additionalLossNeeded;
+
+        // Since netPnl = pnl - interest, we get:
+        // liquidationPnl = liquidationNetPnl + interest
+        const liquidationPnl = liquidationNetPnl + currentPnL.interest;
+
+        // Now solve for the price that gives us this PnL
+        // For long: pnl = positionSize * (price - entryPrice) / entryPrice
+        // For short: pnl = positionSize * (entryPrice - price) / entryPrice
+
+        let liquidationPrice: number;
+        const positionSize = this.collateral * this.leverage;
+
+        if (this.isLong) {
+            // liquidationPnl = positionSize * (liquidationPrice - entryPrice) / entryPrice
+            // liquidationPrice = entryPrice * (1 + liquidationPnl / positionSize)
+            liquidationPrice = this.entryPrice * (1 + liquidationPnl / positionSize);
+        } else {
+            // liquidationPnl = positionSize * (entryPrice - liquidationPrice) / entryPrice
+            // liquidationPrice = entryPrice * (1 - liquidationPnl / positionSize)
+            liquidationPrice = this.entryPrice * (1 - liquidationPnl / positionSize);
+        }
+
+        // Ensure liquidation price is positive
+        return Math.max(0, liquidationPrice);
     }
 }

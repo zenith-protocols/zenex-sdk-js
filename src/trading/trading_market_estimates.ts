@@ -32,26 +32,6 @@ export interface InterestRate {
 }
 
 /**
- * Position P&L breakdown including all components
- */
-export interface PositionPnL {
-    /** Raw P&L from price movement */
-    pnl: number;
-    /** Total interest/borrowing fees */
-    interest: number;
-    /** Net P&L after fees (pnl - interest) */
-    netPnl: number;
-    /** P&L percentage relative to collateral */
-    pnlPercent: number;
-    /** Net P&L percentage relative to collateral */
-    netPnlPercent: number;
-    /** True if position can be liquidated */
-    canLiquidate: boolean;
-    /** Remaining collateral after P&L */
-    remainingCollateral: number;
-}
-
-/**
  * TradingMarketEstimates provides calculation utilities for trading markets
  * All calculations mirror the smart contract logic
  */
@@ -85,7 +65,6 @@ export class TradingMarketEstimates {
 
         // Convert per-second rates to annual percentage rates
         // Assuming rates are hourly rates converted to per-second
-        const secondsPerYear = 365 * 24 * 60 * 60;
         const longAPR = longRate * 3600 * 100; // Convert to hourly then to percentage
         const shortAPR = shortRate * 3600 * 100;
 
@@ -108,81 +87,6 @@ export class TradingMarketEstimates {
             longAPR,
             shortAPR
         };
-    }
-
-    /**
-     * Calculate position P&L including all fees and metrics
-     * @param position The position to calculate P&L for
-     * @param currentPrice Current asset price
-     * @returns Complete P&L breakdown
-     */
-    calculatePnL(position: Position, currentPrice: number): PositionPnL {
-        // Calculate raw P&L
-        const size = position.collateral * position.leverage;
-        const priceDiff = position.isLong
-            ? currentPrice - position.entryPrice
-            : position.entryPrice - currentPrice;
-
-        const pnl = (size * priceDiff) / position.entryPrice;
-
-        // Calculate interest
-        const interest = this._calculatePositionInterest(position);
-
-        const netPnl = pnl - interest;
-
-        // Calculate percentages
-        const pnlPercent = (pnl / position.collateral) * 100;
-        const netPnlPercent = (netPnl / position.collateral) * 100;
-
-        // Check liquidation
-        const remainingCollateral = position.collateral + netPnl;
-        const canLiquidate = this._canBeLiquidated(position.collateral, netPnl);
-
-        return {
-            pnl,
-            interest,
-            netPnl,
-            pnlPercent,
-            netPnlPercent,
-            canLiquidate,
-            remainingCollateral
-        };
-    }
-
-    /**
-     * Calculate accrued interest for a position
-     */
-    private _calculatePositionInterest(position: Position): number {
-        if (position.status !== PositionStatus.Open) {
-            return 0;
-        }
-
-        const borrowedAmount = position.collateral * (position.leverage - 1);
-        if (borrowedAmount <= 0) {
-            return 0;
-        }
-
-        // Get the appropriate index based on position type
-        const currentIndex = position.isLong
-            ? this.market.longInterestIndex
-            : this.market.shortInterestIndex;
-
-        const positionIndex = position.positionIndex;
-
-        if (currentIndex <= positionIndex) {
-            return 0;
-        }
-
-        // Calculate growth factor (how much the index has grown)
-        // Indices represent compound growth multipliers in 18 decimal precision
-        // e.g., 1.05 * 10^18 means 5% growth
-        const indexRatio = Number(currentIndex) / Number(positionIndex);
-        const growthFactor = indexRatio - 1; // Subtract 1 to get the growth percentage
-
-        // Apply growth to borrowed amount
-        const interest = borrowedAmount * growthFactor;
-
-        return interest;
     }
 
     /**
@@ -248,16 +152,6 @@ export class TradingMarketEstimates {
         const multiplier = 1 + (leverageInt * 0.01);
 
         return Math.min(multiplier, 2); // Cap at 2x
-    }
-
-    /**
-     * Check if a position can be liquidated
-     */
-    private _canBeLiquidated(collateral: number, netPnl: number): boolean {
-        const maintenanceMargin = collateral * this.market.liquidationThreshold;
-        const remainingCollateral = collateral + netPnl;
-
-        return remainingCollateral < maintenanceMargin;
     }
 
     /**
