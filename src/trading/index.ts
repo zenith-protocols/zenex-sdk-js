@@ -7,3 +7,4 @@ export * from './trading_market.js';
 export * from './trading_position.js';
 export * from './trading_market_estimates.js';
 export * from './trading_events.js';
+export * from './trading_oracle.js';

@@ -10,15 +10,14 @@ import { descale } from '../utils/scaling.js';
 import { simulateAndParse } from '../simulation_helper.js';
 
 export interface PriceData {
-    price: bigint;
+    price: number;
     timestamp: number;
 }
-
 
 export class TradingOracle {
     constructor(
         public oracleId: string,
-        public prices: Map<string, number>,
+        public prices: Map<Asset, PriceData>,
         public decimals: number
     ) { }
 
@@ -50,7 +49,7 @@ export class TradingOracle {
         }
 
         // Load prices for all assets
-        const prices = new Map<string, number>();
+        const prices = new Map<Asset, PriceData>();
 
         for (const asset of assets) {
             const contract = new Contract(oracleId);
@@ -87,12 +86,16 @@ export class TradingOracle {
                 }
             );
 
+            // Create PriceData with descaled price
             const rawPrice = result.result.price;
             const descaledPrice = descale(rawPrice, oracleDecimals);
-            const assetKey = asset.tag === 'Stellar'
-                ? `Stellar:${asset.values[0]}`
-                : `Other:${asset.values[0]}`;
-            prices.set(assetKey, descaledPrice);
+
+            const priceData: PriceData = {
+                price: descaledPrice,
+                timestamp: result.result.timestamp
+            };
+
+            prices.set(asset, priceData);
         }
 
         return new TradingOracle(oracleId, prices, oracleDecimals);
@@ -102,9 +105,6 @@ export class TradingOracle {
      * Get the price of an asset (automatically descaled)
      */
     public getPrice(asset: Asset): number | undefined {
-        const assetKey = asset.tag === 'Stellar'
-            ? `Stellar:${asset.values[0]}`
-            : `Other:${asset.values[0]}`;
-        return this.prices.get(assetKey);
+        return this.prices.get(asset)?.price;
     }
 }
