@@ -8,8 +8,10 @@ import {
     TransactionBuilder,
     xdr,
 } from '@stellar/stellar-sdk';
-import { Network } from './index.ts';
+import { Network } from './index.js';
 import { decodeEntryKey } from './ledger_entry_helper.js';
+import { simulateAndParse } from './simulation_helper.js';
+import { descale } from './utils/scaling.js';
 
 /**
  * TokenMetadata contains information about a token
@@ -135,5 +137,41 @@ export class TokenMetadata {
         }
 
         return new TokenMetadata(name, symbol, decimal, asset);
+    }
+}
+
+/**
+ * Load token balance for an address
+ * @param network - The Stellar network to connect to
+ * @param tokenId - The token contract address
+ * @param address - The address to check balance for
+ * @param decimals - Optional decimals (defaults to 7)
+ * @returns The descaled balance or null on error
+ */
+export async function getTokenBalance(
+    network: Network,
+    tokenId: string,
+    address: string,
+    decimals: number = 7
+): Promise<number | null> {
+    try {
+        const contract = new Contract(tokenId);
+        const addressScVal = Address.fromString(address).toScVal();
+        const balanceOp = contract.call('balance', addressScVal).toXDR('base64');
+
+        const result = await simulateAndParse(
+            network,
+            balanceOp,
+            (xdrResult) => {
+                const val = xdr.ScVal.fromXDR(xdrResult, 'base64');
+                return scValToNative(val) as bigint;
+            }
+        );
+
+        // Automatically descale the balance
+        return descale(result.result, decimals);
+    } catch (error) {
+        console.error('Error loading token balance:', error);
+        return null;
     }
 }
