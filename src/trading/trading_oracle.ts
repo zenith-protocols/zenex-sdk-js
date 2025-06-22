@@ -76,13 +76,7 @@ export class TradingOracle {
                 (xdrResult) => {
                     const val = xdr.ScVal.fromXDR(xdrResult, 'base64');
                     const native = scValToNative(val);
-                    if (Array.isArray(native) && native.length >= 2) {
-                        return {
-                            price: BigInt(native[0]),
-                            timestamp: Number(native[1])
-                        };
-                    }
-                    throw new Error('Invalid price result format');
+                    return native;
                 }
             );
 
