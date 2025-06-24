@@ -37,6 +37,33 @@ export class Position {
         public timestamp: number // Seconds
     ) { }
 
+    public static async loadUserPositionIds(
+        network: Network,
+        tradingId: string,
+        userId: string
+    ): Promise<number[]> {
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+
+        const key = persistentLedgerKey(tradingId, [
+            xdr.ScVal.scvSymbol('UserPositions'),
+            Address.fromString(userId).toScVal()
+        ]);
+
+        try {
+            const response = await stellarRpc.getLedgerEntries(key);
+            if (response.entries.length === 0) return [];
+
+            const scVal = response.entries[0].val.contractData().val();
+            const vec = scVal.vec();
+            if (!vec) return [];
+
+            // Convert ScVal array to number array
+            return vec.map(val => val.u32());
+        } catch {
+            return [];
+        }
+    }
+
     /**
      * Load a single trading position from the blockchain
      * @param network - The Stellar network to connect to
