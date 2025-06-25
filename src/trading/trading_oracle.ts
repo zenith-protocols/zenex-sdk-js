@@ -15,11 +15,30 @@ export interface PriceData {
 }
 
 export class TradingOracle {
+    private prices: Map<string, PriceData>;
+
     constructor(
         public oracleId: string,
-        public prices: Map<Asset, PriceData>,
+        prices: Map<Asset, PriceData>,
         public decimals: number
-    ) { }
+    ) {
+        // Convert the Map<Asset, PriceData> to Map<string, PriceData> using asset keys
+        this.prices = new Map();
+        prices.forEach((priceData, asset) => {
+            this.setPrice(asset, priceData);
+        });
+    }
+
+    /**
+     * Get a unique string key for an asset
+     */
+    private getAssetKey(asset: Asset): string {
+        if (asset.tag === 'Stellar') {
+            return `Stellar:${asset.values[0]}`;
+        } else {
+            return `Other:${asset.values[0]}`;
+        }
+    }
 
     /**
      * Load oracle with prices for multiple assets
@@ -99,6 +118,23 @@ export class TradingOracle {
      * Get the price of an asset (automatically descaled)
      */
     public getPrice(asset: Asset): number | undefined {
-        return this.prices.get(asset)?.price;
+        const key = this.getAssetKey(asset);
+        return this.prices.get(key)?.price;
+    }
+
+    /**
+     * Get the price data of an asset
+     */
+    public getPriceData(asset: Asset): PriceData | undefined {
+        const key = this.getAssetKey(asset);
+        return this.prices.get(key);
+    }
+
+    /**
+     * Set the price data for an asset
+     */
+    public setPrice(asset: Asset, priceData: PriceData): void {
+        const key = this.getAssetKey(asset);
+        this.prices.set(key, priceData);
     }
 }
