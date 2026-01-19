@@ -1,46 +1,110 @@
-import { Horizon } from "@stellar/stellar-sdk";
+// =============================================================================
+// Zenex SDK v2 - Public API
+// =============================================================================
 
-export * from './vault'
-export * from './trading'
-export * from './token'
-export * from './ledger_entry_helper'
-export * from './simulation_helper'
-export * from './response_parser'
+// Types - Primitives and Network
+export type {
+    u32,
+    i32,
+    u64,
+    i64,
+    u128,
+    i128,
+    Option,
+    Network,
+} from './types/index.js';
 
-export type u32 = number;
-export type i32 = number;
-export type u64 = bigint;
-export type i64 = bigint;
-export type u128 = bigint;
-export type i128 = bigint;
-export type Option<T> = T | undefined;
+export {
+    SCALAR_7,
+    SCALAR_18,
+    I128_MAX,
+} from './types/index.js';
 
-export const I128MAX = BigInt('170141183460469231731687303715884105727');
+// Types - Asset
+export type { Asset } from './types/index.js';
+export { getAssetKey, getAssetName, assetsEqual } from './types/index.js';
 
-export enum ErrorTypes {
-    LedgerEntryParseError = 'LedgerEntryParseError',
-}
+// Types - Trading
+export {
+    ContractStatus,
+    PositionStatus,
+    ExecuteRequestType,
+} from './types/index.js';
 
-export interface Network {
-    rpc: string;
-    passphrase: string;
-    maxConcurrentRequests?: number;
-    opts?: Horizon.Server.Options;
-}
+export type {
+    PositionPnL,
+    PositionData,
+    MarketConfig,
+    MarketData,
+    MarketInfo,
+    TradingConfigData,
+    TradingInstanceData,
+    ExecuteRequest,
+    OpenPositionArgs,
+    SetTriggersArgs,
+    ModifyCollateralArgs,
+    ExecuteArgs,
+    PriceData,
+} from './types/index.js';
 
-export const Networks = {
-    testnet: {
-        rpc: 'https://soroban-testnet.stellar.org',
-        passphrase: 'Test SDF Network ; September 2015',
-    },
-    mainnet: {
-        rpc: 'https://roc.zenithprotocols.com',
-        passphrase: 'Public Global Stellar Network ; September 2015',
-    }
-};
+// Types - Vault
+export type {
+    VaultStateData,
+} from './types/index.js';
 
+// Types - Events
+export {
+    ZenexContractType,
+    TradingEventType,
+    VaultEventType,
+} from './types/index.js';
+
+export type {
+    ZenexEvent,
+    TradingEvent,
+    VaultEvent,
+    TradingOpenPositionEvent,
+    TradingClosePositionEvent,
+    TradingFillPositionEvent,
+    TradingLiquidationEvent,
+    TradingModifyRiskEvent,
+    VaultStrategyWithdrawEvent,
+    VaultStrategyDepositEvent,
+} from './types/index.js';
+
+// Trading Module
+export { TradingContract } from './trading/index.js';
+export { Position } from './trading/index.js';
+export { Market } from './trading/index.js';
+export { TradingConfig } from './trading/index.js';
+export { Oracle } from './trading/index.js';
+
+// Vault Module
+export { VaultContract } from './vault/index.js';
+export { VaultState } from './vault/index.js';
+
+// Events
+export {
+    parseEvent,
+    parseTradingEvent,
+    parseVaultEvent,
+    isTradingEvent,
+    isVaultEvent,
+} from './events/index.js';
+
+// Errors
+export {
+    ContractError,
+    ContractErrorType,
+    parseError,
+    parseResult,
+    isContractError,
+} from './errors/index.js';
+
+// =============================================================================
+// Browser compatibility
+// =============================================================================
 if (typeof window !== 'undefined') {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore Buffer exists
-    window.Buffer = window.Buffer || Buffer;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).Buffer = (window as any).Buffer || Buffer;
 }

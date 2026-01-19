@@ -1,163 +1,48 @@
 import { rpc, scValToNative, xdr, Address } from '@stellar/stellar-sdk';
-import { i128, u32, u64, Asset } from '../index.js';
-import { BaseZenexEvent, ZenexContractType } from '../base_event.js';
-
-export enum TradingEventType {
-    SetConfig = 'set_config',
-    QueueSetMarket = 'queue_set_market',
-    SetMarket = 'set_market',
-    SetStatus = 'set_status',
-    OpenPosition = 'open_position',
-    ModifyRisk = 'modify_risk',
-    ClosePosition = 'close_position',
-    FillPosition = 'fill_position',
-    Liquidation = 'liquidation',
-    CancelPosition = 'cancel_position',
-    UpgradeWasm = 'upgrade_wasm'
-}
-
-export interface BaseTradingEvent extends BaseZenexEvent {
-    id: string;
-    contractId: string;
-    eventType: TradingEventType;
-    ledger: number;
-    ledgerClosedAt: string;
-    txHash: string;
-}
-
-export interface TradingSetConfigEvent extends BaseTradingEvent {
-    eventType: TradingEventType.SetConfig;
-    admin: string;
-    oracle: string;
-    callerTakeRate: i128;
-    maxPositions: u32;
-}
-
-export interface TradingQueueSetMarketEvent extends BaseTradingEvent {
-    eventType: TradingEventType.QueueSetMarket;
-    admin: string;
-    asset: Asset;
-    config: {
-        enabled: boolean;
-        maxLeverage: u32;
-        maxPayout: i128;
-        minCollateral: i128;
-        maxCollateral: i128;
-        liquidationThreshold: i128;
-        totalAvailable: i128;
-        baseFee: i128;
-        priceImpactScalar: i128;
-        minHourlyRate: i128;
-        maxHourlyRate: i128;
-        targetHourlyRate: i128;
-        targetUtilization: i128;
-    };
-}
-
-export interface TradingSetMarketEvent extends BaseTradingEvent {
-    eventType: TradingEventType.SetMarket;
-    asset: Asset;
-}
-
-export interface TradingSetStatusEvent extends BaseTradingEvent {
-    eventType: TradingEventType.SetStatus;
-    admin: string;
-    status: u32;
-}
-
-export interface TradingOpenPositionEvent extends BaseTradingEvent {
-    eventType: TradingEventType.OpenPosition;
-    user: string;
-    asset: Asset;
-    positionId: u32;
-    collateral: i128;
-    leverage: u32;
-    isLong: boolean;
-    entryPrice: i128;
-}
-
-export interface TradingModifyRiskEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ModifyRisk;
-    user: string;
-    positionId: u32;
-    stopLoss: i128;
-    takeProfit: i128;
-}
-
-export interface TradingClosePositionEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ClosePosition;
-    user: string;
-    asset: Asset;
-    positionId: u32;
-    pnl: i128;
-    fee: i128;
-    exitPrice: i128;
-}
-
-export interface TradingFillPositionEvent extends BaseTradingEvent {
-    eventType: TradingEventType.FillPosition;
-    user: string;
-    asset: Asset;
-    caller: string;
-    positionId: u32;
-    fillPrice: i128;
-    callerFee: i128;
-}
-
-export interface TradingLiquidationEvent extends BaseTradingEvent {
-    eventType: TradingEventType.Liquidation;
-    user: string;
-    asset: Asset;
-    liquidator: string;
-    positionId: u32;
-    collateral: i128;
-    loss: i128;
-    liquidatorFee: i128;
-}
-
-export interface TradingCancelPositionEvent extends BaseTradingEvent {
-    eventType: TradingEventType.CancelPosition;
-    user: string;
-    asset: Asset;
-    positionId: u32;
-    collateralReturned: i128;
-}
-
-export interface TradingUpgradeWasmEvent extends BaseTradingEvent {
-    eventType: TradingEventType.UpgradeWasm;
-    admin: string;
-    wasmHash: string;
-}
-
-export type TradingEvent =
-    | TradingSetConfigEvent
-    | TradingQueueSetMarketEvent
-    | TradingSetMarketEvent
-    | TradingSetStatusEvent
-    | TradingOpenPositionEvent
-    | TradingModifyRiskEvent
-    | TradingClosePositionEvent
-    | TradingFillPositionEvent
-    | TradingLiquidationEvent
-    | TradingCancelPositionEvent
-    | TradingUpgradeWasmEvent;
+import { Asset } from '../types/asset.js';
+import {
+    ZenexContractType,
+    TradingEventType,
+    VaultEventType,
+    TradingEvent,
+    VaultEvent,
+    ZenexEvent,
+    BaseTradingEvent,
+    BaseVaultEvent,
+    TradingSetConfigEvent,
+    TradingQueueSetMarketEvent,
+    TradingSetMarketEvent,
+    TradingSetStatusEvent,
+    TradingOpenPositionEvent,
+    TradingClosePositionEvent,
+    TradingFillPositionEvent,
+    TradingLiquidationEvent,
+    TradingCancelPositionEvent,
+    TradingModifyRiskEvent,
+    TradingUpgradeWasmEvent,
+    VaultStrategyWithdrawEvent,
+    VaultStrategyDepositEvent,
+} from '../types/events.js';
 
 /**
- * Parse trading events from RPC event responses
+ * Parse a trading event from RPC event response
  */
-export function tradingEventFromEventResponse(
+export function parseTradingEvent(
     eventResponse: rpc.Api.RawEventResponse
 ): TradingEvent | undefined {
     if (
         eventResponse.type !== 'contract' ||
+        !eventResponse.topic ||
         eventResponse.topic.length === 0 ||
         eventResponse.contractId === undefined
     ) {
         return undefined;
     }
 
+    const topic = eventResponse.topic;
+
     try {
-        const topicXdr = xdr.ScVal.fromXDR(eventResponse.topic[0], 'base64');
+        const topicXdr = xdr.ScVal.fromXDR(topic[0], 'base64');
         const eventType = scValToNative(topicXdr) as string;
 
         const valueXdr = xdr.ScVal.fromXDR(eventResponse.value, 'base64');
@@ -173,18 +58,17 @@ export function tradingEventFromEventResponse(
             txHash: eventResponse.txHash || '',
         };
 
-        // Extract additional topic data based on event type
         const extractAddress = (topicIndex: number): string => {
-            if (eventResponse.topic.length > topicIndex) {
-                const addressXdr = xdr.ScVal.fromXDR(eventResponse.topic[topicIndex], 'base64');
+            if (topic.length > topicIndex) {
+                const addressXdr = xdr.ScVal.fromXDR(topic[topicIndex], 'base64');
                 return Address.fromScVal(addressXdr).toString();
             }
             return '';
         };
 
         const extractAsset = (topicIndex: number): Asset | undefined => {
-            if (eventResponse.topic.length > topicIndex) {
-                const assetXdr = xdr.ScVal.fromXDR(eventResponse.topic[topicIndex], 'base64');
+            if (topic.length > topicIndex) {
+                const assetXdr = xdr.ScVal.fromXDR(topic[topicIndex], 'base64');
                 return scValToNative(assetXdr) as Asset;
             }
             return undefined;
@@ -310,4 +194,106 @@ export function tradingEventFromEventResponse(
         console.warn('Failed to parse trading event:', error);
         return undefined;
     }
+}
+
+/**
+ * Parse a vault event from RPC event response
+ */
+export function parseVaultEvent(
+    eventResponse: rpc.Api.RawEventResponse
+): VaultEvent | undefined {
+    if (
+        eventResponse.type !== 'contract' ||
+        !eventResponse.topic ||
+        eventResponse.topic.length === 0 ||
+        eventResponse.contractId === undefined
+    ) {
+        return undefined;
+    }
+
+    const topic = eventResponse.topic;
+
+    try {
+        const topicXdr = xdr.ScVal.fromXDR(topic[0], 'base64');
+        const eventType = scValToNative(topicXdr) as string;
+
+        const valueXdr = xdr.ScVal.fromXDR(eventResponse.value, 'base64');
+        const eventData = scValToNative(valueXdr);
+
+        const baseEvent: BaseVaultEvent = {
+            id: eventResponse.id,
+            contractId: eventResponse.contractId,
+            contractType: ZenexContractType.Vault,
+            eventType: eventType as VaultEventType,
+            ledger: eventResponse.ledger,
+            ledgerClosedAt: eventResponse.ledgerClosedAt,
+            txHash: eventResponse.txHash || '',
+        };
+
+        const extractAddress = (topicIndex: number): string => {
+            if (topic.length > topicIndex) {
+                const addressXdr = xdr.ScVal.fromXDR(topic[topicIndex], 'base64');
+                return Address.fromScVal(addressXdr).toString();
+            }
+            return '';
+        };
+
+        switch (eventType) {
+            case VaultEventType.StrategyWithdraw:
+                return {
+                    ...baseEvent,
+                    eventType: VaultEventType.StrategyWithdraw,
+                    strategy: extractAddress(1),
+                    amount: eventData.amount,
+                    newNetImpact: eventData.new_net_impact,
+                } as VaultStrategyWithdrawEvent;
+
+            case VaultEventType.StrategyDeposit:
+                return {
+                    ...baseEvent,
+                    eventType: VaultEventType.StrategyDeposit,
+                    strategy: extractAddress(1),
+                    amount: eventData.amount,
+                    newNetImpact: eventData.new_net_impact,
+                } as VaultStrategyDepositEvent;
+
+            default:
+                return undefined;
+        }
+    } catch (error) {
+        console.warn('Failed to parse vault event:', error);
+        return undefined;
+    }
+}
+
+/**
+ * Parse any Zenex event from RPC event response
+ * Tries trading first, then vault
+ */
+export function parseEvent(
+    eventResponse: rpc.Api.RawEventResponse
+): ZenexEvent | undefined {
+    // Try parsing as trading event first
+    const tradingEvent = parseTradingEvent(eventResponse);
+    if (tradingEvent) return tradingEvent;
+
+    // Then try vault event
+    const vaultEvent = parseVaultEvent(eventResponse);
+    if (vaultEvent) return vaultEvent;
+
+    return undefined;
+}
+
+/**
+ * Check if an event is a trading event
+ */
+export function isTradingEvent(event: ZenexEvent): event is TradingEvent {
+    return event.contractType === ZenexContractType.Trading;
+}
+
+/**
+ * Check if an event is a vault event
+ */
+export function isVaultEvent(event: ZenexEvent): event is VaultEvent {
+    return event.contractType === ZenexContractType.Vault;
 }
