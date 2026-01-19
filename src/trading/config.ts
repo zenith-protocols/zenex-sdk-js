@@ -18,8 +18,9 @@ export class TradingConfig implements TradingInstanceData {
     config: TradingConfigData;
     marketList: Asset[];
     positionCounter: number;
+    contractId: string;
 
-    constructor(data: TradingInstanceData) {
+    constructor(data: TradingInstanceData, contractId: string) {
         this.name = data.name;
         this.status = data.status;
         this.vault = data.vault;
@@ -27,6 +28,7 @@ export class TradingConfig implements TradingInstanceData {
         this.config = data.config;
         this.marketList = data.marketList;
         this.positionCounter = data.positionCounter;
+        this.contractId = contractId;
     }
 
     /**
@@ -55,14 +57,14 @@ export class TradingConfig implements TradingInstanceData {
             throw new Error('Trading instance storage is empty');
         }
 
-        return TradingConfig.fromInstanceStorage(storage);
+        return TradingConfig.fromInstanceStorage(storage, contractId);
     }
 
     /**
      * Parse trading configuration from instance storage
      * @internal
      */
-    static fromInstanceStorage(storage: xdr.ScMapEntry[]): TradingConfig {
+    static fromInstanceStorage(storage: xdr.ScMapEntry[], contractId: string): TradingConfig {
         let name: string | undefined;
         let status: number = 0;
         let vault: string | undefined;
@@ -173,7 +175,7 @@ export class TradingConfig implements TradingInstanceData {
             config,
             marketList,
             positionCounter,
-        });
+        }, contractId);
     }
 
     // === Helper Methods ===

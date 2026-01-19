@@ -24,12 +24,18 @@ export class VaultState implements VaultStateData {
     totalShares: number;
     /** Total assets in the vault */
     totalAssets: number;
+    /** Network configuration (stored for instance methods) */
+    private network: Network;
+    /** Vault contract address (stored for instance methods) */
+    private contractId: string;
 
-    constructor(data: VaultStateData) {
+    constructor(data: VaultStateData, network: Network, contractId: string) {
         this.asset = data.asset;
         this.lockTime = data.lockTime;
         this.totalShares = data.totalShares;
         this.totalAssets = data.totalAssets;
+        this.network = network;
+        this.contractId = contractId;
     }
 
     /**
@@ -100,31 +106,29 @@ export class VaultState implements VaultStateData {
             // Balance entry doesn't exist, vault has 0 assets
         }
 
-        return new VaultState({
-            asset,
-            lockTime,
-            totalShares: descale(totalShares, 7),
-            totalAssets: descale(totalAssets, 7),
-        });
+        return new VaultState(
+            {
+                asset,
+                lockTime,
+                totalShares: descale(totalShares, 7),
+                totalAssets: descale(totalAssets, 7),
+            },
+            network,
+            contractId
+        );
     }
 
     /**
      * Check if a user's shares are locked
-     * @param network - The Stellar network to connect to
-     * @param contractId - The vault contract address
      * @param userId - The user address to check
      * @returns True if the user's shares are still locked
      */
-    public static async isLocked(
-        network: Network,
-        contractId: string,
-        userId: string
-    ): Promise<boolean> {
-        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+    public async isLocked(userId: string): Promise<boolean> {
+        const stellarRpc = new rpc.Server(this.network.rpc, this.network.opts);
 
         // Read both the vault instance (for LockTime) and user's LastDepositTime
-        const instanceKey = contractInstanceLedgerKey(contractId);
-        const lastDepositKey = persistentLedgerKey(contractId, [
+        const instanceKey = contractInstanceLedgerKey(this.contractId);
+        const lastDepositKey = persistentLedgerKey(this.contractId, [
             xdr.ScVal.scvSymbol('LastDepositTime'),
             Address.fromString(userId).toScVal(),
         ]);
@@ -178,20 +182,14 @@ export class VaultState implements VaultStateData {
 
     /**
      * Get the net impact (cumulative P&L) for a strategy
-     * @param network - The Stellar network to connect to
-     * @param contractId - The vault contract address
      * @param strategyId - The strategy address
      * @returns Net impact value
      */
-    public static async getNetImpact(
-        network: Network,
-        contractId: string,
-        strategyId: string
-    ): Promise<number> {
-        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+    public async getNetImpact(strategyId: string): Promise<number> {
+        const stellarRpc = new rpc.Server(this.network.rpc, this.network.opts);
 
         // Strategy net impact is stored in persistent storage: Strategy(address)
-        const key = persistentLedgerKey(contractId, [
+        const key = persistentLedgerKey(this.contractId, [
             xdr.ScVal.scvSymbol('Strategy'),
             Address.fromString(strategyId).toScVal(),
         ]);
