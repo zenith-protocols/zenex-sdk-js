@@ -2,13 +2,24 @@
     "name": "@zenith-protocols/zenex-sdk",
     "version": "1.0.0",
     "description": "Javascript SDK for Zenex",
+    "author": "Robeart",
+    "keywords": [
+        "stellar",
+        "soroban",
+        "zenex",
+        "perpetuals",
+        "trading",
+        "defi",
+        "sdk"
+    ],
+    "main": "./dist/cjs/index.js",
+    "module": "./dist/esm/index.js",
     "scripts": {
         "clean": "rimraf dist",
         "build:cjs": "npx tsc -p ./scripts/tsconfig.cjs.json",
         "build:esm": "npx tsc -p ./scripts/tsconfig.esm.json",
         "build:types": "npx tsc -p ./scripts/tsconfig.types.json",
         "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types",
-        "test": "jest --config ./scripts/jest.config.js",
         "test:vault-deposit": "npx tsx tests/vault-deposit.ts",
         "test:position-open": "npx tsx tests/position-open.ts",
         "test:position-modify": "npx tsx tests/position-modify.ts",
@@ -16,9 +27,11 @@
         "test:position-read": "npx tsx tests/position-read.ts"
     },
     "exports": {
-        "require": "./dist/cjs/index.js",
-        "import": "./dist/esm/index.js",
-        "types": "./dist/types/index.d.ts"
+        ".": {
+            "types": "./dist/types/index.d.ts",
+            "require": "./dist/cjs/index.js",
+            "import": "./dist/esm/index.js"
+        }
     },
     "typings": "dist/types/index.d.ts",
     "files": [
@@ -38,17 +51,13 @@
     },
     "homepage": "https://github.com/zenith-protocols/zenex-sdk-js#readme",
     "devDependencies": {
-        "@types/jest": "^30.0.0",
         "@typescript-eslint/eslint-plugin": "^8.53.0",
         "@typescript-eslint/parser": "^8.53.0",
         "eslint": "^9.39.0",
         "eslint-config-prettier": "^10.1.8",
         "eslint-plugin-prettier": "^5.5.5",
-        "jest": "^30.2.0",
         "prettier": "^3.8.0",
         "rimraf": "^6.1.2",
-        "ts-jest": "^29.1.0",
-        "ts-node": "^10.9.2",
         "tsx": "^4.21.0",
         "typescript": "^5.1.6"
     },

@@ -138,3 +138,6 @@ dist
 # TypeScript compiled output in src
 src/**/*.js
 src/**/*.d.ts
+
+# Test credentials
+test-contract.json
