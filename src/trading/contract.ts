@@ -191,7 +191,7 @@ export class TradingContract extends Contract {
         return this.call(
             'queue_set_market',
             assetToScVal(args.asset),
-            this.marketConfigToScVal(args.config),
+            this.marketConfigToScVal(args.config, args.asset),
         ).toXDR('base64');
     }
 
@@ -402,8 +402,12 @@ export class TradingContract extends Contract {
      * Convert MarketConfigArgs to ScVal
      * @internal
      */
-    private marketConfigToScVal(config: MarketConfigArgs): xdr.ScVal {
+    private marketConfigToScVal(config: MarketConfigArgs, asset: Asset): xdr.ScVal {
         return xdr.ScVal.scvMap([
+            new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol('asset'),
+                val: assetToScVal(asset),
+            }),
             new xdr.ScMapEntry({
                 key: xdr.ScVal.scvSymbol('base_fee'),
                 val: nativeToScVal(config.base_fee, { type: 'i128' }),
