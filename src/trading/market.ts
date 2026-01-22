@@ -1,17 +1,19 @@
-import { rpc, xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { rpc, xdr, scValToBigInt, Address } from '@stellar/stellar-sdk';
 import { Network } from '../types/primitives.js';
 import { Asset } from '../types/asset.js';
 import { MarketConfig, MarketData, MarketInfo } from '../types/trading.js';
-import { descale } from '../internal/scaling.js';
-import { persistentLedgerKey, assetToScVal } from '../internal/ledger-keys.js';
+import { descale } from '../scaling.js';
+import { persistentLedgerKey } from '../ledger-keys.js';
 
 /**
  * Market - Trading market class with config and dynamic data
  *
  * Contains both configuration and real-time market data with automatic descaling.
+ * Markets are now indexed by assetIndex (u32) rather than Asset.
  */
 export class Market implements MarketInfo {
     // Market identity
+    assetIndex: number;
     asset: Asset;
 
     // Market configuration (matches Rust MarketConfig)
@@ -34,7 +36,8 @@ export class Market implements MarketInfo {
     shortInterestIndex: bigint;
     lastUpdate: number;
 
-    constructor(data: MarketInfo) {
+    constructor(assetIndex: number, data: MarketInfo) {
+        this.assetIndex = assetIndex;
         this.asset = data.asset;
         this.enabled = data.enabled;
         this.maxPayout = data.maxPayout;
@@ -57,29 +60,27 @@ export class Market implements MarketInfo {
     // === Static Loaders ===
 
     /**
-     * Load trading market data from the blockchain
+     * Load trading market data from the blockchain by asset index
      * @param network - The Stellar network to connect to
      * @param contractId - The trading contract address
-     * @param asset - The asset to load market data for
+     * @param assetIndex - The asset index to load market data for
      * @returns A new Market instance with current data, or null if not found
      */
     public static async load(
         network: Network,
         contractId: string,
-        asset: Asset
+        assetIndex: number
     ): Promise<Market | null> {
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
-
-        const assetScVal = assetToScVal(asset);
 
         const keys = [
             persistentLedgerKey(contractId, [
                 xdr.ScVal.scvSymbol('MarketConfig'),
-                assetScVal
+                xdr.ScVal.scvU32(assetIndex)
             ]),
             persistentLedgerKey(contractId, [
                 xdr.ScVal.scvSymbol('MarketData'),
-                assetScVal
+                xdr.ScVal.scvU32(assetIndex)
             ])
         ];
 
@@ -91,7 +92,7 @@ export class Market implements MarketInfo {
             const configScVal = response.entries[0].val.contractData().val();
             const dataScVal = response.entries[1].val.contractData().val();
 
-            return Market.fromScVals(asset, configScVal, dataScVal);
+            return Market.fromScVals(assetIndex, configScVal, dataScVal);
         } catch {
             return null;
         }
@@ -101,38 +102,36 @@ export class Market implements MarketInfo {
      * Load multiple trading markets in a single RPC call
      * @param network - The Stellar network to connect to
      * @param contractId - The trading contract address
-     * @param assets - Array of assets to load market data for
+     * @param assetIndices - Array of asset indices to load market data for
      * @returns Array of Market instances (only includes successfully loaded markets)
      */
     public static async loadMultiple(
         network: Network,
         contractId: string,
-        assets: Asset[]
+        assetIndices: number[]
     ): Promise<Market[]> {
-        if (assets.length === 0) return [];
+        if (assetIndices.length === 0) return [];
 
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
         const markets: Market[] = [];
 
         const keys: xdr.LedgerKey[] = [];
-        assets.forEach((asset) => {
-            const assetScVal = assetToScVal(asset);
-
+        assetIndices.forEach((assetIndex) => {
             keys.push(persistentLedgerKey(contractId, [
                 xdr.ScVal.scvSymbol('MarketConfig'),
-                assetScVal
+                xdr.ScVal.scvU32(assetIndex)
             ]));
 
             keys.push(persistentLedgerKey(contractId, [
                 xdr.ScVal.scvSymbol('MarketData'),
-                assetScVal
+                xdr.ScVal.scvU32(assetIndex)
             ]));
         });
 
         try {
             const response = await stellarRpc.getLedgerEntries(...keys);
 
-            for (let i = 0; i < assets.length; i++) {
+            for (let i = 0; i < assetIndices.length; i++) {
                 const configIndex = i * 2;
                 const dataIndex = i * 2 + 1;
 
@@ -140,10 +139,10 @@ export class Market implements MarketInfo {
                     try {
                         const configScVal = response.entries[configIndex].val.contractData().val();
                         const dataScVal = response.entries[dataIndex].val.contractData().val();
-                        const market = Market.fromScVals(assets[i], configScVal, dataScVal);
+                        const market = Market.fromScVals(assetIndices[i], configScVal, dataScVal);
                         markets.push(market);
                     } catch (error) {
-                        console.error(`Failed to parse market for asset ${i}:`, error);
+                        console.error(`Failed to parse market for asset index ${assetIndices[i]}:`, error);
                     }
                 }
             }
@@ -159,14 +158,14 @@ export class Market implements MarketInfo {
      * @internal
      */
     static fromScVals(
-        asset: Asset,
+        assetIndex: number,
         configVal: xdr.ScVal,
         dataVal: xdr.ScVal
     ): Market {
-        const config = Market.parseMarketConfig(configVal);
+        const { asset, config } = Market.parseMarketConfig(configVal);
         const data = Market.parseMarketData(dataVal);
 
-        return new Market({
+        return new Market(assetIndex, {
             asset,
             ...config,
             ...data,
@@ -177,19 +176,23 @@ export class Market implements MarketInfo {
      * Parse MarketConfig from contract storage value (matches Rust MarketConfig)
      * @internal
      */
-    private static parseMarketConfig(val: xdr.ScVal): MarketConfig {
+    private static parseMarketConfig(val: xdr.ScVal): { asset: Asset; config: MarketConfig } {
         const map = val.map();
         if (!map) {
             throw new Error('Invalid market config data');
         }
 
         const config: Partial<MarketConfig> = {};
+        let asset: Asset | undefined;
 
         map.forEach((entry) => {
             const key = entry.key().sym().toString();
             const value = entry.val();
 
             switch (key) {
+                case 'asset':
+                    asset = Market.parseAsset(value);
+                    break;
                 case 'enabled':
                     config.enabled = value.b();
                     break;
@@ -221,7 +224,39 @@ export class Market implements MarketInfo {
             }
         });
 
-        return config as MarketConfig;
+        if (!asset) {
+            throw new Error('Market config missing asset');
+        }
+
+        return { asset, config: config as MarketConfig };
+    }
+
+    /**
+     * Parse Asset from ScVal
+     * @internal
+     */
+    private static parseAsset(val: xdr.ScVal): Asset {
+        const variant = val.vec();
+        if (!variant || variant.length < 2) {
+            throw new Error('Invalid asset format');
+        }
+
+        const variantName = variant[0].sym().toString();
+        const variantEntry = variant[1];
+
+        if (variantName === 'Stellar' && variantEntry) {
+            return {
+                tag: 'Stellar',
+                values: [Address.fromScVal(variantEntry).toString()]
+            } as Asset;
+        } else if (variantName === 'Other' && variantEntry) {
+            return {
+                tag: 'Other',
+                values: [variantEntry.sym().toString()]
+            } as Asset;
+        }
+
+        throw new Error('Unknown asset type');
     }
 
     /**

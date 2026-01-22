@@ -11,10 +11,8 @@ export type Option<T> = T | undefined;
 
 // Scaling constants
 export const SCALAR_7 = 10_000_000n;
+export const SCALAR_14 = 100_000_000_000_000n;
 export const SCALAR_18 = 1_000_000_000_000_000_000n;
-
-// Max values
-export const I128_MAX = BigInt('170141183460469231731687303715884105727');
 
 // Network configuration
 export interface Network {

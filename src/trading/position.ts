@@ -1,21 +1,21 @@
-import { Address, rpc, xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { rpc, xdr, scValToBigInt, scValToNative, Address } from '@stellar/stellar-sdk';
 import { Network } from '../types/primitives.js';
-import { Asset } from '../types/asset.js';
 import { PositionStatus, PositionPnL, PositionData } from '../types/trading.js';
-import { descale } from '../internal/scaling.js';
-import { persistentLedgerKey } from '../internal/ledger-keys.js';
+import { descale } from '../scaling.js';
+import { persistentLedgerKey } from '../ledger-keys.js';
 import { Market } from './market.js';
 
 /**
  * Position - Trading position class with loaders and computed properties
  *
  * Represents a trading position with automatic descaling of values.
+ * Use TradingConfig.getAsset(position.assetIndex) to resolve the asset.
  */
 export class Position implements PositionData {
     id: number;
     user: string;
     status: PositionStatus;
-    asset: Asset;
+    assetIndex: number;
     isLong: boolean;
     stopLoss: number;
     takeProfit: number;
@@ -29,7 +29,7 @@ export class Position implements PositionData {
         this.id = data.id;
         this.user = data.user;
         this.status = data.status;
-        this.asset = data.asset;
+        this.assetIndex = data.assetIndex;
         this.isLong = data.isLong;
         this.stopLoss = data.stopLoss;
         this.takeProfit = data.takeProfit;
@@ -159,7 +159,7 @@ export class Position implements PositionData {
         let id: number | undefined;
         let user: string | undefined;
         let status: PositionStatus | undefined;
-        let asset: Asset | undefined;
+        let assetIndex: number | undefined;
         let isLong: boolean | undefined;
         let stopLoss: bigint | undefined;
         let takeProfit: bigint | undefined;
@@ -186,22 +186,8 @@ export class Position implements PositionData {
                         status = variantName as PositionStatus;
                     }
                     break;
-                case 'asset':
-                    const assetVariant = entry.val().vec();
-                    if (assetVariant && assetVariant.length >= 2) {
-                        const tag = assetVariant[0].sym().toString();
-                        if (tag === 'Stellar') {
-                            asset = {
-                                tag: 'Stellar',
-                                values: [Address.fromScVal(assetVariant[1]).toString()]
-                            };
-                        } else if (tag === 'Other') {
-                            asset = {
-                                tag: 'Other',
-                                values: [assetVariant[1].sym().toString()]
-                            };
-                        }
-                    }
+                case 'asset_index':
+                    assetIndex = scValToNative(entry.val()) as number;
                     break;
                 case 'is_long':
                     isLong = entry.val().b();
@@ -234,7 +220,7 @@ export class Position implements PositionData {
             id === undefined ||
             user === undefined ||
             status === undefined ||
-            asset === undefined ||
+            assetIndex === undefined ||
             isLong === undefined ||
             stopLoss === undefined ||
             takeProfit === undefined ||
@@ -251,11 +237,11 @@ export class Position implements PositionData {
             id,
             user,
             status,
-            asset,
+            assetIndex,
             isLong,
-            stopLoss: descale(stopLoss, 7),
-            takeProfit: descale(takeProfit, 7),
-            entryPrice: descale(entryPrice, 7),
+            stopLoss: descale(stopLoss, 14),
+            takeProfit: descale(takeProfit, 14),
+            entryPrice: descale(entryPrice, 14),
             collateral: descale(collateral, 7),
             notionalSize: descale(notionalSize, 7),
             interestIndex,

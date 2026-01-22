@@ -1,13 +1,40 @@
 import { Address, xdr, scValToBigInt, rpc } from '@stellar/stellar-sdk';
 import { Network } from '../types/primitives.js';
 import { VaultStateData } from '../types/vault.js';
-import { descale } from '../internal/scaling.js';
+import { descale } from '../scaling.js';
 import {
     contractInstanceLedgerKey,
     decodeEntryKey,
     tokenBalanceLedgerKey,
     persistentLedgerKey,
-} from '../internal/ledger-keys.js';
+} from '../ledger-keys.js';
+
+/**
+ * Extract the balance amount from a token balance storage value.
+ * Handles both direct i128 values and SEP-41 map format with 'amount' field.
+ * @param val - The ScVal from the balance storage entry
+ * @returns The balance as bigint
+ */
+function extractBalanceAmount(val: xdr.ScVal): bigint {
+    // Check if it's a map (SEP-41 format: { amount: i128, authorized: bool, clawback: bool })
+    if (val.switch() === xdr.ScValType.scvMap()) {
+        const map = val.map();
+        if (map) {
+            for (const entry of map) {
+                const key = entry.key();
+                // Check for 'amount' key (stored as symbol)
+                if (key.switch() === xdr.ScValType.scvSymbol() && key.sym().toString() === 'amount') {
+                    return scValToBigInt(entry.val());
+                }
+            }
+        }
+        // If no 'amount' key found in map, return 0
+        return 0n;
+    }
+
+    // Direct i128 value (simpler token implementations)
+    return scValToBigInt(val);
+}
 
 /**
  * VaultState - Loader class for vault state data
@@ -24,6 +51,8 @@ export class VaultState implements VaultStateData {
     totalShares: number;
     /** Total assets in the vault */
     totalAssets: number;
+    /** Decimals offset for virtual shares (inflation attack protection) */
+    decimalsOffset: number;
     /** Network configuration (stored for instance methods) */
     private network: Network;
     /** Vault contract address (stored for instance methods) */
@@ -34,6 +63,7 @@ export class VaultState implements VaultStateData {
         this.lockTime = data.lockTime;
         this.totalShares = data.totalShares;
         this.totalAssets = data.totalAssets;
+        this.decimalsOffset = data.decimalsOffset;
         this.network = network;
         this.contractId = contractId;
     }
@@ -69,6 +99,7 @@ export class VaultState implements VaultStateData {
         let asset: string | undefined;
         let lockTime: number = 0;
         let totalShares: bigint = 0n;
+        let decimalsOffset: number = 0;
 
         storage.forEach((storageEntry) => {
             const entryKey = decodeEntryKey(storageEntry.key());
@@ -85,8 +116,13 @@ export class VaultState implements VaultStateData {
                 case 'TotalSupply':
                     totalShares = scValToBigInt(storageEntry.val());
                     break;
+
+                case 'VirtualDecimalsOffset':
+                    decimalsOffset = Number(scValToBigInt(storageEntry.val()));
+                    break;
             }
         });
+
 
         if (!asset) {
             throw new Error('Vault asset address not found in instance storage');
@@ -100,18 +136,24 @@ export class VaultState implements VaultStateData {
         try {
             const balanceResponse = await stellarRpc.getLedgerEntries(balanceKey);
             if (balanceResponse.entries.length > 0) {
-                totalAssets = scValToBigInt(balanceResponse.entries[0].val.contractData().val());
+                const val = balanceResponse.entries[0].val.contractData().val();
+                totalAssets = extractBalanceAmount(val);
             }
         } catch {
             // Balance entry doesn't exist, vault has 0 assets
         }
 
+        // Shares have extra precision: 7 (asset decimals) + decimalsOffset
+        // Assets are always descaled by 7 (standard Stellar token decimals)
+        const shareDecimals = 7 + decimalsOffset;
+
         return new VaultState(
             {
                 asset,
                 lockTime,
-                totalShares: descale(totalShares, 7),
+                totalShares: descale(totalShares, shareDecimals),
                 totalAssets: descale(totalAssets, 7),
+                decimalsOffset,
             },
             network,
             contractId
@@ -119,11 +161,11 @@ export class VaultState implements VaultStateData {
     }
 
     /**
-     * Check if a user's shares are locked
+     * Get seconds remaining until user's shares unlock, or 0 if not locked
      * @param userId - The user address to check
-     * @returns True if the user's shares are still locked
+     * @returns Seconds remaining until unlock (0 = not locked)
      */
-    public async isLocked(userId: string): Promise<boolean> {
+    public async lockDuration(userId: string): Promise<number> {
         const stellarRpc = new rpc.Server(this.network.rpc, this.network.opts);
 
         // Read both the vault instance (for LockTime) and user's LastDepositTime
@@ -152,7 +194,7 @@ export class VaultState implements VaultStateData {
         }
 
         // If no lock time set, user is not locked
-        if (lockTime === 0n) return false;
+        if (lockTime === 0n) return 0;
 
         // Check if user has a last deposit time
         let lastDepositTime: bigint = 0n;
@@ -170,47 +212,27 @@ export class VaultState implements VaultStateData {
         }
 
         // If no deposit time, user has no shares so not locked
-        if (lastDepositTime === 0n) return false;
+        if (lastDepositTime === 0n) return 0;
 
         // Get current ledger timestamp
         const latestLedger = await stellarRpc.getLatestLedger();
         const currentTime = BigInt(latestLedger.sequence) * 5n; // Approximate: 5 seconds per ledger
 
-        // User is locked if current time < lastDepositTime + lockTime
-        return currentTime < (lastDepositTime + lockTime);
-    }
-
-    /**
-     * Get the net impact (cumulative P&L) for a strategy
-     * @param strategyId - The strategy address
-     * @returns Net impact value
-     */
-    public async getNetImpact(strategyId: string): Promise<number> {
-        const stellarRpc = new rpc.Server(this.network.rpc, this.network.opts);
-
-        // Strategy net impact is stored in persistent storage: Strategy(address)
-        const key = persistentLedgerKey(this.contractId, [
-            xdr.ScVal.scvSymbol('Strategy'),
-            Address.fromString(strategyId).toScVal(),
-        ]);
-
-        try {
-            const response = await stellarRpc.getLedgerEntries(key);
-            if (response.entries.length > 0) {
-                const value = scValToBigInt(response.entries[0].val.contractData().val());
-                return descale(value, 7);
-            }
-        } catch {
-            // Entry doesn't exist
+        // Calculate unlock time and remaining duration
+        const unlockTime = lastDepositTime + lockTime;
+        if (currentTime >= unlockTime) {
+            return 0;
         }
 
-        return 0;
+        return Number(unlockTime - currentTime);
     }
 
     // === Computed Properties ===
 
     /**
      * Calculate the current share price (assets per share)
+     * This returns the simple ratio for display purposes.
+     * The contract's preview functions handle virtual offset internally.
      * @returns Share price as a number
      */
     sharePrice(): number {
@@ -219,7 +241,8 @@ export class VaultState implements VaultStateData {
     }
 
     /**
-     * Convert asset amount to shares
+     * Convert asset amount to shares (simple ratio for estimates)
+     * For accurate values, use the contract's preview_deposit simulation
      * @param assets - Amount of assets
      * @returns Equivalent shares
      */
@@ -229,7 +252,8 @@ export class VaultState implements VaultStateData {
     }
 
     /**
-     * Convert shares to asset amount
+     * Convert shares to asset amount (simple ratio for estimates)
+     * For accurate values, use the contract's preview_redeem simulation
      * @param shares - Amount of shares
      * @returns Equivalent assets
      */

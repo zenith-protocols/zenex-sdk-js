@@ -25,7 +25,7 @@ import { TradingConfig } from '../src/trading/config.js';
 import { ContractStatus } from '../src/types/trading.js';
 import { VaultContract } from '../src/vault/contract.js';
 import { VaultState } from '../src/vault/state.js';
-import { scale } from '../src/internal/scaling.js';
+import { scale } from '../src/scaling.js';
 
 async function main() {
     logSection('Vault Deposit Test');
@@ -130,18 +130,20 @@ async function main() {
     }
 
     // ============================================================
-    // Step 6: Check if user shares are locked
+    // Step 6: Check user's lock duration
     // ============================================================
-    logSection('Step 6: Check Lock Status');
+    logSection('Step 6: Check Lock Duration');
 
     try {
-        const isLocked = await VaultState.isLocked(network, vaultAddress, userAddress);
-        log(`User shares locked: ${isLocked ? 'Yes' : 'No'}`);
-        if (isLocked) {
-            log(`  Shares will be locked for ${vaultStateBefore.lockTime} seconds after deposit`);
+        const vaultState = await VaultState.load(network, vaultAddress);
+        const lockDuration = await vaultState.lockDuration(userAddress);
+        if (lockDuration > 0) {
+            log(`User shares locked: Yes (${lockDuration} seconds remaining)`);
+        } else {
+            log(`User shares locked: No`);
         }
     } catch (error) {
-        logError(`Failed to check lock status: ${error}`);
+        logError(`Failed to check lock duration: ${error}`);
     }
 
     logSection('Test Complete');

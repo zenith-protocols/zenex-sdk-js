@@ -1,14 +1,15 @@
 import { Address, rpc, xdr, scValToNative, scValToBigInt } from '@stellar/stellar-sdk';
 import { Network } from '../types/primitives.js';
 import { Asset } from '../types/asset.js';
-import { TradingConfigData, TradingInstanceData, ContractStatus } from '../types/trading.js';
-import { descale } from '../internal/scaling.js';
-import { contractInstanceLedgerKey, decodeEntryKey } from '../internal/ledger-keys.js';
+import { TradingConfigData, TradingInstanceData, ContractStatus, MarketConfigWithAsset, MarketMap } from '../types/trading.js';
+import { descale } from '../scaling.js';
+import { contractInstanceLedgerKey, decodeEntryKey, persistentLedgerKey } from '../ledger-keys.js';
 
 /**
  * TradingConfig - Trading contract configuration loader
  *
- * Contains all configuration data from the trading contract's instance storage.
+ * Contains all configuration data from the trading contract's instance storage
+ * plus a mapping of market index -> MarketConfig (including asset).
  */
 export class TradingConfig implements TradingInstanceData {
     name: string | undefined;
@@ -16,19 +17,22 @@ export class TradingConfig implements TradingInstanceData {
     vault: string;
     token: string;
     config: TradingConfigData;
-    marketList: Asset[];
+    marketCounter: number;
     positionCounter: number;
     contractId: string;
+    /** Map of asset_index -> MarketConfigWithAsset */
+    markets: MarketMap;
 
-    constructor(data: TradingInstanceData, contractId: string) {
+    constructor(data: TradingInstanceData, contractId: string, markets: MarketMap) {
         this.name = data.name;
         this.status = data.status;
         this.vault = data.vault;
         this.token = data.token;
         this.config = data.config;
-        this.marketList = data.marketList;
+        this.marketCounter = data.marketCounter;
         this.positionCounter = data.positionCounter;
         this.contractId = contractId;
+        this.markets = markets;
     }
 
     /**
@@ -43,6 +47,7 @@ export class TradingConfig implements TradingInstanceData {
     ): Promise<TradingConfig> {
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
 
+        // Load instance storage first to get marketCounter
         const instanceKey = contractInstanceLedgerKey(contractId);
         const response = await stellarRpc.getLedgerEntries(instanceKey);
 
@@ -57,20 +62,29 @@ export class TradingConfig implements TradingInstanceData {
             throw new Error('Trading instance storage is empty');
         }
 
-        return TradingConfig.fromInstanceStorage(storage, contractId);
+        const instanceData = TradingConfig.parseInstanceStorage(storage);
+
+        // Load all market configs
+        const markets = await TradingConfig.loadMarketConfigs(
+            stellarRpc,
+            contractId,
+            instanceData.marketCounter
+        );
+
+        return new TradingConfig(instanceData, contractId, markets);
     }
 
     /**
      * Parse trading configuration from instance storage
      * @internal
      */
-    static fromInstanceStorage(storage: xdr.ScMapEntry[], contractId: string): TradingConfig {
+    private static parseInstanceStorage(storage: xdr.ScMapEntry[]): TradingInstanceData {
         let name: string | undefined;
         let status: number = 0;
         let vault: string | undefined;
         let token: string | undefined;
         let config: TradingConfigData | undefined;
-        let marketList: Asset[] = [];
+        let marketCounter: number = 0;
         let positionCounter: number = 0;
 
         storage.forEach((storageEntry) => {
@@ -94,7 +108,6 @@ export class TradingConfig implements TradingInstanceData {
                     break;
 
                 case 'Config':
-                    // Config is TradingConfig struct
                     const configMap = storageEntry.val().map();
                     if (configMap) {
                         let oracle: string | undefined;
@@ -131,30 +144,8 @@ export class TradingConfig implements TradingInstanceData {
                     }
                     break;
 
-                case 'MarketList':
-                    const vec = storageEntry.val().vec();
-                    if (vec) {
-                        marketList = vec.map((assetVal) => {
-                            const variant = assetVal.vec();
-                            if (variant) {
-                                const variantName = variant[0].sym().toString();
-                                const variantEntry = variant[1];
-
-                                if (variantName === 'Stellar' && variantEntry) {
-                                    return {
-                                        tag: 'Stellar',
-                                        values: [Address.fromScVal(variantEntry).toString()]
-                                    } as Asset;
-                                } else if (variantName === 'Other' && variantEntry) {
-                                    return {
-                                        tag: 'Other',
-                                        values: [variantEntry.sym().toString()]
-                                    } as Asset;
-                                }
-                            }
-                            throw new Error('Invalid Asset in MarketList');
-                        });
-                    }
+                case 'MarketCounter':
+                    marketCounter = scValToNative(storageEntry.val()) as number;
                     break;
 
                 case 'PosCtr':
@@ -167,15 +158,172 @@ export class TradingConfig implements TradingInstanceData {
             throw new Error('Missing required trading configuration fields');
         }
 
-        return new TradingConfig({
+        return {
             name,
             status,
             vault,
             token,
             config,
-            marketList,
+            marketCounter,
             positionCounter,
-        }, contractId);
+        };
+    }
+
+    /**
+     * Load all market configurations from persistent storage
+     * @internal
+     */
+    private static async loadMarketConfigs(
+        stellarRpc: rpc.Server,
+        contractId: string,
+        marketCounter: number
+    ): Promise<MarketMap> {
+        const markets: MarketMap = new Map();
+
+        if (marketCounter === 0) {
+            return markets;
+        }
+
+        // Build ledger keys for all markets
+        const ledgerKeys: xdr.LedgerKey[] = [];
+        for (let i = 0; i < marketCounter; i++) {
+            // MarketConfig(u32) storage key
+            const key = persistentLedgerKey(contractId, [
+                xdr.ScVal.scvSymbol('MarketConfig'),
+                xdr.ScVal.scvU32(i),
+            ]);
+            ledgerKeys.push(key);
+        }
+
+        // Fetch all market configs in one call
+        const response = await stellarRpc.getLedgerEntries(...ledgerKeys);
+
+        // Parse each market config
+        for (const entry of response.entries) {
+            const contractData = entry.val.contractData();
+            const keyVec = contractData.key().vec();
+            if (!keyVec || keyVec.length < 2) continue;
+
+            const assetIndex = keyVec[1].u32();
+            const configVal = contractData.val();
+            const marketConfig = TradingConfig.parseMarketConfig(configVal);
+
+            if (marketConfig) {
+                markets.set(assetIndex, marketConfig);
+            }
+        }
+
+        return markets;
+    }
+
+    /**
+     * Parse a MarketConfig from ScVal
+     * @internal
+     */
+    private static parseMarketConfig(val: xdr.ScVal): MarketConfigWithAsset | undefined {
+        const configMap = val.map();
+        if (!configMap) return undefined;
+
+        let asset: Asset | undefined;
+        let enabled: boolean | undefined;
+        let maxPayout: bigint | undefined;
+        let minCollateral: bigint | undefined;
+        let maxCollateral: bigint | undefined;
+        let initMargin: bigint | undefined;
+        let maintenanceMargin: bigint | undefined;
+        let baseFee: bigint | undefined;
+        let priceImpactScalar: bigint | undefined;
+        let baseHourlyRate: bigint | undefined;
+
+        configMap.forEach((entry) => {
+            const key = entry.key().sym().toString();
+            switch (key) {
+                case 'asset':
+                    asset = TradingConfig.parseAsset(entry.val());
+                    break;
+                case 'enabled':
+                    enabled = scValToNative(entry.val()) as boolean;
+                    break;
+                case 'max_payout':
+                    maxPayout = scValToBigInt(entry.val());
+                    break;
+                case 'min_collateral':
+                    minCollateral = scValToBigInt(entry.val());
+                    break;
+                case 'max_collateral':
+                    maxCollateral = scValToBigInt(entry.val());
+                    break;
+                case 'init_margin':
+                    initMargin = scValToBigInt(entry.val());
+                    break;
+                case 'maintenance_margin':
+                    maintenanceMargin = scValToBigInt(entry.val());
+                    break;
+                case 'base_fee':
+                    baseFee = scValToBigInt(entry.val());
+                    break;
+                case 'price_impact_scalar':
+                    priceImpactScalar = scValToBigInt(entry.val());
+                    break;
+                case 'base_hourly_rate':
+                    baseHourlyRate = scValToBigInt(entry.val());
+                    break;
+            }
+        });
+
+        if (
+            asset === undefined ||
+            enabled === undefined ||
+            maxPayout === undefined ||
+            minCollateral === undefined ||
+            maxCollateral === undefined ||
+            initMargin === undefined ||
+            maintenanceMargin === undefined ||
+            baseFee === undefined ||
+            priceImpactScalar === undefined ||
+            baseHourlyRate === undefined
+        ) {
+            return undefined;
+        }
+
+        return {
+            asset,
+            enabled,
+            maxPayout: descale(maxPayout, 7),
+            minCollateral: descale(minCollateral, 7),
+            maxCollateral: descale(maxCollateral, 7),
+            initMargin: descale(initMargin, 7),
+            maintenanceMargin: descale(maintenanceMargin, 7),
+            baseFee: descale(baseFee, 7),
+            priceImpactScalar: descale(priceImpactScalar, 7),
+            baseHourlyRate: descale(baseHourlyRate, 18),
+        };
+    }
+
+    /**
+     * Parse Asset from ScVal
+     * @internal
+     */
+    private static parseAsset(val: xdr.ScVal): Asset | undefined {
+        const variant = val.vec();
+        if (!variant || variant.length < 2) return undefined;
+
+        const variantName = variant[0].sym().toString();
+        const variantEntry = variant[1];
+
+        if (variantName === 'Stellar' && variantEntry) {
+            return {
+                tag: 'Stellar',
+                values: [Address.fromScVal(variantEntry).toString()]
+            } as Asset;
+        } else if (variantName === 'Other' && variantEntry) {
+            return {
+                tag: 'Other',
+                values: [variantEntry.sym().toString()]
+            } as Asset;
+        }
+
+        return undefined;
     }
 
     // === Helper Methods ===
@@ -188,19 +336,64 @@ export class TradingConfig implements TradingInstanceData {
     }
 
     /**
+     * Get market config by asset index
+     * @param assetIndex - The market's asset index
+     * @returns MarketConfigWithAsset or undefined if not found
+     */
+    getMarket(assetIndex: number): MarketConfigWithAsset | undefined {
+        return this.markets.get(assetIndex);
+    }
+
+    /**
+     * Get asset by index
+     * @param assetIndex - The market's asset index
+     * @returns Asset or undefined if not found
+     */
+    getAsset(assetIndex: number): Asset | undefined {
+        return this.markets.get(assetIndex)?.asset;
+    }
+
+    /**
+     * Find asset index by asset
+     * @param asset - The asset to find
+     * @returns asset index or undefined if not found
+     */
+    findAssetIndex(asset: Asset): number | undefined {
+        for (const [index, config] of this.markets) {
+            if (config.asset.tag === asset.tag) {
+                if (config.asset.tag === 'Other' && asset.tag === 'Other') {
+                    if (config.asset.values[0] === asset.values[0]) {
+                        return index;
+                    }
+                } else if (config.asset.tag === 'Stellar' && asset.tag === 'Stellar') {
+                    if (config.asset.values[0].toString() === asset.values[0].toString()) {
+                        return index;
+                    }
+                }
+            }
+        }
+        return undefined;
+    }
+
+    /**
      * Check if a specific asset is a valid market
      */
     hasMarket(asset: Asset): boolean {
-        return this.marketList.some(m => {
-            if (m.tag !== asset.tag) return false;
-            if (m.tag === 'Other' && asset.tag === 'Other') {
-                return m.values[0] === asset.values[0];
+        return this.findAssetIndex(asset) !== undefined;
+    }
+
+    /**
+     * Get all market assets as an array (ordered by index)
+     */
+    getMarketAssets(): Asset[] {
+        const assets: Asset[] = [];
+        for (let i = 0; i < this.marketCounter; i++) {
+            const market = this.markets.get(i);
+            if (market) {
+                assets.push(market.asset);
             }
-            if (m.tag === 'Stellar' && asset.tag === 'Stellar') {
-                return m.values[0].toString() === asset.values[0].toString();
-            }
-            return false;
-        });
+        }
+        return assets;
     }
 
     /**

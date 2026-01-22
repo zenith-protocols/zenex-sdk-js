@@ -12,13 +12,13 @@ export type {
 
 export {
     SCALAR_7,
+    SCALAR_14,
     SCALAR_18,
-    I128_MAX,
 } from './primitives.js';
 
 // Asset types
 export type { Asset } from './asset.js';
-export { getAssetKey, getAssetName, assetsEqual } from './asset.js';
+export { getAssetKey, getAssetName, assetsEqual, assetToScVal, assetFromScVal, assetFromKey } from './asset.js';
 
 // Trading types
 export {
@@ -35,6 +35,8 @@ export type {
     MarketInfo,
     TradingConfigData,
     TradingInstanceData,
+    MarketConfigWithAsset,
+    MarketMap,
     ExecuteRequest,
     OpenPositionArgs,
     SetTriggersArgs,
@@ -74,13 +76,16 @@ export type {
     TradingClosePositionEvent,
     TradingFillPositionEvent,
     TradingLiquidationEvent,
+    TradingTakeProfitEvent,
+    TradingStopLossEvent,
     TradingCancelPositionEvent,
-    TradingModifyRiskEvent,
-    TradingUpgradeWasmEvent,
+    TradingWithdrawCollateralEvent,
+    TradingDepositCollateralEvent,
+    TradingSetTakeProfitEvent,
+    TradingSetStopLossEvent,
     TradingEvent,
     BaseVaultEvent,
     VaultStrategyWithdrawEvent,
-    VaultStrategyDepositEvent,
     VaultEvent,
     ZenexEvent,
 } from './events.js';

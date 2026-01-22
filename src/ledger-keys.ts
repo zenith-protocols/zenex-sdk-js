@@ -1,5 +1,5 @@
 import { Address, xdr } from '@stellar/stellar-sdk';
-import { Asset } from '../types/asset.js';
+import { assetToScVal } from './types/asset.js';
 
 /**
  * Create a storage key for an enum variant without associated data.
@@ -44,25 +44,20 @@ export function tokenBalanceLedgerKey(tokenContractId: string, accountAddress: s
  * Decode entry key from ScVal
  */
 export function decodeEntryKey(entryKey: xdr.ScVal): string {
-    let key: string | undefined;
     switch (entryKey.switch()) {
         case xdr.ScValType.scvVec():
             const vec = entryKey.vec();
             if (!vec || !vec.at(0)) {
                 throw Error('Invalid ledger entry key: vec or its first element is null or undefined');
             }
-            key = vec.at(0)!.sym().toString();
-            break;
+            return vec.at(0)!.sym().toString();
         case xdr.ScValType.scvSymbol():
-            key = entryKey.sym().toString();
-            break;
+            return entryKey.sym().toString();
         case xdr.ScValType.scvLedgerKeyContractInstance():
-            key = 'ContractInstance';
-            break;
+            return 'ContractInstance';
         default:
             throw Error(`Invalid ledger entry key type: should not contain type ${entryKey.switch()}`);
     }
-    return key;
 }
 
 /**
@@ -98,27 +93,5 @@ export function persistentLedgerKey(contractId: string, keyVec: xdr.ScVal[]): xd
     );
 }
 
-/**
- * Convert an Asset type to ScVal for use in ledger keys.
- * @param asset - The asset to convert.
- * @returns The ScVal representation of the asset.
- */
-export function assetToScVal(asset: Asset): xdr.ScVal {
-    if (asset.tag === 'Stellar') {
-        const address = asset.values[0] instanceof Address
-            ? asset.values[0]
-            : Address.fromString(asset.values[0]);
-
-        return xdr.ScVal.scvVec([
-            xdr.ScVal.scvSymbol('Stellar'),
-            address.toScVal()
-        ]);
-    } else if (asset.tag === 'Other') {
-        return xdr.ScVal.scvVec([
-            xdr.ScVal.scvSymbol('Other'),
-            xdr.ScVal.scvSymbol(asset.values[0])
-        ]);
-    }
-
-    throw new Error('Invalid asset type');
-}
+// Re-export for internal use
+export { assetToScVal };

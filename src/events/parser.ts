@@ -10,18 +10,23 @@ import {
     BaseTradingEvent,
     BaseVaultEvent,
     TradingSetConfigEvent,
+    TradingQueueSetConfigEvent,
     TradingQueueSetMarketEvent,
+    TradingCancelSetMarketEvent,
     TradingSetMarketEvent,
     TradingSetStatusEvent,
     TradingOpenPositionEvent,
     TradingClosePositionEvent,
     TradingFillPositionEvent,
     TradingLiquidationEvent,
+    TradingTakeProfitEvent,
+    TradingStopLossEvent,
     TradingCancelPositionEvent,
-    TradingModifyRiskEvent,
-    TradingUpgradeWasmEvent,
+    TradingWithdrawCollateralEvent,
+    TradingDepositCollateralEvent,
+    TradingSetTakeProfitEvent,
+    TradingSetStopLossEvent,
     VaultStrategyWithdrawEvent,
-    VaultStrategyDepositEvent,
 } from '../types/events.js';
 
 /**
@@ -66,6 +71,14 @@ export function parseTradingEvent(
             return '';
         };
 
+        const extractU32 = (topicIndex: number): number => {
+            if (topic.length > topicIndex) {
+                const u32Xdr = xdr.ScVal.fromXDR(topic[topicIndex], 'base64');
+                return scValToNative(u32Xdr) as number;
+            }
+            return 0;
+        };
+
         const extractAsset = (topicIndex: number): Asset | undefined => {
             if (topic.length > topicIndex) {
                 const assetXdr = xdr.ScVal.fromXDR(topic[topicIndex], 'base64');
@@ -79,113 +92,160 @@ export function parseTradingEvent(
                 return {
                     ...baseEvent,
                     eventType: TradingEventType.SetConfig,
-                    admin: extractAddress(1),
-                    oracle: eventData[0],
-                    callerTakeRate: eventData[1],
-                    maxPositions: eventData[2],
+                    oracle: eventData.oracle,
+                    callerTakeRate: eventData.caller_take_rate,
+                    maxPositions: eventData.max_positions,
                 } as TradingSetConfigEvent;
+
+            case TradingEventType.QueueSetConfig:
+                return {
+                    ...baseEvent,
+                    eventType: TradingEventType.QueueSetConfig,
+                    oracle: eventData.oracle,
+                    callerTakeRate: eventData.caller_take_rate,
+                    maxPositions: eventData.max_positions,
+                    unlockTime: eventData.unlock_time,
+                } as TradingQueueSetConfigEvent;
 
             case TradingEventType.QueueSetMarket:
                 return {
                     ...baseEvent,
                     eventType: TradingEventType.QueueSetMarket,
-                    admin: extractAddress(1),
-                    asset: eventData[0],
-                    config: eventData[1],
+                    asset: extractAsset(1)!,
+                    config: eventData.config,
                 } as TradingQueueSetMarketEvent;
+
+            case TradingEventType.CancelSetMarket:
+                return {
+                    ...baseEvent,
+                    eventType: TradingEventType.CancelSetMarket,
+                    asset: extractAsset(1)!,
+                } as TradingCancelSetMarketEvent;
 
             case TradingEventType.SetMarket:
                 return {
                     ...baseEvent,
                     eventType: TradingEventType.SetMarket,
-                    asset: eventData,
+                    assetIndex: extractU32(1),
                 } as TradingSetMarketEvent;
 
             case TradingEventType.SetStatus:
                 return {
                     ...baseEvent,
                     eventType: TradingEventType.SetStatus,
-                    admin: extractAddress(1),
-                    status: eventData,
+                    status: eventData.status,
                 } as TradingSetStatusEvent;
 
             case TradingEventType.OpenPosition:
                 return {
                     ...baseEvent,
                     eventType: TradingEventType.OpenPosition,
-                    user: extractAddress(1),
-                    asset: extractAsset(2),
-                    positionId: eventData[0],
-                    collateral: eventData[1],
-                    leverage: eventData[2],
-                    isLong: eventData[3],
-                    entryPrice: eventData[4],
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
                 } as TradingOpenPositionEvent;
-
-            case TradingEventType.ModifyRisk:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.ModifyRisk,
-                    user: extractAddress(1),
-                    positionId: eventData[0],
-                    stopLoss: eventData[1],
-                    takeProfit: eventData[2],
-                } as TradingModifyRiskEvent;
 
             case TradingEventType.ClosePosition:
                 return {
                     ...baseEvent,
                     eventType: TradingEventType.ClosePosition,
-                    user: extractAddress(1),
-                    asset: extractAsset(2),
-                    positionId: eventData[0],
-                    pnl: eventData[1],
-                    fee: eventData[2],
-                    exitPrice: eventData[3],
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
+                    price: eventData.price,
+                    fee: eventData.fee,
                 } as TradingClosePositionEvent;
 
             case TradingEventType.FillPosition:
                 return {
                     ...baseEvent,
                     eventType: TradingEventType.FillPosition,
-                    user: extractAddress(1),
-                    asset: extractAsset(2),
-                    caller: extractAddress(3),
-                    positionId: eventData[0],
-                    fillPrice: eventData[1],
-                    callerFee: eventData[2],
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
                 } as TradingFillPositionEvent;
 
             case TradingEventType.Liquidation:
                 return {
                     ...baseEvent,
                     eventType: TradingEventType.Liquidation,
-                    user: extractAddress(1),
-                    asset: extractAsset(2),
-                    liquidator: extractAddress(3),
-                    positionId: eventData[0],
-                    collateral: eventData[1],
-                    loss: eventData[2],
-                    liquidatorFee: eventData[3],
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
+                    price: eventData.price,
+                    fee: eventData.fee,
                 } as TradingLiquidationEvent;
+
+            case TradingEventType.TakeProfit:
+                return {
+                    ...baseEvent,
+                    eventType: TradingEventType.TakeProfit,
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
+                    price: eventData.price,
+                    fee: eventData.fee,
+                } as TradingTakeProfitEvent;
+
+            case TradingEventType.StopLoss:
+                return {
+                    ...baseEvent,
+                    eventType: TradingEventType.StopLoss,
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
+                    price: eventData.price,
+                    fee: eventData.fee,
+                } as TradingStopLossEvent;
 
             case TradingEventType.CancelPosition:
                 return {
                     ...baseEvent,
                     eventType: TradingEventType.CancelPosition,
-                    user: extractAddress(1),
-                    asset: extractAsset(2),
-                    positionId: eventData[0],
-                    collateralReturned: eventData[1],
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
                 } as TradingCancelPositionEvent;
 
-            case TradingEventType.UpgradeWasm:
+            case TradingEventType.WithdrawCollateral:
                 return {
                     ...baseEvent,
-                    eventType: TradingEventType.UpgradeWasm,
-                    admin: extractAddress(1),
-                    wasmHash: eventData,
-                } as TradingUpgradeWasmEvent;
+                    eventType: TradingEventType.WithdrawCollateral,
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
+                    amount: eventData.amount,
+                } as TradingWithdrawCollateralEvent;
+
+            case TradingEventType.DepositCollateral:
+                return {
+                    ...baseEvent,
+                    eventType: TradingEventType.DepositCollateral,
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
+                    amount: eventData.amount,
+                } as TradingDepositCollateralEvent;
+
+            case TradingEventType.SetTakeProfit:
+                return {
+                    ...baseEvent,
+                    eventType: TradingEventType.SetTakeProfit,
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
+                    price: eventData.price,
+                } as TradingSetTakeProfitEvent;
+
+            case TradingEventType.SetStopLoss:
+                return {
+                    ...baseEvent,
+                    eventType: TradingEventType.SetStopLoss,
+                    assetIndex: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: eventData.position_id,
+                    price: eventData.price,
+                } as TradingSetStopLossEvent;
 
             default:
                 return undefined;
@@ -245,17 +305,7 @@ export function parseVaultEvent(
                     eventType: VaultEventType.StrategyWithdraw,
                     strategy: extractAddress(1),
                     amount: eventData.amount,
-                    newNetImpact: eventData.new_net_impact,
                 } as VaultStrategyWithdrawEvent;
-
-            case VaultEventType.StrategyDeposit:
-                return {
-                    ...baseEvent,
-                    eventType: VaultEventType.StrategyDeposit,
-                    strategy: extractAddress(1),
-                    amount: eventData.amount,
-                    newNetImpact: eventData.new_net_impact,
-                } as VaultStrategyDepositEvent;
 
             default:
                 return undefined;

@@ -1,6 +1,6 @@
 import { i128, u32, u64 } from './primitives.js';
 import { Asset } from './asset.js';
-import { MarketConfig, ContractStatus } from './trading.js';
+import { MarketConfigWithAsset } from './trading.js';
 
 // Contract type enum
 export enum ZenexContractType {
@@ -10,28 +10,29 @@ export enum ZenexContractType {
 
 // Trading event types (matches Rust events)
 export enum TradingEventType {
-    SetConfig = 'set_config',
-    QueueSetConfig = 'queue_set_config',
-    CancelSetConfig = 'cancel_set_config',
-    QueueSetMarket = 'queue_set_market',
-    CancelSetMarket = 'cancel_set_market',
-    SetMarket = 'set_market',
-    SetStatus = 'set_status',
-    OpenPosition = 'open_position',
-    ClosePosition = 'close_position',
-    FillPosition = 'fill_position',
-    Liquidation = 'liquidation',
-    TakeProfit = 'take_profit',
-    StopLoss = 'stop_loss',
-    CancelPosition = 'cancel_position',
-    ModifyRisk = 'modify_risk',
-    UpgradeWasm = 'upgrade_wasm',
+    SetConfig = 'SetConfig',
+    QueueSetConfig = 'QueueSetConfig',
+    CancelSetConfig = 'CancelSetConfig',
+    QueueSetMarket = 'QueueSetMarket',
+    CancelSetMarket = 'CancelSetMarket',
+    SetMarket = 'SetMarket',
+    SetStatus = 'SetStatus',
+    OpenPosition = 'OpenPosition',
+    ClosePosition = 'ClosePosition',
+    FillPosition = 'FillPosition',
+    Liquidation = 'Liquidation',
+    TakeProfit = 'TakeProfit',
+    StopLoss = 'StopLoss',
+    CancelPosition = 'CancelPosition',
+    WithdrawCollateral = 'WithdrawCollateral',
+    DepositCollateral = 'DepositCollateral',
+    SetTakeProfit = 'SetTakeProfit',
+    SetStopLoss = 'SetStopLoss',
 }
 
 // Vault event types
 export enum VaultEventType {
     StrategyWithdraw = 'StrategyWithdraw',
-    StrategyDeposit = 'StrategyDeposit',
 }
 
 // Base event interface
@@ -52,7 +53,6 @@ export interface BaseTradingEvent extends BaseZenexEvent {
 
 export interface TradingSetConfigEvent extends BaseTradingEvent {
     eventType: TradingEventType.SetConfig;
-    admin: string;
     oracle: string;
     callerTakeRate: i128;
     maxPositions: u32;
@@ -60,7 +60,6 @@ export interface TradingSetConfigEvent extends BaseTradingEvent {
 
 export interface TradingQueueSetConfigEvent extends BaseTradingEvent {
     eventType: TradingEventType.QueueSetConfig;
-    admin: string;
     oracle: string;
     callerTakeRate: i128;
     maxPositions: u32;
@@ -73,9 +72,8 @@ export interface TradingCancelSetConfigEvent extends BaseTradingEvent {
 
 export interface TradingQueueSetMarketEvent extends BaseTradingEvent {
     eventType: TradingEventType.QueueSetMarket;
-    admin: string;
     asset: Asset;
-    config: MarketConfig;
+    config: MarketConfigWithAsset;
 }
 
 export interface TradingCancelSetMarketEvent extends BaseTradingEvent {
@@ -85,77 +83,101 @@ export interface TradingCancelSetMarketEvent extends BaseTradingEvent {
 
 export interface TradingSetMarketEvent extends BaseTradingEvent {
     eventType: TradingEventType.SetMarket;
-    asset: Asset;
+    assetIndex: u32;
 }
 
 export interface TradingSetStatusEvent extends BaseTradingEvent {
     eventType: TradingEventType.SetStatus;
-    admin: string;
-    status: ContractStatus;
+    status: u32;
 }
 
 export interface TradingOpenPositionEvent extends BaseTradingEvent {
     eventType: TradingEventType.OpenPosition;
+    assetIndex: u32;
     user: string;
-    asset?: Asset;
     positionId: u32;
-    collateral: i128;
-    leverage: i128;
-    isLong: boolean;
-    entryPrice: i128;
 }
 
 export interface TradingClosePositionEvent extends BaseTradingEvent {
     eventType: TradingEventType.ClosePosition;
+    assetIndex: u32;
     user: string;
-    asset?: Asset;
     positionId: u32;
-    pnl: i128;
+    price: i128;
     fee: i128;
-    exitPrice: i128;
 }
 
 export interface TradingFillPositionEvent extends BaseTradingEvent {
     eventType: TradingEventType.FillPosition;
+    assetIndex: u32;
     user: string;
-    asset?: Asset;
-    caller: string;
     positionId: u32;
-    fillPrice: i128;
-    callerFee: i128;
 }
 
 export interface TradingLiquidationEvent extends BaseTradingEvent {
     eventType: TradingEventType.Liquidation;
+    assetIndex: u32;
     user: string;
-    asset?: Asset;
-    liquidator: string;
     positionId: u32;
-    collateral: i128;
-    loss: i128;
-    liquidatorFee: i128;
+    price: i128;
+    fee: i128;
 }
 
 export interface TradingCancelPositionEvent extends BaseTradingEvent {
     eventType: TradingEventType.CancelPosition;
-    user: string;
-    asset?: Asset;
-    positionId: u32;
-    collateralReturned: i128;
-}
-
-export interface TradingModifyRiskEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ModifyRisk;
+    assetIndex: u32;
     user: string;
     positionId: u32;
-    stopLoss: i128;
-    takeProfit: i128;
 }
 
-export interface TradingUpgradeWasmEvent extends BaseTradingEvent {
-    eventType: TradingEventType.UpgradeWasm;
-    admin: string;
-    wasmHash: string;
+export interface TradingTakeProfitEvent extends BaseTradingEvent {
+    eventType: TradingEventType.TakeProfit;
+    assetIndex: u32;
+    user: string;
+    positionId: u32;
+    price: i128;
+    fee: i128;
+}
+
+export interface TradingStopLossEvent extends BaseTradingEvent {
+    eventType: TradingEventType.StopLoss;
+    assetIndex: u32;
+    user: string;
+    positionId: u32;
+    price: i128;
+    fee: i128;
+}
+
+export interface TradingWithdrawCollateralEvent extends BaseTradingEvent {
+    eventType: TradingEventType.WithdrawCollateral;
+    assetIndex: u32;
+    user: string;
+    positionId: u32;
+    amount: i128;
+}
+
+export interface TradingDepositCollateralEvent extends BaseTradingEvent {
+    eventType: TradingEventType.DepositCollateral;
+    assetIndex: u32;
+    user: string;
+    positionId: u32;
+    amount: i128;
+}
+
+export interface TradingSetTakeProfitEvent extends BaseTradingEvent {
+    eventType: TradingEventType.SetTakeProfit;
+    assetIndex: u32;
+    user: string;
+    positionId: u32;
+    price: i128;
+}
+
+export interface TradingSetStopLossEvent extends BaseTradingEvent {
+    eventType: TradingEventType.SetStopLoss;
+    assetIndex: u32;
+    user: string;
+    positionId: u32;
+    price: i128;
 }
 
 export type TradingEvent =
@@ -170,9 +192,13 @@ export type TradingEvent =
     | TradingClosePositionEvent
     | TradingFillPositionEvent
     | TradingLiquidationEvent
+    | TradingTakeProfitEvent
+    | TradingStopLossEvent
     | TradingCancelPositionEvent
-    | TradingModifyRiskEvent
-    | TradingUpgradeWasmEvent;
+    | TradingWithdrawCollateralEvent
+    | TradingDepositCollateralEvent
+    | TradingSetTakeProfitEvent
+    | TradingSetStopLossEvent;
 
 // Vault Events
 export interface BaseVaultEvent extends BaseZenexEvent {
@@ -184,19 +210,9 @@ export interface VaultStrategyWithdrawEvent extends BaseVaultEvent {
     eventType: VaultEventType.StrategyWithdraw;
     strategy: string;
     amount: i128;
-    newNetImpact: i128;
 }
 
-export interface VaultStrategyDepositEvent extends BaseVaultEvent {
-    eventType: VaultEventType.StrategyDeposit;
-    strategy: string;
-    amount: i128;
-    newNetImpact: i128;
-}
-
-export type VaultEvent =
-    | VaultStrategyWithdrawEvent
-    | VaultStrategyDepositEvent;
+export type VaultEvent = VaultStrategyWithdrawEvent;
 
 // Union of all events
 export type ZenexEvent = TradingEvent | VaultEvent;

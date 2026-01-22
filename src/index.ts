@@ -16,13 +16,13 @@ export type {
 
 export {
     SCALAR_7,
+    SCALAR_14,
     SCALAR_18,
-    I128_MAX,
 } from './types/index.js';
 
 // Types - Asset
 export type { Asset } from './types/index.js';
-export { getAssetKey, getAssetName, assetsEqual } from './types/index.js';
+export { getAssetKey, getAssetName, assetsEqual, assetToScVal, assetFromScVal, assetFromKey } from './types/index.js';
 
 // Types - Trading
 export {
@@ -67,9 +67,14 @@ export type {
     TradingClosePositionEvent,
     TradingFillPositionEvent,
     TradingLiquidationEvent,
-    TradingModifyRiskEvent,
+    TradingTakeProfitEvent,
+    TradingStopLossEvent,
+    TradingCancelPositionEvent,
+    TradingWithdrawCollateralEvent,
+    TradingDepositCollateralEvent,
+    TradingSetTakeProfitEvent,
+    TradingSetStopLossEvent,
     VaultStrategyWithdrawEvent,
-    VaultStrategyDepositEvent,
 } from './types/index.js';
 
 // Trading Module
@@ -77,7 +82,9 @@ export { TradingContract } from './trading/index.js';
 export { Position } from './trading/index.js';
 export { Market } from './trading/index.js';
 export { TradingConfig } from './trading/index.js';
-export { Oracle } from './trading/index.js';
+
+// Oracle
+export { getOraclePrice, getOracleDecimals } from './oracle.js';
 
 // Vault Module
 export { VaultContract } from './vault/index.js';
@@ -100,6 +107,15 @@ export {
     parseResult,
     isContractError,
 } from './errors/index.js';
+
+// Scaling Utilities
+export {
+    scale,
+    descale,
+} from './scaling.js';
+
+// Simulation
+export { simulateAndParse } from './simulate.js';
 
 // =============================================================================
 // Browser compatibility

@@ -10,6 +10,8 @@ export interface VaultStateData {
     totalShares: number;
     /** Total assets in the vault */
     totalAssets: number;
+    /** Decimals offset for virtual shares (inflation attack protection) */
+    decimalsOffset: number;
 }
 
 // Constructor arguments for deploying a new vault

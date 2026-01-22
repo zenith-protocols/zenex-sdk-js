@@ -29,7 +29,7 @@ export interface PositionData {
     id: number;
     user: string;
     status: PositionStatus;
-    asset: Asset;
+    assetIndex: number;
     isLong: boolean;
     stopLoss: number;
     takeProfit: number;
@@ -84,9 +84,17 @@ export interface TradingInstanceData {
     vault: string;
     token: string;
     config: TradingConfigData;
-    marketList: Asset[];
+    marketCounter: number;
     positionCounter: number;
 }
+
+// Market configuration with asset (matches Rust MarketConfig which now includes asset)
+export interface MarketConfigWithAsset extends MarketConfig {
+    asset: Asset;
+}
+
+// Market mapping: index -> MarketConfig (including asset)
+export type MarketMap = Map<number, MarketConfigWithAsset>;
 
 // Execute request types (matches Rust ExecuteRequestType)
 export enum ExecuteRequestType {
@@ -105,7 +113,7 @@ export interface ExecuteRequest {
 // Open position arguments (matches contract function)
 export interface OpenPositionArgs {
     user: string;
-    asset: Asset;
+    asset_index: u32;
     collateral: i128;
     notional_size: i128;
     is_long: boolean;
@@ -135,7 +143,9 @@ export interface ExecuteArgs {
 
 // Price data from oracle
 export interface PriceData {
-    price: number;
+    /** The price as a fixed point number with the oracle's decimals */
+    price: bigint;
+    /** The timestamp of the price in seconds */
     timestamp: number;
 }
 
