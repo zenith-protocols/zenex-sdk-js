@@ -25,7 +25,8 @@
         "test:position-open": "npx tsx tests/position-open.ts",
         "test:position-modify": "npx tsx tests/position-modify.ts",
         "test:position-close": "npx tsx tests/position-close.ts",
-        "test:position-read": "npx tsx tests/position-read.ts"
+        "test:position-read": "npx tsx tests/position-read.ts",
+        "test:liquidation": "npx tsx tests/liquidation.test.ts"
     },
     "exports": {
         ".": {

@@ -1,7 +1,7 @@
 import { rpc, xdr, scValToBigInt, scValToNative, Address } from '@stellar/stellar-sdk';
 import { Network } from '../types/primitives.js';
 import { PositionStatus, PositionPnL, PositionData } from '../types/trading.js';
-import { descale } from '../scaling.js';
+import { descale, scale, SCALAR_7, SCALAR_18, fixedMulFloor, fixedMulCeil, fixedDivCeil } from '../scaling.js';
 import { persistentLedgerKey } from '../ledger-keys.js';
 import { Market } from './market.js';
 
@@ -342,12 +342,17 @@ export class Position implements PositionData {
     /**
      * Get the liquidation price for the position
      *
-     * Formula matches smart contract:
+     * Formula matches smart contract using fixed-point arithmetic:
      * 1. Calculate total fees (base + price impact + interest)
      *    - base_fee is only charged when closing on the dominant side or when balanced
+     *    - Fees use ceil rounding (rounds up to avoid undercharging)
      * 2. Calculate required margin (notional_size * maintenance_margin)
+     *    - Uses floor rounding (minimum margin needed)
      * 3. Solve: collateral + pnl - fees = requiredMargin
-     * 4. Liquidation price = entry_price * (1 +/- priceChangeRatio)
+     * 4. Liquidation price = entry_price + entry_price * priceChangeRatio / SCALAR_7
+     *
+     * This implementation uses BigInt fixed-point math to match the Sentinel/Contract
+     * calculations exactly, avoiding floating-point precision issues.
      *
      * @param market - The market containing margin requirements and interest indices
      * @returns The liquidation price level
@@ -355,63 +360,81 @@ export class Position implements PositionData {
     getLiquidationPrice(market: Market): number {
         if (!this.isActive() || this.status === PositionStatus.Pending) return 0;
 
+        // Convert to scaled BigInt values (SCALAR_7 precision)
+        const notionalSize = scale(this.notionalSize, 7);
+        const collateral = scale(this.collateral, 7);
+        const baseFeeRate = scale(market.baseFee, 7);
+        const priceImpactScalar = scale(market.priceImpactScalar, 7);
+        const maintenanceMargin = scale(market.maintenanceMargin, 7);
+        // Entry price uses SCALAR_14 in contract, but we store descaled. Scale to SCALAR_7 for ratio calc.
+        const entryPrice = scale(this.entryPrice, 7);
+
+        // Get scaled market notional sizes for dominance check
+        const longNotionalSize = scale(market.longNotionalSize, 7);
+        const shortNotionalSize = scale(market.shortNotionalSize, 7);
+
         // Determine if base fee should be paid on close
         // Base fee is charged when:
         // - Market is balanced (long == short), OR
         // - Position is on the dominant side
-        const isLongDominant = market.longNotionalSize > market.shortNotionalSize;
-        const isShortDominant = market.shortNotionalSize > market.longNotionalSize;
-        const isBalanced = market.longNotionalSize === market.shortNotionalSize;
+        const isLongDominant = longNotionalSize > shortNotionalSize;
+        const isShortDominant = shortNotionalSize > longNotionalSize;
+        const isBalanced = longNotionalSize === shortNotionalSize;
 
         const shouldPayBaseFee = isBalanced
             || (isLongDominant && this.isLong)
             || (isShortDominant && !this.isLong);
 
-        // 1. Calculate base fee (notional_size * base_fee) - only if should pay
+        // 1. Calculate base fee (notional_size * base_fee / SCALAR_7) - ceil rounding
         const baseFee = shouldPayBaseFee
-            ? this.notionalSize * market.baseFee
-            : 0;
+            ? fixedMulCeil(notionalSize, baseFeeRate, SCALAR_7)
+            : 0n;
 
-        // 2. Calculate price impact fee (notional_size / price_impact_scalar)
-        const priceImpactFee = this.notionalSize / market.priceImpactScalar;
+        // 2. Calculate price impact fee (notional_size * SCALAR_7 / price_impact_scalar) - ceil rounding
+        const priceImpactFee = fixedDivCeil(notionalSize, priceImpactScalar, SCALAR_7);
 
         // 3. Calculate accrued interest
         // Interest fee = notional_size * (current_index - entry_index) / SCALAR_18
         const currentInterestIndex = this.isLong
             ? market.longInterestIndex
             : market.shortInterestIndex;
-        const indexDiff = Number(currentInterestIndex - this.interestIndex) / 1e18;
-        const interestFee = this.notionalSize * indexDiff;
+        const indexDiff = currentInterestIndex - this.interestIndex;
+        // Use floor for interest (matches contract behavior)
+        const interestFee = fixedMulFloor(notionalSize, indexDiff, SCALAR_18);
 
         // 4. Total fees
         const totalFee = baseFee + priceImpactFee + interestFee;
 
-        // 5. Calculate required margin (notional_size * maintenance_margin)
-        const requiredMargin = this.notionalSize * market.maintenanceMargin;
+        // 5. Calculate required margin (notional_size * maintenance_margin / SCALAR_7) - floor rounding
+        const requiredMargin = fixedMulFloor(notionalSize, maintenanceMargin, SCALAR_7);
 
         // 6. Calculate required PnL at liquidation
         // At liquidation: collateral + pnl - fees = requiredMargin
         // Therefore: pnl = requiredMargin - collateral + fees
-        const requiredPnl = requiredMargin - this.collateral + totalFee;
+        const requiredPnl = requiredMargin - collateral + totalFee;
 
         // 7. Calculate price change ratio
-        // PnL = notional_size * (price_change / entry_price)
-        // Solving: price_change_ratio = required_pnl / notional_size
-        const priceChangeRatio = requiredPnl / this.notionalSize;
+        // ratio = required_pnl * SCALAR_7 / notional_size (floor rounding)
+        const priceChangeRatio = fixedMulFloor(requiredPnl, SCALAR_7, notionalSize);
 
         // 8. Calculate liquidation price based on position direction
-        let liquidationPrice: number;
+        // price_delta = entry_price * price_change_ratio / SCALAR_7
+        const priceDelta = fixedMulFloor(entryPrice, priceChangeRatio, SCALAR_7);
+
+        let liquidationPrice: bigint;
         if (this.isLong) {
             // For long: liquidation price is below entry (negative PnL needed)
-            // liq_price = entry_price + entry_price * price_change_ratio
-            liquidationPrice = this.entryPrice * (1 + priceChangeRatio);
+            // liq_price = entry_price + price_delta (price_delta is negative for longs)
+            liquidationPrice = entryPrice + priceDelta;
         } else {
             // For short: liquidation price is above entry
-            // liq_price = entry_price - entry_price * price_change_ratio
-            liquidationPrice = this.entryPrice * (1 - priceChangeRatio);
+            // liq_price = entry_price - price_delta
+            liquidationPrice = entryPrice - priceDelta;
         }
 
-        return Math.max(0, liquidationPrice);
+        // Convert back to number (descale from SCALAR_7)
+        const result = Number(liquidationPrice) / 1e7;
+        return Math.max(0, result);
     }
 
     /**
