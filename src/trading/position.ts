@@ -313,7 +313,20 @@ export class Position implements PositionData {
         // Fee estimation (base fee + price impact)
         let fee = 0;
         if (market) {
-            fee = this.notionalSize * market.baseFee;
+            // Determine if base fee should be paid on close
+            // Base fee is charged when:
+            // - Market is balanced (long == short), OR
+            // - Position is on the dominant side
+            const isLongDominant = market.longNotionalSize > market.shortNotionalSize;
+            const isShortDominant = market.shortNotionalSize > market.longNotionalSize;
+            const isBalanced = market.longNotionalSize === market.shortNotionalSize;
+
+            const shouldPayBaseFee = isBalanced
+                || (isLongDominant && this.isLong)
+                || (isShortDominant && !this.isLong);
+
+            const baseFee = shouldPayBaseFee ? this.notionalSize * market.baseFee : 0;
+            fee = baseFee;
             fee += this.notionalSize / market.priceImpactScalar;
             fee += interest;
         }
@@ -328,26 +341,73 @@ export class Position implements PositionData {
 
     /**
      * Get the liquidation price for the position
-     * @param market - The market containing margin requirements
+     *
+     * Formula matches smart contract:
+     * 1. Calculate total fees (base + price impact + interest)
+     *    - base_fee is only charged when closing on the dominant side or when balanced
+     * 2. Calculate required margin (notional_size * maintenance_margin)
+     * 3. Solve: collateral + pnl - fees = requiredMargin
+     * 4. Liquidation price = entry_price * (1 +/- priceChangeRatio)
+     *
+     * @param market - The market containing margin requirements and interest indices
      * @returns The liquidation price level
      */
     getLiquidationPrice(market: Market): number {
         if (!this.isActive() || this.status === PositionStatus.Pending) return 0;
 
-        // Liquidation occurs when: collateral + pnl < collateral * maintenance_margin
-        // At liquidation: pnl = collateral * (maintenance_margin - 1)
-        const liquidationPnl = this.collateral * (market.maintenanceMargin - 1);
+        // Determine if base fee should be paid on close
+        // Base fee is charged when:
+        // - Market is balanced (long == short), OR
+        // - Position is on the dominant side
+        const isLongDominant = market.longNotionalSize > market.shortNotionalSize;
+        const isShortDominant = market.shortNotionalSize > market.longNotionalSize;
+        const isBalanced = market.longNotionalSize === market.shortNotionalSize;
 
-        // pnl = notional_size * price_change_ratio
-        // price_change_ratio = pnl / notional_size
-        const priceChangeRatio = liquidationPnl / this.notionalSize;
+        const shouldPayBaseFee = isBalanced
+            || (isLongDominant && this.isLong)
+            || (isShortDominant && !this.isLong);
 
+        // 1. Calculate base fee (notional_size * base_fee) - only if should pay
+        const baseFee = shouldPayBaseFee
+            ? this.notionalSize * market.baseFee
+            : 0;
+
+        // 2. Calculate price impact fee (notional_size / price_impact_scalar)
+        const priceImpactFee = this.notionalSize / market.priceImpactScalar;
+
+        // 3. Calculate accrued interest
+        // Interest fee = notional_size * (current_index - entry_index) / SCALAR_18
+        const currentInterestIndex = this.isLong
+            ? market.longInterestIndex
+            : market.shortInterestIndex;
+        const indexDiff = Number(currentInterestIndex - this.interestIndex) / 1e18;
+        const interestFee = this.notionalSize * indexDiff;
+
+        // 4. Total fees
+        const totalFee = baseFee + priceImpactFee + interestFee;
+
+        // 5. Calculate required margin (notional_size * maintenance_margin)
+        const requiredMargin = this.notionalSize * market.maintenanceMargin;
+
+        // 6. Calculate required PnL at liquidation
+        // At liquidation: collateral + pnl - fees = requiredMargin
+        // Therefore: pnl = requiredMargin - collateral + fees
+        const requiredPnl = requiredMargin - this.collateral + totalFee;
+
+        // 7. Calculate price change ratio
+        // PnL = notional_size * (price_change / entry_price)
+        // Solving: price_change_ratio = required_pnl / notional_size
+        const priceChangeRatio = requiredPnl / this.notionalSize;
+
+        // 8. Calculate liquidation price based on position direction
         let liquidationPrice: number;
         if (this.isLong) {
-            // For long: price_change = current - entry, so current = entry + entry * ratio
+            // For long: liquidation price is below entry (negative PnL needed)
+            // liq_price = entry_price + entry_price * price_change_ratio
             liquidationPrice = this.entryPrice * (1 + priceChangeRatio);
         } else {
-            // For short: price_change = entry - current, so current = entry * (1 - ratio)
+            // For short: liquidation price is above entry
+            // liq_price = entry_price - entry_price * price_change_ratio
             liquidationPrice = this.entryPrice * (1 - priceChangeRatio);
         }
 
@@ -365,7 +425,7 @@ export class Position implements PositionData {
 
         const pnlResult = this.calculatePnL(currentPrice, market);
         const remainingValue = this.collateral + pnlResult.netPnl;
-        const minimumRequired = this.collateral * market.maintenanceMargin;
+        const minimumRequired = this.notionalSize * market.maintenanceMargin;
 
         return remainingValue < minimumRequired;
     }
