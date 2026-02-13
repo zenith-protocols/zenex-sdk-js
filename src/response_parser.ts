@@ -1,8 +1,14 @@
 import { rpc } from '@stellar/stellar-sdk';
 
-/**
- * Contract error types for Zenex contracts
- */
+export class ContractError extends Error {
+    public type: ContractErrorType;
+
+    constructor(type: ContractErrorType) {
+        super();
+        this.type = type;
+    }
+}
+
 export enum ContractErrorType {
     UnknownError = -1000,
 
@@ -63,44 +69,49 @@ export enum ContractErrorType {
     UserNotAllowed = 113,
     UserBlocked = 114,
 
-    // Trading Errors (300+) - matches Rust TradingError
+    // Trading Errors (700+) - matches Rust TradingError
     // Configuration
-    AlreadyInitialized = 300,
-    NotInitialized = 301,
-    InvalidConfig = 302,
-    UpdateNotQueued = 303,
-    UpdateNotUnlocked = 304,
+    AlreadyInitialized = 700,
+    NotInitialized = 701,
+    InvalidConfig = 702,
+    UpdateNotQueued = 703,
+    UpdateNotUnlocked = 704,
     // Market
-    MarketNotFound = 310,
-    MarketInitNotQueued = 311,
-    MarketDisabled = 312,
+    MarketNotFound = 710,
+    MarketInitNotQueued = 711,
+    MarketDisabled = 712,
     // Oracle/Price
-    PriceNotFound = 320,
-    PriceStale = 321,
+    PriceNotFound = 720,
+    PriceStale = 721,
     // Position
-    PositionNotFound = 325,
-    PositionAlreadyClosed = 326,
-    PositionNotOpen = 327,
-    PositionNotPending = 328,
-    MaxPositionsReached = 329,
-    NegativeValueNotAllowed = 330,
-    CollateralBelowMinimum = 331,
-    CollateralAboveMaximum = 332,
-    InvalidEntryPrice = 334,
-    WithdrawalBreaksMargin = 337,
-    InvalidTakeProfitPrice = 340,
-    InvalidStopLossPrice = 341,
-    TakeProfitNotTriggered = 342,
-    StopLossNotTriggered = 343,
-    PositionNotLiquidatable = 345,
-    LimitOrderNotFillable = 346,
+    PositionNotFound = 730,
+    PositionAlreadyClosed = 731,
+    PositionNotOpen = 732,
+    PositionNotPending = 733,
+    MaxPositionsReached = 734,
+    NegativeValueNotAllowed = 735,
+    CollateralBelowMinimum = 736,
+    CollateralAboveMaximum = 737,
+    LeverageBelowMinimum = 738,
+    InvalidEntryPrice = 739,
+    CollateralUnchanged = 740,
+    WithdrawalBreaksMargin = 741,
+    InvalidTakeProfitPrice = 742,
+    InvalidStopLossPrice = 743,
+    TakeProfitNotTriggered = 744,
+    StopLossNotTriggered = 745,
+    PositionNotLiquidatable = 746,
+    LimitOrderNotFillable = 747,
+    PositionTooNew = 748,
     // Action/Request
-    ActionNotAllowedForStatus = 351,
+    ActionNotAllowedForStatus = 750,
+    InvalidRequestType = 751,
     // Status
-    ContractPaused = 380,
-    InvalidStatus = 381,
+    InvalidStatus = 760,
+    ContractOnIce = 761,
+    ContractFrozen = 762,
     // Utilization
-    UtilizationLimitExceeded = 390,
+    UtilizationLimitExceeded = 770,
 
     // VaultTokenError (400-410) - from stellar_tokens vault
     VaultAssetAddressNotSet = 400,
@@ -121,36 +132,6 @@ export enum ContractErrorType {
     UnauthorizedStrategy = 422,
 }
 
-/**
- * Contract error class
- */
-export class ContractError extends Error {
-    public type: ContractErrorType;
-
-    constructor(type: ContractErrorType, message?: string) {
-        super(message || `Contract error: ${ContractErrorType[type] || type}`);
-        this.type = type;
-        this.name = 'ContractError';
-    }
-
-    /**
-     * Get human-readable error name
-     */
-    getName(): string {
-        return ContractErrorType[this.type] || 'UnknownError';
-    }
-
-    /**
-     * Check if this is a specific error type
-     */
-    is(type: ContractErrorType): boolean {
-        return this.type === type;
-    }
-}
-
-/**
- * Parse error from various RPC response types
- */
 export function parseError(
     errorResponse:
         | rpc.Api.GetFailedTransactionResponse
@@ -158,8 +139,8 @@ export function parseError(
         | rpc.Api.SimulateTransactionErrorResponse
 ): ContractError {
     // Simulation Error
-    if ('id' in errorResponse && 'error' in errorResponse) {
-        const match = (errorResponse as rpc.Api.SimulateTransactionErrorResponse).error.match(/Error\(Contract, #(\d+)\)/);
+    if ('id' in errorResponse) {
+        const match = errorResponse.error.match(/Error\(Contract, #(\d+)\)/);
         if (match) {
             const errorValue = parseInt(match[1], 10);
             if (errorValue in ContractErrorType)
@@ -216,9 +197,6 @@ export function parseError(
     return new ContractError(ContractErrorType.UnknownError);
 }
 
-/**
- * Parse result from successful RPC responses
- */
 export function parseResult<T>(
     response: rpc.Api.SimulateTransactionSuccessResponse | rpc.Api.GetSuccessfulTransactionResponse,
     parser: (xdr: string) => T
@@ -230,13 +208,4 @@ export function parseResult<T>(
     } else {
         return undefined;
     }
-}
-
-/**
- * Check if an error is a specific contract error
- */
-export function isContractError(error: unknown, type?: ContractErrorType): error is ContractError {
-    if (!(error instanceof ContractError)) return false;
-    if (type === undefined) return true;
-    return error.type === type;
 }

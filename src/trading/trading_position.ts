@@ -1,9 +1,39 @@
 import { rpc, xdr, scValToBigInt, scValToNative, Address } from '@stellar/stellar-sdk';
-import { Network } from '../types/primitives.js';
-import { PositionStatus, PositionPnL, PositionData } from '../types/trading.js';
-import { descale, scale, SCALAR_7, SCALAR_18, fixedMulFloor, fixedMulCeil, fixedDivCeil } from '../scaling.js';
+import { Network } from '../index.js';
+import { toFloat, toFixed, SCALAR_7, SCALAR_18, mulFloor, mulCeil, divCeil } from '../math.js';
 import { persistentLedgerKey } from '../ledger-keys.js';
-import { Market } from './market.js';
+import { Market } from './trading_market.js';
+
+// Fee breakdown for a position
+export interface FeeBreakdown {
+    baseFee: number;
+    priceImpact: number;
+    interest: number;
+    total: number;
+}
+
+// PnL calculation result
+export interface PositionPnL {
+    pnl: number;
+    fee: FeeBreakdown;
+    netPnl: number;
+}
+
+// Position data for SDK consumers (descaled)
+export interface PositionData {
+    id: number;
+    user: string;
+    filled: boolean;
+    assetIndex: number;
+    isLong: boolean;
+    stopLoss: number;
+    takeProfit: number;
+    entryPrice: number;
+    collateral: number;
+    notionalSize: number;
+    interestIndex: bigint; // Keep as bigint for precision
+    createdAt: number;
+}
 
 /**
  * Position - Trading position class with loaders and computed properties
@@ -14,7 +44,7 @@ import { Market } from './market.js';
 export class Position implements PositionData {
     id: number;
     user: string;
-    status: PositionStatus;
+    filled: boolean;
     assetIndex: number;
     isLong: boolean;
     stopLoss: number;
@@ -28,7 +58,7 @@ export class Position implements PositionData {
     constructor(data: PositionData) {
         this.id = data.id;
         this.user = data.user;
-        this.status = data.status;
+        this.filled = data.filled;
         this.assetIndex = data.assetIndex;
         this.isLong = data.isLong;
         this.stopLoss = data.stopLoss;
@@ -158,7 +188,7 @@ export class Position implements PositionData {
 
         let id: number | undefined;
         let user: string | undefined;
-        let status: PositionStatus | undefined;
+        let filled: boolean | undefined;
         let assetIndex: number | undefined;
         let isLong: boolean | undefined;
         let stopLoss: bigint | undefined;
@@ -179,12 +209,8 @@ export class Position implements PositionData {
                 case 'user':
                     user = Address.fromScVal(entry.val()).toString();
                     break;
-                case 'status':
-                    const statusVariant = entry.val().vec();
-                    if (statusVariant && statusVariant.length > 0) {
-                        const variantName = statusVariant[0].sym().toString();
-                        status = variantName as PositionStatus;
-                    }
+                case 'filled':
+                    filled = entry.val().b();
                     break;
                 case 'asset_index':
                     assetIndex = scValToNative(entry.val()) as number;
@@ -219,7 +245,7 @@ export class Position implements PositionData {
         if (
             id === undefined ||
             user === undefined ||
-            status === undefined ||
+            filled === undefined ||
             assetIndex === undefined ||
             isLong === undefined ||
             stopLoss === undefined ||
@@ -236,14 +262,14 @@ export class Position implements PositionData {
         return new Position({
             id,
             user,
-            status,
+            filled,
             assetIndex,
             isLong,
-            stopLoss: descale(stopLoss, 14),
-            takeProfit: descale(takeProfit, 14),
-            entryPrice: descale(entryPrice, 14),
-            collateral: descale(collateral, 7),
-            notionalSize: descale(notionalSize, 7),
+            stopLoss: toFloat(stopLoss, 14),
+            takeProfit: toFloat(takeProfit, 14),
+            entryPrice: toFloat(entryPrice, 14),
+            collateral: toFloat(collateral, 7),
+            notionalSize: toFloat(notionalSize, 7),
             interestIndex,
             createdAt: Number(createdAt),
         });
@@ -260,17 +286,10 @@ export class Position implements PositionData {
     }
 
     /**
-     * Check if position is active (open or pending)
+     * Check if position is an open filled position
      */
-    isActive(): boolean {
-        return this.status === PositionStatus.Open || this.status === PositionStatus.Pending;
-    }
-
-    /**
-     * Check if position is closed
-     */
-    isClosed(): boolean {
-        return this.status === PositionStatus.Closed;
+    isOpen(): boolean {
+        return this.filled;
     }
 
     /**
@@ -281,195 +300,101 @@ export class Position implements PositionData {
     }
 
     /**
+     * Get the fee breakdown for closing this position.
+     * Uses fixed-point math (ceil rounding for fees, floor for interest).
+     *
+     * @param market - The market data for fee and interest calculation
+     * @returns Fee breakdown with baseFee, priceImpact, interest, and total
+     */
+    getFeeBreakdown(market: Market): FeeBreakdown {
+        const notionalSize = toFixed(this.notionalSize, 7);
+        const baseFeeRate = toFixed(market.baseFee, 7);
+        const priceImpactScalar = toFixed(market.priceImpactScalar, 7);
+
+        // Base fee is charged when market is balanced or position is on the dominant side
+        const longNotional = toFixed(market.longNotionalSize, 7);
+        const shortNotional = toFixed(market.shortNotionalSize, 7);
+        const shouldPayBaseFee = longNotional === shortNotional
+            || (longNotional > shortNotional && this.isLong)
+            || (shortNotional > longNotional && !this.isLong);
+
+        const baseFee = shouldPayBaseFee
+            ? mulCeil(notionalSize, baseFeeRate, SCALAR_7)
+            : 0n;
+
+        const priceImpact = divCeil(notionalSize, priceImpactScalar, SCALAR_7);
+
+        const currentIndex = this.isLong
+            ? market.longInterestIndex
+            : market.shortInterestIndex;
+        const interest = mulFloor(notionalSize, currentIndex - this.interestIndex, SCALAR_18);
+
+        return {
+            baseFee: toFloat(baseFee, 7),
+            priceImpact: toFloat(priceImpact, 7),
+            interest: toFloat(interest, 7),
+            total: toFloat(baseFee + priceImpact + interest, 7),
+        };
+    }
+
+    /**
      * Calculate the position's profit and loss
      * @param currentPrice - The current market price of the asset
-     * @param market - Optional market for interest calculation
+     * @param market - Optional market for fee and interest calculation
      * @returns The position's PnL breakdown
      */
     calculatePnL(currentPrice: number, market?: Market): PositionPnL {
-        if (!this.isActive() || this.status === PositionStatus.Pending) {
-            return { pnl: 0, interest: 0, fee: 0, netPnl: 0 };
+        if (!this.filled) {
+            return { pnl: 0, fee: { baseFee: 0, priceImpact: 0, interest: 0, total: 0 }, netPnl: 0 };
         }
 
-        // PnL = notional_size * (price_change / entry_price)
         const priceDiff = this.isLong
             ? currentPrice - this.entryPrice
             : this.entryPrice - currentPrice;
+        const pnl = this.notionalSize * (priceDiff / this.entryPrice);
 
-        const priceChangeRatio = priceDiff / this.entryPrice;
-        const pnl = this.notionalSize * priceChangeRatio;
-
-        // Interest calculation
-        let interest = 0;
-        if (market) {
-            const currentIndex = this.isLong
-                ? market.longInterestIndex
-                : market.shortInterestIndex;
-
-            const indexDiff = Number(currentIndex - this.interestIndex) / 1e18;
-            interest = this.notionalSize * indexDiff;
-        }
-
-        // Fee estimation (base fee + price impact)
-        let fee = 0;
-        if (market) {
-            // Determine if base fee should be paid on close
-            // Base fee is charged when:
-            // - Market is balanced (long == short), OR
-            // - Position is on the dominant side
-            const isLongDominant = market.longNotionalSize > market.shortNotionalSize;
-            const isShortDominant = market.shortNotionalSize > market.longNotionalSize;
-            const isBalanced = market.longNotionalSize === market.shortNotionalSize;
-
-            const shouldPayBaseFee = isBalanced
-                || (isLongDominant && this.isLong)
-                || (isShortDominant && !this.isLong);
-
-            const baseFee = shouldPayBaseFee ? this.notionalSize * market.baseFee : 0;
-            fee = baseFee;
-            fee += this.notionalSize / market.priceImpactScalar;
-            fee += interest;
-        }
+        const fee = market
+            ? this.getFeeBreakdown(market)
+            : { baseFee: 0, priceImpact: 0, interest: 0, total: 0 };
 
         return {
             pnl,
-            interest,
             fee,
-            netPnl: pnl - fee,
+            netPnl: pnl - fee.total,
         };
     }
 
     /**
      * Get the liquidation price for the position
      *
-     * Formula matches smart contract using fixed-point arithmetic:
-     * 1. Calculate total fees (base + price impact + interest)
-     *    - base_fee is only charged when closing on the dominant side or when balanced
-     *    - Fees use ceil rounding (rounds up to avoid undercharging)
+     * Uses fixed-point arithmetic to match the contract:
+     * 1. Get total fees via getFeeBreakdown
      * 2. Calculate required margin (notional_size * maintenance_margin)
-     *    - Uses floor rounding (minimum margin needed)
      * 3. Solve: collateral + pnl - fees = requiredMargin
-     * 4. Liquidation price = entry_price + entry_price * priceChangeRatio / SCALAR_7
-     *
-     * This implementation uses BigInt fixed-point math to match the Sentinel/Contract
-     * calculations exactly, avoiding floating-point precision issues.
+     * 4. Derive liquidation price from the required pnl
      *
      * @param market - The market containing margin requirements and interest indices
      * @returns The liquidation price level
      */
     getLiquidationPrice(market: Market): number {
-        if (!this.isActive() || this.status === PositionStatus.Pending) return 0;
+        if (!this.filled) return 0;
 
-        // Convert to scaled BigInt values (SCALAR_7 precision)
-        const notionalSize = scale(this.notionalSize, 7);
-        const collateral = scale(this.collateral, 7);
-        const baseFeeRate = scale(market.baseFee, 7);
-        const priceImpactScalar = scale(market.priceImpactScalar, 7);
-        const maintenanceMargin = scale(market.maintenanceMargin, 7);
-        // Entry price uses SCALAR_14 in contract, but we store descaled. Scale to SCALAR_7 for ratio calc.
-        const entryPrice = scale(this.entryPrice, 7);
+        const notionalSize = toFixed(this.notionalSize, 7);
+        const collateral = toFixed(this.collateral, 7);
+        const maintenanceMargin = toFixed(market.maintenanceMargin, 7);
+        const entryPrice = toFixed(this.entryPrice, 7);
+        const totalFee = toFixed(this.getFeeBreakdown(market).total, 7);
 
-        // Get scaled market notional sizes for dominance check
-        const longNotionalSize = scale(market.longNotionalSize, 7);
-        const shortNotionalSize = scale(market.shortNotionalSize, 7);
-
-        // Determine if base fee should be paid on close
-        // Base fee is charged when:
-        // - Market is balanced (long == short), OR
-        // - Position is on the dominant side
-        const isLongDominant = longNotionalSize > shortNotionalSize;
-        const isShortDominant = shortNotionalSize > longNotionalSize;
-        const isBalanced = longNotionalSize === shortNotionalSize;
-
-        const shouldPayBaseFee = isBalanced
-            || (isLongDominant && this.isLong)
-            || (isShortDominant && !this.isLong);
-
-        // 1. Calculate base fee (notional_size * base_fee / SCALAR_7) - ceil rounding
-        const baseFee = shouldPayBaseFee
-            ? fixedMulCeil(notionalSize, baseFeeRate, SCALAR_7)
-            : 0n;
-
-        // 2. Calculate price impact fee (notional_size * SCALAR_7 / price_impact_scalar) - ceil rounding
-        const priceImpactFee = fixedDivCeil(notionalSize, priceImpactScalar, SCALAR_7);
-
-        // 3. Calculate accrued interest
-        // Interest fee = notional_size * (current_index - entry_index) / SCALAR_18
-        const currentInterestIndex = this.isLong
-            ? market.longInterestIndex
-            : market.shortInterestIndex;
-        const indexDiff = currentInterestIndex - this.interestIndex;
-        // Use floor for interest (matches contract behavior)
-        const interestFee = fixedMulFloor(notionalSize, indexDiff, SCALAR_18);
-
-        // 4. Total fees
-        const totalFee = baseFee + priceImpactFee + interestFee;
-
-        // 5. Calculate required margin (notional_size * maintenance_margin / SCALAR_7) - floor rounding
-        const requiredMargin = fixedMulFloor(notionalSize, maintenanceMargin, SCALAR_7);
-
-        // 6. Calculate required PnL at liquidation
-        // At liquidation: collateral + pnl - fees = requiredMargin
-        // Therefore: pnl = requiredMargin - collateral + fees
+        const requiredMargin = mulFloor(notionalSize, maintenanceMargin, SCALAR_7);
         const requiredPnl = requiredMargin - collateral + totalFee;
 
-        // 7. Calculate price change ratio
-        // ratio = required_pnl * SCALAR_7 / notional_size (floor rounding)
-        const priceChangeRatio = fixedMulFloor(requiredPnl, SCALAR_7, notionalSize);
+        const priceChangeRatio = mulFloor(requiredPnl, SCALAR_7, notionalSize);
+        const priceDelta = mulFloor(entryPrice, priceChangeRatio, SCALAR_7);
 
-        // 8. Calculate liquidation price based on position direction
-        // price_delta = entry_price * price_change_ratio / SCALAR_7
-        const priceDelta = fixedMulFloor(entryPrice, priceChangeRatio, SCALAR_7);
+        const liquidationPrice = this.isLong
+            ? entryPrice + priceDelta
+            : entryPrice - priceDelta;
 
-        let liquidationPrice: bigint;
-        if (this.isLong) {
-            // For long: liquidation price is below entry (negative PnL needed)
-            // liq_price = entry_price + price_delta (price_delta is negative for longs)
-            liquidationPrice = entryPrice + priceDelta;
-        } else {
-            // For short: liquidation price is above entry
-            // liq_price = entry_price - price_delta
-            liquidationPrice = entryPrice - priceDelta;
-        }
-
-        // Convert back to number (descale from SCALAR_7)
-        const result = Number(liquidationPrice) / 1e7;
-        return Math.max(0, result);
-    }
-
-    /**
-     * Check if position is liquidatable at current price
-     * @param currentPrice - Current market price
-     * @param market - Market with margin requirements
-     * @returns True if position can be liquidated
-     */
-    isLiquidatable(currentPrice: number, market: Market): boolean {
-        if (!this.isActive() || this.status === PositionStatus.Pending) return false;
-
-        const pnlResult = this.calculatePnL(currentPrice, market);
-        const remainingValue = this.collateral + pnlResult.netPnl;
-        const minimumRequired = this.notionalSize * market.maintenanceMargin;
-
-        return remainingValue < minimumRequired;
-    }
-
-    /**
-     * Check if take profit is triggered
-     */
-    checkTakeProfit(currentPrice: number): boolean {
-        if (this.takeProfit === 0) return false;
-        return this.isLong
-            ? currentPrice >= this.takeProfit
-            : currentPrice <= this.takeProfit;
-    }
-
-    /**
-     * Check if stop loss is triggered
-     */
-    checkStopLoss(currentPrice: number): boolean {
-        if (this.stopLoss === 0) return false;
-        return this.isLong
-            ? currentPrice <= this.stopLoss
-            : currentPrice >= this.stopLoss;
+        return Math.max(0, Number(liquidationPrice) / 1e7);
     }
 }

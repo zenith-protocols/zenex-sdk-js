@@ -6,7 +6,7 @@ import {
     TransactionBuilder,
     xdr,
 } from '@stellar/stellar-sdk';
-import { Network } from './types/primitives.js';
+import { Network } from './index.js';
 
 // Dummy account for simulations (doesn't need to exist on chain)
 const SIMULATION_ACCOUNT = 'GDMVSPSKEUOTRFSJH2SXVUNB2JGORKDTWBMOP5OZJZP4GKRQUQWFJO4Y';

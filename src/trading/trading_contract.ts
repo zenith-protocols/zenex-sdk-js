@@ -1,18 +1,96 @@
-import { Address, Contract, contract, xdr, nativeToScVal, Operation } from '@stellar/stellar-sdk';
-import { i128, u32 } from '../types/primitives.js';
-import { Asset } from '../types/asset.js';
-import {
-    OpenPositionArgs,
-    SetTriggersArgs,
-    ModifyCollateralArgs,
-    ExecuteRequest,
-    ExecuteRequestType,
-    InitializeArgs,
-    TradingConfigArgs,
-    MarketConfigArgs,
-    QueueSetMarketArgs,
-} from '../types/trading.js';
-import { assetToScVal } from '../types/asset.js';
+import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
+import { i128, u32, u64 } from '../index.js';
+import { Asset, assetToScVal } from '../asset.js';
+
+// Contract status enum (matches Rust contract constants)
+export enum ContractStatus {
+    Active = 0,  // Full operation - all trading actions allowed
+    OnIce = 1,   // Blocks new positions, allows closing/modifying existing positions
+    Frozen = 2,  // Emergency lockdown - no trading actions allowed
+    Setup = 99,  // Initial setup mode - no trading, config changes immediate
+}
+
+// Execute request types (matches Rust ExecuteRequestType)
+export enum ExecuteRequestType {
+    Fill = 0,
+    StopLoss = 1,
+    TakeProfit = 2,
+    Liquidate = 3,
+}
+
+// Execute request structure (matches Rust ExecuteRequest)
+export interface ExecuteRequest {
+    request_type: ExecuteRequestType;
+    position_id: u32;
+}
+
+// Open position arguments (matches contract function)
+export interface OpenPositionArgs {
+    user: string;
+    asset_index: u32;
+    collateral: i128;
+    notional_size: i128;
+    is_long: boolean;
+    entry_price: i128;
+    take_profit: i128;
+    stop_loss: i128;
+}
+
+// Set triggers arguments
+export interface SetTriggersArgs {
+    position_id: u32;
+    take_profit: i128;
+    stop_loss: i128;
+}
+
+// Modify collateral arguments
+export interface ModifyCollateralArgs {
+    position_id: u32;
+    new_collateral: i128;
+}
+
+// Execute arguments
+export interface ExecuteArgs {
+    caller: string;
+    requests: ExecuteRequest[];
+}
+
+// Initialize arguments (owner only)
+export interface InitializeArgs {
+    name: string;
+    vault: string;
+    config: TradingConfigArgs;
+}
+
+// Trading config arguments (raw i128 values for contract calls)
+export interface TradingConfigArgs {
+    oracle: string;
+    max_price_age: u32;
+    caller_take_rate: i128;
+    max_positions: u32;
+    max_utilization: i128;
+    min_open_time: u64;
+}
+
+// Market config arguments (raw i128 values for contract calls)
+export interface MarketConfigArgs {
+    asset: Asset;
+    enabled: boolean;
+    max_payout: i128;
+    min_collateral: i128;
+    max_collateral: i128;
+    init_margin: i128;
+    maintenance_margin: i128;
+    base_fee: i128;
+    price_impact_scalar: i128;
+    base_hourly_rate: i128;
+    ratio_cap: i128;
+}
+
+// Queue set market arguments
+export interface QueueSetMarketArgs {
+    config: MarketConfigArgs;
+}
 
 /**
  * TradingContract - Operation builder for the Zenex Trading contract
@@ -91,23 +169,47 @@ export class TradingContract extends Contract {
         "AAAAAgAAACNTdG9yYWdlIGtleXMgZm9yIGBPd25hYmxlYCB1dGlsaXR5LgAAAAAAAAAAEU93bmFibGVTdG9yYWdlS2V5AAAAAAAAAgAAAAAAAAAAAAAABU93bmVyAAAAAAAAAAAAAAAAAAAMUGVuZGluZ093bmVy"
     ]);
 
-    // Result parsers for functions that return values
     static readonly parsers = {
-        // Returns (position_id: u32, fee: i128)
+        // Admin methods (void)
+        initialize: () => {},
+        queueSetConfig: () => {},
+        cancelSetConfig: () => {},
+        setConfig: () => {},
+        queueSetMarket: () => {},
+        cancelSetMarket: () => {},
+        setMarket: () => {},
+        setStatus: () => {},
+        upgrade: () => {},
+        // Ownable methods
+        getOwner: (result: string): string | undefined =>
+            TradingContract.spec.funcResToNative('get_owner', result),
+        transferOwnership: () => {},
+        acceptOwnership: () => {},
+        renounceOwnership: () => {},
+        // Trading methods
         openPosition: (result: string): [u32, i128] =>
             TradingContract.spec.funcResToNative('open_position', result),
-        // Returns (pnl: i128, fee: i128)
         closePosition: (result: string): [i128, i128] =>
             TradingContract.spec.funcResToNative('close_position', result),
-        // Returns interest fee: i128
-        modifyCollateral: (result: string): i128 =>
-            TradingContract.spec.funcResToNative('modify_collateral', result),
-        // Returns Vec<u32> result codes
+        modifyCollateral: () => {},
+        setTriggers: () => {},
         execute: (result: string): u32[] =>
             TradingContract.spec.funcResToNative('execute', result),
-        // Returns owner address
-        owner: (result: string): Address =>
-            TradingContract.spec.funcResToNative('owner', result),
+        // View / Getter methods
+        getPosition: (result: string) =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getUserPositions: (result: string): u32[] =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getMarket: (result: string) =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getConfig: (result: string) =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getStatus: (result: string): u32 =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getVault: (result: string): string =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getToken: (result: string): string =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
     };
 
     /**
@@ -184,14 +286,13 @@ export class TradingContract extends Contract {
 
     /**
      * Queue setting data for a market (owner only)
-     * @param args - Asset and market configuration
+     * @param config - Market configuration (includes asset)
      * @returns XDR operation string
      */
-    queueSetMarket(args: QueueSetMarketArgs): string {
+    queueSetMarket(config: MarketConfigArgs): string {
         return this.call(
             'queue_set_market',
-            assetToScVal(args.asset),
-            this.marketConfigToScVal(args.config, args.asset),
+            this.marketConfigToScVal(config),
         ).toXDR('base64');
     }
 
@@ -256,21 +357,31 @@ export class TradingContract extends Contract {
      * Get the contract owner
      * @returns XDR operation string
      */
-    owner(): string {
-        return this.call('owner').toXDR('base64');
+    getOwner(): string {
+        return this.call('get_owner').toXDR('base64');
     }
 
     /**
-     * Transfer ownership to a new address (owner only)
-     * @param newOwner - New owner address
+     * Initiate a 2-step ownership transfer (owner only)
+     * @param newOwner - Proposed new owner address
+     * @param liveUntilLedger - Ledger number until which the new owner can accept (0 to cancel)
      * @returns XDR operation string
      */
-    transferOwnership(newOwner: Address | string): string {
+    transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
         return this.call(
             'transfer_ownership',
             addr.toScVal(),
+            xdr.ScVal.scvU32(liveUntilLedger),
         ).toXDR('base64');
+    }
+
+    /**
+     * Accept a pending ownership transfer (new owner only)
+     * @returns XDR operation string
+     */
+    acceptOwnership(): string {
+        return this.call('accept_ownership').toXDR('base64');
     }
 
     /**
@@ -370,6 +481,79 @@ export class TradingContract extends Contract {
     }
 
     // ============================================================
+    // View / Getter Methods
+    // ============================================================
+
+    /**
+     * Get a position by ID
+     * @param positionId - The unique identifier of the position
+     * @returns XDR operation string
+     */
+    getPosition(positionId: u32): string {
+        return this.call(
+            'get_position',
+            xdr.ScVal.scvU32(positionId),
+        ).toXDR('base64');
+    }
+
+    /**
+     * Get all position IDs for a user
+     * @param user - The address of the user
+     * @returns XDR operation string
+     */
+    getUserPositions(user: Address | string): string {
+        const addr = typeof user === 'string' ? Address.fromString(user) : user;
+        return this.call(
+            'get_user_positions',
+            addr.toScVal(),
+        ).toXDR('base64');
+    }
+
+    /**
+     * Get market configuration and data by asset index
+     * @param assetIndex - The index of the market
+     * @returns XDR operation string
+     */
+    getMarket(assetIndex: u32): string {
+        return this.call(
+            'get_market',
+            xdr.ScVal.scvU32(assetIndex),
+        ).toXDR('base64');
+    }
+
+    /**
+     * Get the trading configuration
+     * @returns XDR operation string
+     */
+    getConfig(): string {
+        return this.call('get_config').toXDR('base64');
+    }
+
+    /**
+     * Get the contract status
+     * @returns XDR operation string
+     */
+    getStatus(): string {
+        return this.call('get_status').toXDR('base64');
+    }
+
+    /**
+     * Get the vault address
+     * @returns XDR operation string
+     */
+    getVault(): string {
+        return this.call('get_vault').toXDR('base64');
+    }
+
+    /**
+     * Get the collateral token address
+     * @returns XDR operation string
+     */
+    getToken(): string {
+        return this.call('get_token').toXDR('base64');
+    }
+
+    // ============================================================
     // Internal Helpers
     // ============================================================
 
@@ -388,8 +572,16 @@ export class TradingContract extends Contract {
                 val: xdr.ScVal.scvU32(config.max_positions),
             }),
             new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol('max_price_age'),
+                val: xdr.ScVal.scvU32(config.max_price_age),
+            }),
+            new xdr.ScMapEntry({
                 key: xdr.ScVal.scvSymbol('max_utilization'),
                 val: nativeToScVal(config.max_utilization, { type: 'i128' }),
+            }),
+            new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol('min_open_time'),
+                val: nativeToScVal(config.min_open_time, { type: 'u64' }),
             }),
             new xdr.ScMapEntry({
                 key: xdr.ScVal.scvSymbol('oracle'),
@@ -402,11 +594,11 @@ export class TradingContract extends Contract {
      * Convert MarketConfigArgs to ScVal
      * @internal
      */
-    private marketConfigToScVal(config: MarketConfigArgs, asset: Asset): xdr.ScVal {
+    private marketConfigToScVal(config: MarketConfigArgs): xdr.ScVal {
         return xdr.ScVal.scvMap([
             new xdr.ScMapEntry({
                 key: xdr.ScVal.scvSymbol('asset'),
-                val: assetToScVal(asset),
+                val: assetToScVal(config.asset),
             }),
             new xdr.ScMapEntry({
                 key: xdr.ScVal.scvSymbol('base_fee'),
@@ -444,6 +636,10 @@ export class TradingContract extends Contract {
                 key: xdr.ScVal.scvSymbol('price_impact_scalar'),
                 val: nativeToScVal(config.price_impact_scalar, { type: 'i128' }),
             }),
+            new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol('ratio_cap'),
+                val: nativeToScVal(config.ratio_cap, { type: 'i128' }),
+            }),
         ]);
     }
 
@@ -459,36 +655,8 @@ export class TradingContract extends Contract {
             }),
             new xdr.ScMapEntry({
                 key: xdr.ScVal.scvSymbol('request_type'),
-                val: this.executeRequestTypeToScVal(request.request_type),
+                val: xdr.ScVal.scvU32(request.request_type),
             }),
-        ]);
-    }
-
-    /**
-     * Convert ExecuteRequestType enum to ScVal
-     * @internal
-     */
-    private executeRequestTypeToScVal(requestType: ExecuteRequestType): xdr.ScVal {
-        let variantName: string;
-        switch (requestType) {
-            case ExecuteRequestType.Fill:
-                variantName = 'Fill';
-                break;
-            case ExecuteRequestType.StopLoss:
-                variantName = 'StopLoss';
-                break;
-            case ExecuteRequestType.TakeProfit:
-                variantName = 'TakeProfit';
-                break;
-            case ExecuteRequestType.Liquidate:
-                variantName = 'Liquidate';
-                break;
-            default:
-                throw new Error(`Unknown ExecuteRequestType: ${requestType}`);
-        }
-
-        return xdr.ScVal.scvVec([
-            xdr.ScVal.scvSymbol(variantName),
         ]);
     }
 }

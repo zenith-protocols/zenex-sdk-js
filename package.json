@@ -1,6 +1,6 @@
 {
     "name": "@zenith-protocols/zenex-sdk",
-    "version": "1.2.0",
+    "version": "1.4.0",
     "description": "Javascript SDK for Zenex",
     "author": "Robeart",
     "keywords": [
@@ -19,14 +19,8 @@
         "build:cjs": "npx tsc -p ./scripts/tsconfig.cjs.json",
         "build:esm": "npx tsc -p ./scripts/tsconfig.esm.json",
         "build:types": "npx tsc -p ./scripts/tsconfig.types.json",
-        "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types",
-        "test:vault-state": "npx tsx tests/vault-state.ts",
-        "test:vault-deposit": "npx tsx tests/vault-deposit.ts",
-        "test:position-open": "npx tsx tests/position-open.ts",
-        "test:position-modify": "npx tsx tests/position-modify.ts",
-        "test:position-close": "npx tsx tests/position-close.ts",
-        "test:position-read": "npx tsx tests/position-read.ts",
-        "test:liquidation": "npx tsx tests/liquidation.test.ts"
+        "build:pkg": "node -e \"fs=require('fs');fs.writeFileSync('dist/esm/package.json','{\\\"type\\\":\\\"module\\\"}');fs.writeFileSync('dist/cjs/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
+        "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types && npm run build:pkg"
     },
     "exports": {
         ".": {
@@ -41,7 +35,7 @@
     ],
     "publishConfig": {
         "access": "public",
-        "tag": "beta"
+        "tag": "latest"
     },
     "repository": {
         "type": "git",

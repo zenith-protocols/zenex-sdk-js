@@ -1,15 +1,4 @@
 import { Address, xdr } from '@stellar/stellar-sdk';
-import { assetToScVal } from './types/asset.js';
-
-/**
- * Create a storage key for an enum variant without associated data.
- * E.g., StorageKey::TotalSupply or VaultStorageKey::AssetAddress
- * @param variant - The enum variant name
- * @returns ScVal representing the enum key
- */
-export function enumStorageKey(variant: string): xdr.ScVal {
-    return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant)]);
-}
 
 /**
  * Create a storage key for an enum variant with an Address.
@@ -93,5 +82,3 @@ export function persistentLedgerKey(contractId: string, keyVec: xdr.ScVal[]): xd
     );
 }
 
-// Re-export for internal use
-export { assetToScVal };

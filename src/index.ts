@@ -2,41 +2,60 @@
 // Zenex SDK v2 - Public API
 // =============================================================================
 
-// Types - Primitives and Network
-export type {
-    u32,
-    i32,
-    u64,
-    i64,
-    u128,
-    i128,
-    Option,
-    Network,
-} from './types/index.js';
+import { rpc } from '@stellar/stellar-sdk';
+import { ZenexContractType } from './base_event.js';
+import type { TradingEvent } from './trading/trading_events.js';
+import type { VaultEvent } from './vault/vault_events.js';
+import { parseTradingEvent } from './trading/trading_events.js';
+import { parseVaultEvent } from './vault/vault_events.js';
 
-export {
-    SCALAR_7,
-    SCALAR_14,
-    SCALAR_18,
-} from './types/index.js';
+// Types - Primitives and Network
+export type u32 = number;
+export type i32 = number;
+export type u64 = bigint;
+export type i64 = bigint;
+export type u128 = bigint;
+export type i128 = bigint;
+export type Option<T> = T | undefined;
+
+export interface Network {
+    /** RPC URL (e.g., 'https://soroban-testnet.stellar.org') */
+    rpc: string;
+    /** Network passphrase for tx signing (use Networks from @stellar/stellar-sdk) */
+    passphrase: string;
+    /** Optional RPC server options */
+    opts?: rpc.Server.Options;
+}
 
 // Types - Asset
-export type { Asset } from './types/index.js';
-export { getAssetKey, getAssetName, assetsEqual, assetToScVal, assetFromScVal, assetFromKey } from './types/index.js';
+export type { Asset } from './asset.js';
+export { getAssetKey, getAssetName, assetsEqual, assetToScVal, assetFromScVal, assetFromKey } from './asset.js';
 
-// Types - Trading
+// Types - Base Event
+export { ZenexContractType } from './base_event.js';
+export type { BaseZenexEvent } from './base_event.js';
+
+// Union of all events
+export type ZenexEvent = TradingEvent | VaultEvent;
+
+// Trading Module
 export {
+    TradingContract,
+    Position,
+    Market,
+    TradingConfig,
     ContractStatus,
-    PositionStatus,
     ExecuteRequestType,
-} from './types/index.js';
+    TradingEventType,
+    parseTradingEvent,
+} from './trading/index.js';
 
 export type {
+    FeeBreakdown,
     PositionPnL,
     PositionData,
     MarketConfig,
     MarketData,
-    MarketInfo,
     TradingConfigData,
     TradingInstanceData,
     ExecuteRequest,
@@ -44,75 +63,87 @@ export type {
     SetTriggersArgs,
     ModifyCollateralArgs,
     ExecuteArgs,
-    PriceData,
-} from './types/index.js';
-
-// Types - Vault
-export type {
-    VaultStateData,
-} from './types/index.js';
-
-// Types - Events
-export {
-    ZenexContractType,
-    TradingEventType,
-    VaultEventType,
-} from './types/index.js';
-
-export type {
-    ZenexEvent,
-    TradingEvent,
-    VaultEvent,
-    TradingOpenPositionEvent,
+    BaseTradingEvent,
+    TradingSetConfigEvent,
+    TradingQueueSetConfigEvent,
+    TradingCancelSetConfigEvent,
+    TradingQueueSetMarketEvent,
+    TradingCancelSetMarketEvent,
+    TradingSetMarketEvent,
+    TradingSetStatusEvent,
+    TradingOpenMarketEvent,
+    TradingPlaceLimitEvent,
     TradingClosePositionEvent,
-    TradingFillPositionEvent,
+    TradingFillLimitEvent,
     TradingLiquidationEvent,
     TradingTakeProfitEvent,
     TradingStopLossEvent,
-    TradingCancelPositionEvent,
-    TradingWithdrawCollateralEvent,
-    TradingDepositCollateralEvent,
-    TradingSetTakeProfitEvent,
-    TradingSetStopLossEvent,
-    VaultStrategyWithdrawEvent,
-} from './types/index.js';
+    TradingCancelLimitEvent,
+    TradingModifyCollateralEvent,
+    TradingSetTriggersEvent,
+    TradingEvent,
+} from './trading/index.js';
 
-// Trading Module
-export { TradingContract } from './trading/index.js';
-export { Position } from './trading/index.js';
-export { Market } from './trading/index.js';
-export { TradingConfig } from './trading/index.js';
+// Vault Module
+export {
+    VaultContract,
+    VaultState,
+    VaultEventType,
+    parseVaultEvent,
+} from './vault/index.js';
+
+export type {
+    VaultStateData,
+    BaseVaultEvent,
+    VaultStrategyWithdrawEvent,
+    VaultEvent,
+} from './vault/index.js';
 
 // Oracle
 export { getOraclePrice, getOracleDecimals } from './oracle.js';
+export type { PriceData } from './oracle.js';
 
-// Vault Module
-export { VaultContract } from './vault/index.js';
-export { VaultState } from './vault/index.js';
+// Events - Combined utilities
+/**
+ * Parse any Zenex event from RPC event response
+ * Tries trading first, then vault
+ */
+export function parseEvent(
+    eventResponse: rpc.Api.RawEventResponse
+): ZenexEvent | undefined {
+    const tradingEvent = parseTradingEvent(eventResponse);
+    if (tradingEvent) return tradingEvent;
 
-// Events
-export {
-    parseEvent,
-    parseTradingEvent,
-    parseVaultEvent,
-    isTradingEvent,
-    isVaultEvent,
-} from './events/index.js';
+    const vaultEvent = parseVaultEvent(eventResponse);
+    if (vaultEvent) return vaultEvent;
 
-// Errors
+    return undefined;
+}
+
+/**
+ * Check if an event is a trading event
+ */
+export function isTradingEvent(event: ZenexEvent): event is TradingEvent {
+    return event.contractType === ZenexContractType.Trading;
+}
+
+/**
+ * Check if an event is a vault event
+ */
+export function isVaultEvent(event: ZenexEvent): event is VaultEvent {
+    return event.contractType === ZenexContractType.Vault;
+}
+
+// Response Parser / Errors
 export {
     ContractError,
     ContractErrorType,
     parseError,
     parseResult,
-    isContractError,
-} from './errors/index.js';
+} from './response_parser.js';
 
-// Scaling Utilities
-export {
-    scale,
-    descale,
-} from './scaling.js';
+// Fixed-Point Math
+export * as FixedMath from './math.js';
 
 // Simulation
 export { simulateAndParse } from './simulate.js';

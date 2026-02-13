@@ -1,6 +1,21 @@
 import { Address, Contract, contract, xdr, nativeToScVal, Operation } from '@stellar/stellar-sdk';
-import { i128, u32, u64 } from '../types/primitives.js';
-import { VaultConstructorArgs } from '../types/vault.js';
+import { i128, u32, u64 } from '../index.js';
+
+// Constructor arguments for deploying a new vault
+export interface VaultConstructorArgs {
+    /** Name for the vault share token */
+    name: string;
+    /** Symbol for the vault share token */
+    symbol: string;
+    /** Address of the underlying token contract */
+    asset: string;
+    /** Virtual offset for inflation attack protection (0-10) */
+    decimals_offset: u32;
+    /** List of authorized strategy contract addresses */
+    strategies: string[];
+    /** Delay in seconds before redemptions/withdrawals can be executed */
+    lock_time: u64;
+}
 
 /**
  * VaultContract - Operation builder for the Zenex Vault contract

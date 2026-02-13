@@ -1,9 +1,34 @@
-import { rpc, xdr, scValToBigInt, Address } from '@stellar/stellar-sdk';
-import { Network } from '../types/primitives.js';
-import { Asset } from '../types/asset.js';
-import { MarketConfig, MarketData, MarketInfo } from '../types/trading.js';
-import { descale } from '../scaling.js';
+import { rpc, xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { Network } from '../index.js';
+import { Asset, assetFromScVal } from '../asset.js';
+import { toFloat, toFixed, SCALAR_18, mulFloor, mulCeil, divCeil } from '../math.js';
 import { persistentLedgerKey } from '../ledger-keys.js';
+
+// Market configuration (matches Rust MarketConfig)
+export interface MarketConfig {
+    asset: Asset;
+    enabled: boolean;
+    maxPayout: number;
+    minCollateral: number;
+    maxCollateral: number;
+    initMargin: number;
+    maintenanceMargin: number;
+    baseFee: number;
+    priceImpactScalar: number;
+    baseHourlyRate: number; // In SCALAR_18
+    ratioCap: number; // SCALAR_18 precision
+}
+
+// Market data (matches Rust MarketData)
+export interface MarketData {
+    longNotionalSize: number;
+    shortNotionalSize: number;
+    longInterestIndex: bigint;
+    shortInterestIndex: bigint;
+    lastUpdate: number;
+}
+
+
 
 /**
  * Market - Trading market class with config and dynamic data
@@ -11,7 +36,7 @@ import { persistentLedgerKey } from '../ledger-keys.js';
  * Contains both configuration and real-time market data with automatic descaling.
  * Markets are now indexed by assetIndex (u32) rather than Asset.
  */
-export class Market implements MarketInfo {
+export class Market implements MarketConfig, MarketData {
     // Market identity
     assetIndex: number;
     asset: Asset;
@@ -26,17 +51,16 @@ export class Market implements MarketInfo {
     baseFee: number;
     priceImpactScalar: number;
     baseHourlyRate: number;
+    ratioCap: number;
 
     // Dynamic market data (matches Rust MarketData)
-    longCollateral: number;
     longNotionalSize: number;
-    shortCollateral: number;
     shortNotionalSize: number;
     longInterestIndex: bigint;
     shortInterestIndex: bigint;
     lastUpdate: number;
 
-    constructor(assetIndex: number, data: MarketInfo) {
+    constructor(assetIndex: number, data: MarketConfig & MarketData) {
         this.assetIndex = assetIndex;
         this.asset = data.asset;
         this.enabled = data.enabled;
@@ -48,9 +72,8 @@ export class Market implements MarketInfo {
         this.baseFee = data.baseFee;
         this.priceImpactScalar = data.priceImpactScalar;
         this.baseHourlyRate = data.baseHourlyRate;
-        this.longCollateral = data.longCollateral;
+        this.ratioCap = data.ratioCap;
         this.longNotionalSize = data.longNotionalSize;
-        this.shortCollateral = data.shortCollateral;
         this.shortNotionalSize = data.shortNotionalSize;
         this.longInterestIndex = data.longInterestIndex;
         this.shortInterestIndex = data.shortInterestIndex;
@@ -162,11 +185,10 @@ export class Market implements MarketInfo {
         configVal: xdr.ScVal,
         dataVal: xdr.ScVal
     ): Market {
-        const { asset, config } = Market.parseMarketConfig(configVal);
+        const config = Market.parseMarketConfig(configVal);
         const data = Market.parseMarketData(dataVal);
 
         return new Market(assetIndex, {
-            asset,
             ...config,
             ...data,
         });
@@ -176,14 +198,13 @@ export class Market implements MarketInfo {
      * Parse MarketConfig from contract storage value (matches Rust MarketConfig)
      * @internal
      */
-    private static parseMarketConfig(val: xdr.ScVal): { asset: Asset; config: MarketConfig } {
+    private static parseMarketConfig(val: xdr.ScVal): MarketConfig {
         const map = val.map();
         if (!map) {
             throw new Error('Invalid market config data');
         }
 
         const config: Partial<MarketConfig> = {};
-        let asset: Asset | undefined;
 
         map.forEach((entry) => {
             const key = entry.key().sym().toString();
@@ -191,72 +212,47 @@ export class Market implements MarketInfo {
 
             switch (key) {
                 case 'asset':
-                    asset = Market.parseAsset(value);
+                    config.asset = assetFromScVal(value);
                     break;
                 case 'enabled':
                     config.enabled = value.b();
                     break;
                 case 'max_payout':
-                    config.maxPayout = descale(scValToBigInt(value), 7);
+                    config.maxPayout = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'min_collateral':
-                    config.minCollateral = descale(scValToBigInt(value), 7);
+                    config.minCollateral = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'max_collateral':
-                    config.maxCollateral = descale(scValToBigInt(value), 7);
+                    config.maxCollateral = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'init_margin':
-                    config.initMargin = descale(scValToBigInt(value), 7);
+                    config.initMargin = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'maintenance_margin':
-                    config.maintenanceMargin = descale(scValToBigInt(value), 7);
+                    config.maintenanceMargin = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'base_fee':
-                    config.baseFee = descale(scValToBigInt(value), 7);
+                    config.baseFee = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'price_impact_scalar':
-                    config.priceImpactScalar = descale(scValToBigInt(value), 7);
+                    config.priceImpactScalar = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'base_hourly_rate':
                     // This is in SCALAR_18
                     config.baseHourlyRate = Number(scValToBigInt(value)) / 1e18;
                     break;
+                case 'ratio_cap':
+                    config.ratioCap = Number(scValToBigInt(value)) / 1e18;
+                    break;
             }
         });
 
-        if (!asset) {
+        if (!config.asset) {
             throw new Error('Market config missing asset');
         }
 
-        return { asset, config: config as MarketConfig };
-    }
-
-    /**
-     * Parse Asset from ScVal
-     * @internal
-     */
-    private static parseAsset(val: xdr.ScVal): Asset {
-        const variant = val.vec();
-        if (!variant || variant.length < 2) {
-            throw new Error('Invalid asset format');
-        }
-
-        const variantName = variant[0].sym().toString();
-        const variantEntry = variant[1];
-
-        if (variantName === 'Stellar' && variantEntry) {
-            return {
-                tag: 'Stellar',
-                values: [Address.fromScVal(variantEntry).toString()]
-            } as Asset;
-        } else if (variantName === 'Other' && variantEntry) {
-            return {
-                tag: 'Other',
-                values: [variantEntry.sym().toString()]
-            } as Asset;
-        }
-
-        throw new Error('Unknown asset type');
+        return config as MarketConfig;
     }
 
     /**
@@ -276,17 +272,11 @@ export class Market implements MarketInfo {
             const value = entry.val();
 
             switch (key) {
-                case 'long_collateral':
-                    data.longCollateral = descale(scValToBigInt(value), 7);
-                    break;
                 case 'long_notional_size':
-                    data.longNotionalSize = descale(scValToBigInt(value), 7);
-                    break;
-                case 'short_collateral':
-                    data.shortCollateral = descale(scValToBigInt(value), 7);
+                    data.longNotionalSize = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'short_notional_size':
-                    data.shortNotionalSize = descale(scValToBigInt(value), 7);
+                    data.shortNotionalSize = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'long_interest_index':
                     data.longInterestIndex = scValToBigInt(value);
@@ -304,13 +294,6 @@ export class Market implements MarketInfo {
     }
 
     // === Computed Properties ===
-
-    /**
-     * Get total collateral across both long and short positions
-     */
-    getTotalCollateral(): number {
-        return this.longCollateral + this.shortCollateral;
-    }
 
     /**
      * Get total notional size
@@ -342,5 +325,80 @@ export class Market implements MarketInfo {
         const priceImpact = notionalSize / this.priceImpactScalar;
 
         return baseFee + priceImpact;
+    }
+
+    /**
+     * Calculate funding rates based on market imbalance (mirrors interest.rs calc_interest).
+     *
+     * Returns hourly interest rates as percentages.
+     * Positive = paying, negative = receiving.
+     *
+     * @returns { longRate, shortRate } as percentage numbers (e.g. 0.001 means 0.001%)
+     */
+    getInterestRates(): { longRate: number; shortRate: number } {
+        const DISCOUNT_FACTOR = 800_000_000_000_000_000n; // 0.8 in SCALAR_18
+
+        const baseRate = toFixed(this.baseHourlyRate, 18);
+        const ratioCap = toFixed(this.ratioCap, 18);
+        const longNotional = toFixed(this.longNotionalSize, 7);
+        const shortNotional = toFixed(this.shortNotionalSize, 7);
+
+        const hasLongs = longNotional > 0n;
+        const hasShorts = shortNotional > 0n;
+
+        let longRate: bigint;
+        let shortRate: bigint;
+
+        if (!hasLongs && !hasShorts) {
+            // No positions
+            longRate = 0n;
+            shortRate = 0n;
+        } else if (hasLongs && !hasShorts) {
+            // Only longs
+            longRate = baseRate;
+            shortRate = -mulFloor(baseRate, DISCOUNT_FACTOR, SCALAR_18);
+        } else if (!hasLongs && hasShorts) {
+            // Only shorts
+            longRate = -mulFloor(baseRate, DISCOUNT_FACTOR, SCALAR_18);
+            shortRate = baseRate;
+        } else if (longNotional === shortNotional) {
+            // Equal positions
+            longRate = baseRate;
+            shortRate = baseRate;
+        } else {
+            // Imbalanced market
+            const isLongDominant = longNotional > shortNotional;
+            const dominant = isLongDominant ? longNotional : shortNotional;
+            const minority = isLongDominant ? shortNotional : longNotional;
+
+            // Ratio capped at ratio_cap (use ceil for protocol safety)
+            // Both dominant/minority are SCALAR_7 — they cancel, SCALAR_18 sets output precision
+            const rawRatio = divCeil(dominant, minority, SCALAR_18);
+            const ratio = rawRatio < ratioCap ? rawRatio : ratioCap;
+            const squared = mulCeil(ratio, ratio, SCALAR_18);
+
+            // Dominant side pays: base_rate * ratio
+            const pay = mulCeil(baseRate, ratio, SCALAR_18);
+            // Minority side receives: -0.8 * base_rate * ratio²
+            const receive = -mulFloor(
+                mulFloor(baseRate, DISCOUNT_FACTOR, SCALAR_18),
+                squared,
+                SCALAR_18
+            );
+
+            if (isLongDominant) {
+                longRate = pay;
+                shortRate = receive;
+            } else {
+                longRate = receive;
+                shortRate = pay;
+            }
+        }
+
+        // Convert from SCALAR_18 bigint to percentage number
+        return {
+            longRate: Number(longRate) / 1e18 * 100,
+            shortRate: Number(shortRate) / 1e18 * 100,
+        };
     }
 }

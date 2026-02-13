@@ -6,9 +6,16 @@ import {
     TransactionBuilder,
     xdr,
 } from '@stellar/stellar-sdk';
-import { Network } from './types/primitives.js';
-import { Asset, assetToScVal } from './types/asset.js';
-import { PriceData } from './types/trading.js';
+import { Network } from './index.js';
+import { Asset, assetToScVal } from './asset.js';
+
+// Price data from oracle
+export interface PriceData {
+    /** The price as a fixed point number with the oracle's decimals */
+    price: bigint;
+    /** The timestamp of the price in seconds */
+    timestamp: number;
+}
 
 // Dummy account for simulations (doesn't need to exist on chain)
 const SIMULATION_ACCOUNT = 'GANXGJV2RNOFMOSQ2DTI3RKDBAVERXUVFC27KW3RLVQCLB3RYNO3AAI4';
@@ -43,11 +50,10 @@ export async function getOraclePrice(
         if (xdrStr) {
             const priceResult = xdr.ScVal.fromXDR(xdrStr, 'base64')?.value();
             if (priceResult) {
+                const entries = priceResult as { val: () => xdr.ScVal }[];
                 return {
-                    // @ts-ignore
-                    price: scValToNative(priceResult[0]?.val()),
-                    // @ts-ignore
-                    timestamp: Number(scValToNative(priceResult[1]?.val())),
+                    price: scValToNative(entries[0]?.val()),
+                    timestamp: Number(scValToNative(entries[1]?.val())),
                 };
             }
         }

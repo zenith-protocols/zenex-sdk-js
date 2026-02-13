@@ -1,13 +1,26 @@
 import { Address, xdr, scValToBigInt, rpc } from '@stellar/stellar-sdk';
-import { Network } from '../types/primitives.js';
-import { VaultStateData } from '../types/vault.js';
-import { descale } from '../scaling.js';
+import { Network } from '../index.js';
+import { toFloat } from '../math.js';
 import {
     contractInstanceLedgerKey,
     decodeEntryKey,
     tokenBalanceLedgerKey,
     persistentLedgerKey,
 } from '../ledger-keys.js';
+
+// Vault state data (ERC-4626 style)
+export interface VaultStateData {
+    /** Underlying asset token address */
+    asset: string;
+    /** Lock time in seconds for withdrawals */
+    lockTime: number;
+    /** Total shares in circulation */
+    totalShares: number;
+    /** Total assets in the vault */
+    totalAssets: number;
+    /** Decimals offset for virtual shares (inflation attack protection) */
+    decimalsOffset: number;
+}
 
 /**
  * Extract the balance amount from a token balance storage value.
@@ -151,8 +164,8 @@ export class VaultState implements VaultStateData {
             {
                 asset,
                 lockTime,
-                totalShares: descale(totalShares, shareDecimals),
-                totalAssets: descale(totalAssets, 7),
+                totalShares: toFloat(totalShares, shareDecimals),
+                totalAssets: toFloat(totalAssets, 7),
                 decimalsOffset,
             },
             network,
