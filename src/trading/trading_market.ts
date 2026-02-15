@@ -350,9 +350,9 @@ export class Market implements MarketConfig, MarketData {
         let shortRate: bigint;
 
         if (!hasLongs && !hasShorts) {
-            // No positions
-            longRate = 0n;
-            shortRate = 0n;
+            // No positions — both sides pay base rate
+            longRate = baseRate;
+            shortRate = baseRate;
         } else if (hasLongs && !hasShorts) {
             // Only longs
             longRate = baseRate;
