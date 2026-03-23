@@ -69,31 +69,24 @@ export enum ContractErrorType {
     UserNotAllowed = 113,
     UserBlocked = 114,
 
-    // Trading Errors (700+) - matches Rust TradingError
+    // Trading Errors - matches Rust TradingError
+    // Access
+    Unauthorized = 1,
     // Configuration
-    AlreadyInitialized = 700,
-    NotInitialized = 701,
     InvalidConfig = 702,
-    UpdateNotQueued = 703,
-    UpdateNotUnlocked = 704,
     // Market
     MarketNotFound = 710,
-    MarketInitNotQueued = 711,
     MarketDisabled = 712,
-    // Oracle/Price
-    PriceNotFound = 720,
-    PriceStale = 721,
+    // Price
+    InvalidPrice = 720,
     // Position
     PositionNotFound = 730,
-    PositionAlreadyClosed = 731,
-    PositionNotOpen = 732,
     PositionNotPending = 733,
     MaxPositionsReached = 734,
     NegativeValueNotAllowed = 735,
-    CollateralBelowMinimum = 736,
-    CollateralAboveMaximum = 737,
-    LeverageBelowMinimum = 738,
-    InvalidEntryPrice = 739,
+    NotionalBelowMinimum = 736,
+    NotionalAboveMaximum = 737,
+    LeverageAboveMaximum = 739,
     CollateralUnchanged = 740,
     WithdrawalBreaksMargin = 741,
     InvalidTakeProfitPrice = 742,
@@ -110,8 +103,15 @@ export enum ContractErrorType {
     InvalidStatus = 760,
     ContractOnIce = 761,
     ContractFrozen = 762,
+    // Market limits
+    MaxMarketsReached = 770,
+    MarketHasOpenPositions = 771,
+    // ADL / Circuit breaker
+    ThresholdNotMet = 780,
+    // Funding
+    FundingTooEarly = 790,
     // Utilization
-    UtilizationLimitExceeded = 770,
+    UtilizationExceeded = 791,
 
     // VaultTokenError (400-410) - from stellar_tokens vault
     VaultAssetAddressNotSet = 400,

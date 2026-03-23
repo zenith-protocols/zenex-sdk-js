@@ -47,29 +47,33 @@ export {
     ContractStatus,
     ExecuteRequestType,
     TradingEventType,
+    OrderValidationError,
     parseTradingEvent,
 } from './trading/index.js';
 
 export type {
     FeeBreakdown,
     PositionPnL,
+    PositionBreakdown,
     PositionData,
+    ValidateOrderParams,
+    GrossCollateralParams,
+    GrossCollateralResult,
     MarketConfig,
     MarketData,
     TradingConfigData,
     TradingInstanceData,
     ExecuteRequest,
-    OpenPositionArgs,
+    PlaceLimitArgs,
+    OpenMarketArgs,
     SetTriggersArgs,
     ModifyCollateralArgs,
     ExecuteArgs,
+    DeployArgs,
     BaseTradingEvent,
     TradingSetConfigEvent,
-    TradingQueueSetConfigEvent,
-    TradingCancelSetConfigEvent,
-    TradingQueueSetMarketEvent,
-    TradingCancelSetMarketEvent,
     TradingSetMarketEvent,
+    TradingDelMarketEvent,
     TradingSetStatusEvent,
     TradingOpenMarketEvent,
     TradingPlaceLimitEvent,
@@ -81,8 +85,32 @@ export type {
     TradingCancelLimitEvent,
     TradingModifyCollateralEvent,
     TradingSetTriggersEvent,
+    TradingApplyFundingEvent,
+    TradingADLTriggeredEvent,
     TradingEvent,
 } from './trading/index.js';
+
+// Factory Module
+export {
+    FactoryContract,
+} from './factory/index.js';
+
+export type {
+    FactoryInitMeta,
+    FactoryDeployArgs,
+    FactoryConstructorArgs,
+} from './factory/index.js';
+
+// Governance Module (time-locked admin for trading)
+export {
+    GovernanceContract,
+} from './governance/index.js';
+
+export type {
+    QueuedConfig,
+    QueuedMarket,
+    GovernanceConstructorArgs,
+} from './governance/index.js';
 
 // Vault Module
 export {

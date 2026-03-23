@@ -2,67 +2,73 @@ import { Address, rpc, xdr, scValToNative, scValToBigInt } from '@stellar/stella
 import { Network } from '../index.js';
 import { ContractStatus } from './trading_contract.js';
 import { toFloat } from '../math.js';
-import { contractInstanceLedgerKey, decodeEntryKey } from '../ledger-keys.js';
+import { contractInstanceLedgerKey, decodeEntryKey, persistentLedgerKey } from '../ledger-keys.js';
 
 // Trading configuration (matches Rust TradingConfig)
 export interface TradingConfigData {
-    oracle: string;
-    maxPriceAge: number;
-    callerTakeRate: number;
-    maxPositions: number;
-    maxUtilization: number;
-    minOpenTime: number;
+    callerRate: number;
+    minNotional: number;
+    maxNotional: number;
+    feeDom: number;
+    feeNonDom: number;
+    maxUtil: number;
+    rFunding: bigint;    // SCALAR_18
+    rBase: bigint;       // SCALAR_18
+    rVar: number;
 }
 
-// Contract instance storage data
+// Full instance + persistent state from a single getLedgerEntries call
 export interface TradingInstanceData {
-    name: string | undefined;
     status: number;
     vault: string;
     token: string;
+    treasury: string;
+    priceVerifier: string;
     config: TradingConfigData;
-    priceDecimals: number;
-    tokenDecimals: number;
-    marketCounter: number;
     positionCounter: number;
+    totalNotional: number;
+    lastFundingUpdate: number;
+    feedIds: number[];
 }
 
 /**
- * TradingConfig - Trading contract configuration loader
+ * TradingConfig - Trading contract state loader
  *
- * Contains all configuration data from the trading contract's instance storage.
- * Use Market.loadMultiple() with marketCounter to load market data.
+ * Single getLedgerEntries call fetches instance storage + Markets persistent key.
+ * Returns all config, addresses, counters, and the list of active feed IDs.
+ * Use feedIds with Market.loadMultiple() to fetch market data separately.
  */
 export class TradingConfig implements TradingInstanceData {
-    name: string | undefined;
     status: number;
     vault: string;
     token: string;
+    treasury: string;
+    priceVerifier: string;
     config: TradingConfigData;
-    priceDecimals: number;
-    tokenDecimals: number;
-    marketCounter: number;
     positionCounter: number;
+    totalNotional: number;
+    lastFundingUpdate: number;
+    feedIds: number[];
     contractId: string;
 
     constructor(data: TradingInstanceData, contractId: string) {
-        this.name = data.name;
         this.status = data.status;
         this.vault = data.vault;
         this.token = data.token;
+        this.treasury = data.treasury;
+        this.priceVerifier = data.priceVerifier;
         this.config = data.config;
-        this.priceDecimals = data.priceDecimals;
-        this.tokenDecimals = data.tokenDecimals;
-        this.marketCounter = data.marketCounter;
         this.positionCounter = data.positionCounter;
+        this.totalNotional = data.totalNotional;
+        this.lastFundingUpdate = data.lastFundingUpdate;
+        this.feedIds = data.feedIds;
         this.contractId = contractId;
     }
 
     /**
-     * Load trading configuration from the blockchain
-     * @param network - The Stellar network to connect to
-     * @param contractId - The trading contract address
-     * @returns A new TradingConfig instance with current data
+     * Load full trading contract state in a single getLedgerEntries call.
+     * Fetches instance storage (config, addresses, counters) and the
+     * Markets persistent key (list of active feed IDs).
      */
     public static async load(
         network: Network,
@@ -70,190 +76,151 @@ export class TradingConfig implements TradingInstanceData {
     ): Promise<TradingConfig> {
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
 
-        const instanceKey = contractInstanceLedgerKey(contractId);
-        const response = await stellarRpc.getLedgerEntries(instanceKey);
+        const response = await stellarRpc.getLedgerEntries(
+            contractInstanceLedgerKey(contractId),
+            persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('Markets')]),
+        );
 
         if (response.entries.length === 0) {
             throw new Error('Trading contract not found');
         }
 
-        const contractData = response.entries[0].val.contractData();
-        const contractInstance = contractData.val().instance();
+        // Parse instance storage
+        const contractInstance = response.entries[0].val.contractData().val().instance();
         const storage = contractInstance.storage();
-        if (!storage) {
-            throw new Error('Trading instance storage is empty');
-        }
+        if (!storage) throw new Error('Trading instance storage is empty');
 
         const instanceData = TradingConfig.parseInstanceStorage(storage);
 
-        return new TradingConfig(instanceData, contractId);
+        // Parse feed IDs from Markets persistent key
+        let feedIds: number[] = [];
+        if (response.entries.length > 1) {
+            const vec = response.entries[1].val.contractData().val().vec();
+            if (vec) feedIds = vec.map(v => v.u32());
+        }
+
+        return new TradingConfig({ ...instanceData, feedIds }, contractId);
     }
 
-    /**
-     * Parse trading configuration from instance storage
-     * @internal
-     */
-    private static parseInstanceStorage(storage: xdr.ScMapEntry[]): TradingInstanceData {
-        let name: string | undefined;
+    // === Parsers ===
+
+    private static parseInstanceStorage(
+        storage: xdr.ScMapEntry[]
+    ): Omit<TradingInstanceData, 'feedIds'> {
         let status: number = 0;
         let vault: string | undefined;
         let token: string | undefined;
+        let treasury: string | undefined;
+        let priceVerifier: string | undefined;
         let config: TradingConfigData | undefined;
-        let priceDecimals: number = 0;
-        let tokenDecimals: number = 0;
-        let marketCounter: number = 0;
         let positionCounter: number = 0;
+        let totalNotional: bigint = 0n;
+        let lastFundingUpdate: bigint = 0n;
 
-        storage.forEach((storageEntry) => {
-            const instanceKey = decodeEntryKey(storageEntry.key());
-
-            switch (instanceKey) {
-                case 'Name':
-                    name = scValToNative(storageEntry.val()) as string;
-                    break;
-
+        for (const entry of storage) {
+            const key = decodeEntryKey(entry.key());
+            switch (key) {
                 case 'Status':
-                    status = scValToNative(storageEntry.val()) as number;
+                    status = scValToNative(entry.val()) as number;
                     break;
-
                 case 'Vault':
-                    vault = Address.fromScVal(storageEntry.val()).toString();
+                    vault = Address.fromScVal(entry.val()).toString();
                     break;
-
                 case 'Token':
-                    token = Address.fromScVal(storageEntry.val()).toString();
+                    token = Address.fromScVal(entry.val()).toString();
                     break;
-
-                case 'Config':
-                    const configMap = storageEntry.val().map();
-                    if (configMap) {
-                        let oracle: string | undefined;
-                        let maxPriceAge: number | undefined;
-                        let callerTakeRate: bigint | undefined;
-                        let maxPositions: number | undefined;
-                        let maxUtilization: bigint | undefined;
-                        let minOpenTime: bigint | undefined;
-
-                        configMap.forEach((configEntry) => {
-                            const configKey = configEntry.key().sym().toString();
-                            switch (configKey) {
-                                case 'oracle':
-                                    oracle = Address.fromScVal(configEntry.val()).toString();
-                                    break;
-                                case 'max_price_age':
-                                    maxPriceAge = scValToNative(configEntry.val()) as number;
-                                    break;
-                                case 'caller_take_rate':
-                                    callerTakeRate = scValToBigInt(configEntry.val());
-                                    break;
-                                case 'max_positions':
-                                    maxPositions = scValToNative(configEntry.val()) as number;
-                                    break;
-                                case 'max_utilization':
-                                    maxUtilization = scValToBigInt(configEntry.val());
-                                    break;
-                                case 'min_open_time':
-                                    minOpenTime = scValToBigInt(configEntry.val());
-                                    break;
-                            }
-                        });
-
-                        if (oracle && callerTakeRate !== undefined && maxPositions !== undefined && maxUtilization !== undefined) {
-                            config = {
-                                oracle,
-                                maxPriceAge: maxPriceAge ?? 0,
-                                callerTakeRate: toFloat(callerTakeRate, 7),
-                                maxPositions,
-                                maxUtilization: toFloat(maxUtilization, 7),
-                                minOpenTime: Number(minOpenTime ?? 0n),
-                            };
-                        }
-                    }
+                case 'Treasury':
+                    treasury = Address.fromScVal(entry.val()).toString();
                     break;
-
-                case 'PriceDecimals':
-                    priceDecimals = scValToNative(storageEntry.val()) as number;
+                case 'PriceVerifier':
+                    priceVerifier = Address.fromScVal(entry.val()).toString();
                     break;
-
-                case 'TokenDecimals':
-                    tokenDecimals = scValToNative(storageEntry.val()) as number;
+                case 'Config': {
+                    const configMap = entry.val().map();
+                    if (configMap) config = TradingConfig.parseConfig(configMap);
                     break;
-
-                case 'MarketCounter':
-                    marketCounter = scValToNative(storageEntry.val()) as number;
-                    break;
-
+                }
                 case 'PositionCounter':
-                    positionCounter = scValToNative(storageEntry.val()) as number;
+                    positionCounter = scValToNative(entry.val()) as number;
+                    break;
+                case 'TotalNotional':
+                    totalNotional = scValToBigInt(entry.val());
+                    break;
+                case 'LastFundingUpdate':
+                    lastFundingUpdate = scValToBigInt(entry.val());
                     break;
             }
-        });
+        }
 
-        if (!vault || !token || !config) {
+        if (!vault || !token || !treasury || !priceVerifier || !config) {
             throw new Error('Missing required trading configuration fields');
         }
 
         return {
-            name,
-            status,
-            vault,
-            token,
-            config,
-            priceDecimals,
-            tokenDecimals,
-            marketCounter,
+            status, vault, token, treasury, priceVerifier, config,
             positionCounter,
+            totalNotional: toFloat(totalNotional, 7),
+            lastFundingUpdate: Number(lastFundingUpdate),
         };
     }
 
-    // === Helper Methods ===
+    private static parseConfig(configMap: xdr.ScMapEntry[]): TradingConfigData | undefined {
+        let callerRate: bigint | undefined;
+        let minNotional: bigint | undefined;
+        let maxNotional: bigint | undefined;
+        let feeDom: bigint | undefined;
+        let feeNonDom: bigint | undefined;
+        let maxUtil: bigint | undefined;
+        let rFunding: bigint | undefined;
+        let rBase: bigint | undefined;
+        let rVar: bigint | undefined;
 
-    /**
-     * Get the contract status as typed enum
-     */
-    getStatus(): ContractStatus {
-        return this.status as ContractStatus;
+        for (const entry of configMap) {
+            switch (entry.key().sym().toString()) {
+                case 'caller_rate':  callerRate = scValToBigInt(entry.val()); break;
+                case 'min_notional': minNotional = scValToBigInt(entry.val()); break;
+                case 'max_notional': maxNotional = scValToBigInt(entry.val()); break;
+                case 'fee_dom':      feeDom = scValToBigInt(entry.val()); break;
+                case 'fee_non_dom':  feeNonDom = scValToBigInt(entry.val()); break;
+                case 'max_util':     maxUtil = scValToBigInt(entry.val()); break;
+                case 'r_funding':    rFunding = scValToBigInt(entry.val()); break;
+                case 'r_base':       rBase = scValToBigInt(entry.val()); break;
+                case 'r_var':        rVar = scValToBigInt(entry.val()); break;
+            }
+        }
+
+        if (callerRate === undefined || minNotional === undefined ||
+            maxNotional === undefined || feeDom === undefined ||
+            feeNonDom === undefined || maxUtil === undefined ||
+            rFunding === undefined || rBase === undefined ||
+            rVar === undefined
+        ) {
+            return undefined;
+        }
+
+        return {
+            callerRate: toFloat(callerRate, 7),
+            minNotional: toFloat(minNotional, 7),
+            maxNotional: toFloat(maxNotional, 7),
+            feeDom: toFloat(feeDom, 7),
+            feeNonDom: toFloat(feeNonDom, 7),
+            maxUtil: toFloat(maxUtil, 7),
+            rFunding, rBase,
+            rVar: toFloat(rVar, 7),
+        };
     }
 
-    /**
-     * Get the oracle address
-     */
-    get oracle(): string {
-        return this.config.oracle;
-    }
+    // === Accessors ===
 
-    /**
-     * Get caller take rate
-     */
-    get callerTakeRate(): number {
-        return this.config.callerTakeRate;
-    }
+    getStatus(): ContractStatus { return this.status as ContractStatus; }
 
-    /**
-     * Get max positions per user
-     */
-    get maxPositions(): number {
-        return this.config.maxPositions;
-    }
-
-    /**
-     * Get max utilization
-     */
-    get maxUtilization(): number {
-        return this.config.maxUtilization;
-    }
-
-    /**
-     * Get max price age
-     */
-    get maxPriceAge(): number {
-        return this.config.maxPriceAge;
-    }
-
-    /**
-     * Get min open time
-     */
-    get minOpenTime(): number {
-        return this.config.minOpenTime;
-    }
+    get callerRate(): number { return this.config.callerRate; }
+    get minNotional(): number { return this.config.minNotional; }
+    get maxNotional(): number { return this.config.maxNotional; }
+    get feeDom(): number { return this.config.feeDom; }
+    get feeNonDom(): number { return this.config.feeNonDom; }
+    get maxUtil(): number { return this.config.maxUtil; }
+    get rFunding(): bigint { return this.config.rFunding; }
+    get rBase(): bigint { return this.config.rBase; }
+    get rVar(): number { return this.config.rVar; }
 }

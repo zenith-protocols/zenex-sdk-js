@@ -2,6 +2,8 @@
 export enum ZenexContractType {
     Vault = 'vault',
     Trading = 'trading',
+    Factory = 'factory',
+    Governance = 'governance',
 }
 
 // Base event interface

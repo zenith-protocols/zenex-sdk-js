@@ -2,6 +2,11 @@ export const SCALAR_7 = BigInt(10000000);
 export const SCALAR_14 = BigInt(100000000000000);
 export const SCALAR_18 = BigInt(1000000000000000000);
 
+// Trading limits
+export const MAX_MARKETS = 32;
+export const MAX_POSITIONS = 25;
+export const MIN_OPEN_TIME = 30;
+
 export function toFixed(x: number, decimals = 7): bigint {
   return BigInt(Math.round(x * 10 ** decimals));
 }

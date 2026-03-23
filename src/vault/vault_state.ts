@@ -227,9 +227,9 @@ export class VaultState implements VaultStateData {
         // If no deposit time, user has no shares so not locked
         if (lastDepositTime === 0n) return 0;
 
-        // Get current ledger timestamp
-        const latestLedger = await stellarRpc.getLatestLedger();
-        const currentTime = BigInt(latestLedger.sequence) * 5n; // Approximate: 5 seconds per ledger
+        // Use wall-clock time as approximation of ledger timestamp
+        // The contract uses e.ledger().timestamp() which is Unix epoch seconds
+        const currentTime = BigInt(Math.floor(Date.now() / 1000));
 
         // Calculate unlock time and remaining duration
         const unlockTime = lastDepositTime + lockTime;

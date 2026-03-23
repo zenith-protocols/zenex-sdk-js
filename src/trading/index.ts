@@ -12,22 +12,28 @@ export {
 
 export type {
     ExecuteRequest,
-    OpenPositionArgs,
+    PlaceLimitArgs,
+    OpenMarketArgs,
     SetTriggersArgs,
     ModifyCollateralArgs,
     ExecuteArgs,
-    InitializeArgs,
+    DeployArgs,
     TradingConfigArgs,
     MarketConfigArgs,
-    QueueSetMarketArgs,
 } from './trading_contract.js';
 
 // Position types
 export type {
     FeeBreakdown,
     PositionPnL,
+    PositionBreakdown,
     PositionData,
+    ValidateOrderParams,
+    GrossCollateralParams,
+    GrossCollateralResult,
 } from './trading_position.js';
+
+export { OrderValidationError } from './trading_position.js';
 
 // Market types
 export type {
@@ -49,11 +55,8 @@ export {
 export type {
     BaseTradingEvent,
     TradingSetConfigEvent,
-    TradingQueueSetConfigEvent,
-    TradingCancelSetConfigEvent,
-    TradingQueueSetMarketEvent,
-    TradingCancelSetMarketEvent,
     TradingSetMarketEvent,
+    TradingDelMarketEvent,
     TradingSetStatusEvent,
     TradingOpenMarketEvent,
     TradingPlaceLimitEvent,
@@ -65,6 +68,9 @@ export type {
     TradingCancelLimitEvent,
     TradingModifyCollateralEvent,
     TradingSetTriggersEvent,
+    TradingApplyFundingEvent,
+    TradingADLTriggeredEvent,
+    TradingADLMarketEvent,
     TradingEvent,
 } from './trading_events.js';
 

@@ -1,13 +1,12 @@
-import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
+import { Address, Contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { i128, u32, u64 } from '../index.js';
-import { Asset, assetToScVal } from '../asset.js';
 
-// Contract status enum (matches Rust contract constants)
+// Contract status enum (matches Rust contract)
 export enum ContractStatus {
-    Active = 0,  // Full operation - all trading actions allowed
-    OnIce = 1,   // Blocks new positions, allows closing/modifying existing positions
-    Frozen = 2,  // Emergency lockdown - no trading actions allowed
-    Setup = 99,  // Initial setup mode - no trading, config changes immediate
+    Active = 0,     // Full operation - all trading actions allowed
+    OnIce = 1,      // Permissionless circuit breaker (PnL threshold)
+    AdminOnIce = 2, // Admin-set on ice (only admin can lift)
+    Frozen = 3,     // Emergency lockdown - no trading actions allowed
 }
 
 // Execute request types (matches Rust ExecuteRequestType)
@@ -24,16 +23,28 @@ export interface ExecuteRequest {
     position_id: u32;
 }
 
-// Open position arguments (matches contract function)
-export interface OpenPositionArgs {
+// Place limit order arguments
+export interface PlaceLimitArgs {
     user: string;
-    asset_index: u32;
+    feed_id: u32;
     collateral: i128;
     notional_size: i128;
     is_long: boolean;
     entry_price: i128;
     take_profit: i128;
     stop_loss: i128;
+}
+
+// Open market order arguments
+export interface OpenMarketArgs {
+    user: string;
+    feed_id: u32;
+    collateral: i128;
+    notional_size: i128;
+    is_long: boolean;
+    take_profit: i128;
+    stop_loss: i128;
+    price: Buffer | Uint8Array;
 }
 
 // Set triggers arguments
@@ -47,160 +58,92 @@ export interface SetTriggersArgs {
 export interface ModifyCollateralArgs {
     position_id: u32;
     new_collateral: i128;
+    price: Buffer | Uint8Array;
 }
 
 // Execute arguments
 export interface ExecuteArgs {
     caller: string;
     requests: ExecuteRequest[];
+    price: Buffer | Uint8Array;
 }
 
-// Initialize arguments (owner only)
-export interface InitializeArgs {
-    name: string;
+// Deploy arguments (passed to __constructor)
+export interface DeployArgs {
+    owner: string;
+    token: string;
     vault: string;
+    price_verifier: string;
+    treasury: string;
     config: TradingConfigArgs;
 }
 
 // Trading config arguments (raw i128 values for contract calls)
 export interface TradingConfigArgs {
-    oracle: string;
-    max_price_age: u32;
-    caller_take_rate: i128;
-    max_positions: u32;
-    max_utilization: i128;
-    min_open_time: u64;
+    caller_rate: i128;
+    min_notional: i128;
+    max_notional: i128;
+    fee_dom: i128;
+    fee_non_dom: i128;
+    max_util: i128;
+    r_funding: i128;
+    r_base: i128;
+    r_var: i128;
 }
 
 // Market config arguments (raw i128 values for contract calls)
 export interface MarketConfigArgs {
-    asset: Asset;
     enabled: boolean;
-    max_payout: i128;
-    min_collateral: i128;
-    max_collateral: i128;
-    init_margin: i128;
-    maintenance_margin: i128;
-    base_fee: i128;
-    price_impact_scalar: i128;
-    base_hourly_rate: i128;
-    ratio_cap: i128;
-}
-
-// Queue set market arguments
-export interface QueueSetMarketArgs {
-    config: MarketConfigArgs;
+    max_util: i128;
+    r_borrow: i128;
+    margin: i128;
+    liq_fee: i128;
+    impact: i128;
 }
 
 /**
  * TradingContract - Operation builder for the Zenex Trading contract
  *
- * This class extends the Stellar Contract class and provides methods
- * to build operations (XDR) for trading interactions.
- *
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class TradingContract extends Contract {
-    static spec: contract.Spec = new contract.Spec(["AAAAAQAAAC9TdHJ1Y3R1cmUgdG8gc3RvcmUgaW5mb3JtYXRpb24gYWJvdXQgYSBwb3NpdGlvbgAAAAAAAAAACFBvc2l0aW9uAAAADAAAAAAAAAALYXNzZXRfaW5kZXgAAAAABAAAAAAAAAAKY29sbGF0ZXJhbAAAAAAACwAAAAAAAAAKY3JlYXRlZF9hdAAAAAAABgAAAAAAAAALZW50cnlfcHJpY2UAAAAACwAAAAAAAAACaWQAAAAAAAQAAAAAAAAADmludGVyZXN0X2luZGV4AAAAAAALAAAAAAAAAAdpc19sb25nAAAAAAEAAAAAAAAADW5vdGlvbmFsX3NpemUAAAAAAAALAAAAAAAAAAZzdGF0dXMAAAAAB9AAAAAOUG9zaXRpb25TdGF0dXMAAAAAAAAAAAAJc3RvcF9sb3NzAAAAAAAACwAAAAAAAAALdGFrZV9wcm9maXQAAAAACwAAAAAAAAAEdXNlcgAAABM=",
-        "AAAAAQAAAAAAAAAAAAAACk1hcmtldERhdGEAAAAAAAcAAAAAAAAAC2xhc3RfdXBkYXRlAAAAAAYAAAAAAAAAD2xvbmdfY29sbGF0ZXJhbAAAAAALAAAAAAAAABNsb25nX2ludGVyZXN0X2luZGV4AAAAAAsAAAAAAAAAEmxvbmdfbm90aW9uYWxfc2l6ZQAAAAAACwAAAAAAAAAQc2hvcnRfY29sbGF0ZXJhbAAAAAsAAAAAAAAAFHNob3J0X2ludGVyZXN0X2luZGV4AAAACwAAAAAAAAATc2hvcnRfbm90aW9uYWxfc2l6ZQAAAAAL",
-        "AAAAAQAAAAAAAAAAAAAADENvbmZpZ1VwZGF0ZQAAAAIAAAAAAAAABmNvbmZpZwAAAAAH0AAAAA1UcmFkaW5nQ29uZmlnAAAAAAAAAAAAAAt1bmxvY2tfdGltZQAAAAAG",
-        "AAAAAQAAAAAAAAAAAAAADE1hcmtldENvbmZpZwAAAAoAAAAAAAAABWFzc2V0AAAAAAAH0AAAAAVBc3NldAAAAAAAAAAAAAAIYmFzZV9mZWUAAAALAAAAAAAAABBiYXNlX2hvdXJseV9yYXRlAAAACwAAAAAAAAAHZW5hYmxlZAAAAAABAAAAAAAAAAtpbml0X21hcmdpbgAAAAALAAAAAAAAABJtYWludGVuYW5jZV9tYXJnaW4AAAAAAAsAAAAAAAAADm1heF9jb2xsYXRlcmFsAAAAAAALAAAAAAAAAAptYXhfcGF5b3V0AAAAAAALAAAAAAAAAA5taW5fY29sbGF0ZXJhbAAAAAAACwAAAAAAAAATcHJpY2VfaW1wYWN0X3NjYWxhcgAAAAAL",
-        "AAAAAQAAAAAAAAAAAAAADVRyYWRpbmdDb25maWcAAAAAAAAEAAAAAAAAABBjYWxsZXJfdGFrZV9yYXRlAAAACwAAAAAAAAANbWF4X3Bvc2l0aW9ucwAAAAAAAAQAAAAAAAAAD21heF91dGlsaXphdGlvbgAAAAALAAAAAAAAAAZvcmFjbGUAAAAAABM=",
-        "AAAAAQAAABxSZXF1ZXN0IGZvciBrZWVwZXIgZXhlY3V0aW9uAAAAAAAAAA5FeGVjdXRlUmVxdWVzdAAAAAAAAgAAAAAAAAALcG9zaXRpb25faWQAAAAABAAAAAAAAAAMcmVxdWVzdF90eXBlAAAH0AAAABJFeGVjdXRlUmVxdWVzdFR5cGUAAA==",
-        "AAAAAgAAAA9Qb3NpdGlvbiBzdGF0dXMAAAAAAAAAAA5Qb3NpdGlvblN0YXR1cwAAAAAAAwAAAAAAAAAAAAAAB1BlbmRpbmcAAAAAAAAAAAAAAAAET3BlbgAAAAAAAAAAAAAABkNsb3NlZAAA",
-        "AAAAAQAAAAAAAAAAAAAAEFF1ZXVlZE1hcmtldEluaXQAAAACAAAAAAAAAAZjb25maWcAAAAAB9AAAAAMTWFya2V0Q29uZmlnAAAAAAAAAAt1bmxvY2tfdGltZQAAAAAG",
-        "AAAAAwAAAChUeXBlcyBvZiBrZWVwZXIgYWN0aW9ucyAocGVybWlzc2lvbmxlc3MpAAAAAAAAABJFeGVjdXRlUmVxdWVzdFR5cGUAAAAAAAQAAAAAAAAABEZpbGwAAAAAAAAAAAAAAAhTdG9wTG9zcwAAAAEAAAAAAAAAClRha2VQcm9maXQAAAAAAAIAAAAAAAAACUxpcXVpZGF0ZQAAAAAAAAM=",
-        "AAAABAAAAAAAAAAAAAAADFRyYWRpbmdFcnJvcgAAAB4AAAAAAAAAEkFscmVhZHlJbml0aWFsaXplZAAAAAABLAAAAAAAAAAOTm90SW5pdGlhbGl6ZWQAAAAAAS0AAAAAAAAADUludmFsaWRDb25maWcAAAAAAAEuAAAAAAAAAA9VcGRhdGVOb3RRdWV1ZWQAAAABLwAAAAAAAAARVXBkYXRlTm90VW5sb2NrZWQAAAAAAAEwAAAAAAAAAA5NYXJrZXROb3RGb3VuZAAAAAABNgAAAAAAAAATTWFya2V0SW5pdE5vdFF1ZXVlZAAAAAE3AAAAAAAAAA5NYXJrZXREaXNhYmxlZAAAAAABOAAAAAAAAAANUHJpY2VOb3RGb3VuZAAAAAAAAUAAAAAAAAAAClByaWNlU3RhbGUAAAAAAUEAAAAAAAAAEFBvc2l0aW9uTm90Rm91bmQAAAFFAAAAAAAAABVQb3NpdGlvbkFscmVhZHlDbG9zZWQAAAAAAAFGAAAAAAAAAA9Qb3NpdGlvbk5vdE9wZW4AAAABRwAAAAAAAAASUG9zaXRpb25Ob3RQZW5kaW5nAAAAAAFIAAAAAAAAABNNYXhQb3NpdGlvbnNSZWFjaGVkAAAAAUkAAAAAAAAAF05lZ2F0aXZlVmFsdWVOb3RBbGxvd2VkAAAAAUoAAAAAAAAAFkNvbGxhdGVyYWxCZWxvd01pbmltdW0AAAAAAUsAAAAAAAAAFkNvbGxhdGVyYWxBYm92ZU1heGltdW0AAAAAAUwAAAAAAAAAEUludmFsaWRFbnRyeVByaWNlAAAAAAABTgAAAAAAAAAWV2l0aGRyYXdhbEJyZWFrc01hcmdpbgAAAAABUQAAAAAAAAAWSW52YWxpZFRha2VQcm9maXRQcmljZQAAAAABVAAAAAAAAAAUSW52YWxpZFN0b3BMb3NzUHJpY2UAAAFVAAAAAAAAABZUYWtlUHJvZml0Tm90VHJpZ2dlcmVkAAAAAAFWAAAAAAAAABRTdG9wTG9zc05vdFRyaWdnZXJlZAAAAVcAAAAAAAAAF1Bvc2l0aW9uTm90TGlxdWlkYXRhYmxlAAAAAVkAAAAAAAAAFUxpbWl0T3JkZXJOb3RGaWxsYWJsZQAAAAAAAVoAAAAAAAAAGUFjdGlvbk5vdEFsbG93ZWRGb3JTdGF0dXMAAAAAAAFfAAAAAAAAAA1JbnZhbGlkU3RhdHVzAAAAAAABfQAAAAAAAAAOQ29udHJhY3RQYXVzZWQAAAAAAXwAAAAAAAAAGFV0aWxpemF0aW9uTGltaXRFeGNlZWRlZAAAAYY=",
-        "AAAABQAAAAAAAAAAAAAACFN0b3BMb3NzAAAAAQAAAAlzdG9wX2xvc3MAAAAAAAAFAAAAAAAAAAthc3NldF9pbmRleAAAAAAEAAAAAQAAAAAAAAAEdXNlcgAAABMAAAABAAAAAAAAAAtwb3NpdGlvbl9pZAAAAAAEAAAAAAAAAAAAAAAFcHJpY2UAAAAAAAALAAAAAAAAAAAAAAADZmVlAAAAAAsAAAAAAAAAAg==",
-        "AAAABQAAAAAAAAAAAAAACVNldENvbmZpZwAAAAAAAAEAAAAKc2V0X2NvbmZpZwAAAAAAAwAAAAAAAAAGb3JhY2xlAAAAAAATAAAAAAAAAAAAAAAQY2FsbGVyX3Rha2VfcmF0ZQAAAAsAAAAAAAAAAAAAAA1tYXhfcG9zaXRpb25zAAAAAAAABAAAAAAAAAAC",
-        "AAAABQAAAAAAAAAAAAAACVNldE1hcmtldAAAAAAAAAEAAAAKc2V0X21hcmtldAAAAAAAAQAAAAAAAAALYXNzZXRfaW5kZXgAAAAABAAAAAEAAAAC",
-        "AAAABQAAAAAAAAAAAAAACVNldFN0YXR1cwAAAAAAAAEAAAAKc2V0X3N0YXR1cwAAAAAAAQAAAAAAAAAGc3RhdHVzAAAAAAAEAAAAAAAAAAI=",
-        "AAAABQAAAAAAAAAAAAAAClRha2VQcm9maXQAAAAAAAEAAAALdGFrZV9wcm9maXQAAAAABQAAAAAAAAALYXNzZXRfaW5kZXgAAAAABAAAAAEAAAAAAAAABHVzZXIAAAATAAAAAQAAAAAAAAALcG9zaXRpb25faWQAAAAABAAAAAAAAAAAAAAABXByaWNlAAAAAAAACwAAAAAAAAAAAAAAA2ZlZQAAAAALAAAAAAAAAAI=",
-        "AAAABQAAAAAAAAAAAAAAC0xpcXVpZGF0aW9uAAAAAAEAAAALbGlxdWlkYXRpb24AAAAABQAAAAAAAAALYXNzZXRfaW5kZXgAAAAABAAAAAEAAAAAAAAABHVzZXIAAAATAAAAAQAAAAAAAAALcG9zaXRpb25faWQAAAAABAAAAAAAAAAAAAAABXByaWNlAAAAAAAACwAAAAAAAAAAAAAAA2ZlZQAAAAALAAAAAAAAAAI=",
-        "AAAABQAAAAAAAAAAAAAAC1NldFN0b3BMb3NzAAAAAAEAAAANc2V0X3N0b3BfbG9zcwAAAAAAAAQAAAAAAAAAC2Fzc2V0X2luZGV4AAAAAAQAAAABAAAAAAAAAAR1c2VyAAAAEwAAAAEAAAAAAAAAC3Bvc2l0aW9uX2lkAAAAAAQAAAAAAAAAAAAAAAVwcmljZQAAAAAAAAsAAAAAAAAAAg==",
-        "AAAABQAAAAAAAAAAAAAADEZpbGxQb3NpdGlvbgAAAAEAAAANZmlsbF9wb3NpdGlvbgAAAAAAAAMAAAAAAAAAC2Fzc2V0X2luZGV4AAAAAAQAAAABAAAAAAAAAAR1c2VyAAAAEwAAAAEAAAAAAAAAC3Bvc2l0aW9uX2lkAAAAAAQAAAAAAAAAAg==",
-        "AAAABQAAAAAAAAAAAAAADE9wZW5Qb3NpdGlvbgAAAAEAAAANb3Blbl9wb3NpdGlvbgAAAAAAAAMAAAAAAAAAC2Fzc2V0X2luZGV4AAAAAAQAAAABAAAAAAAAAAR1c2VyAAAAEwAAAAEAAAAAAAAAC3Bvc2l0aW9uX2lkAAAAAAQAAAAAAAAAAg==",
-        "AAAABQAAAAAAAAAAAAAADUNsb3NlUG9zaXRpb24AAAAAAAABAAAADmNsb3NlX3Bvc2l0aW9uAAAAAAAFAAAAAAAAAAthc3NldF9pbmRleAAAAAAEAAAAAQAAAAAAAAAEdXNlcgAAABMAAAABAAAAAAAAAAtwb3NpdGlvbl9pZAAAAAAEAAAAAAAAAAAAAAAFcHJpY2UAAAAAAAALAAAAAAAAAAAAAAADZmVlAAAAAAsAAAAAAAAAAg==",
-        "AAAABQAAAAAAAAAAAAAADVNldFRha2VQcm9maXQAAAAAAAABAAAAD3NldF90YWtlX3Byb2ZpdAAAAAAEAAAAAAAAAAthc3NldF9pbmRleAAAAAAEAAAAAQAAAAAAAAAEdXNlcgAAABMAAAABAAAAAAAAAAtwb3NpdGlvbl9pZAAAAAAEAAAAAAAAAAAAAAAFcHJpY2UAAAAAAAALAAAAAAAAAAI=",
-        "AAAABQAAAAAAAAAAAAAADkNhbmNlbFBvc2l0aW9uAAAAAAABAAAAD2NhbmNlbF9wb3NpdGlvbgAAAAADAAAAAAAAAAthc3NldF9pbmRleAAAAAAEAAAAAQAAAAAAAAAEdXNlcgAAABMAAAABAAAAAAAAAAtwb3NpdGlvbl9pZAAAAAAEAAAAAAAAAAI=",
-        "AAAABQAAAAAAAAAAAAAADlF1ZXVlU2V0Q29uZmlnAAAAAAABAAAAEHF1ZXVlX3NldF9jb25maWcAAAAEAAAAAAAAAAZvcmFjbGUAAAAAABMAAAAAAAAAAAAAABBjYWxsZXJfdGFrZV9yYXRlAAAACwAAAAAAAAAAAAAADW1heF9wb3NpdGlvbnMAAAAAAAAEAAAAAAAAAAAAAAALdW5sb2NrX3RpbWUAAAAABgAAAAAAAAAC",
-        "AAAABQAAAAAAAAAAAAAADlF1ZXVlU2V0TWFya2V0AAAAAAABAAAAEHF1ZXVlX3NldF9tYXJrZXQAAAACAAAAAAAAAAVhc3NldAAAAAAAB9AAAAAFQXNzZXQAAAAAAAABAAAAAAAAAAZjb25maWcAAAAAB9AAAAAMTWFya2V0Q29uZmlnAAAAAAAAAAI=",
-        "AAAABQAAAAAAAAAAAAAAD0NhbmNlbFNldENvbmZpZwAAAAABAAAAEWNhbmNlbF9zZXRfY29uZmlnAAAAAAAAAAAAAAI=",
-        "AAAABQAAAAAAAAAAAAAAD0NhbmNlbFNldE1hcmtldAAAAAABAAAAEWNhbmNlbF9zZXRfbWFya2V0AAAAAAAAAQAAAAAAAAAFYXNzZXQAAAAAAAfQAAAABUFzc2V0AAAAAAAAAQAAAAI=",
-        "AAAABQAAAAAAAAAAAAAAEURlcG9zaXRDb2xsYXRlcmFsAAAAAAAAAQAAABJkZXBvc2l0X2NvbGxhdGVyYWwAAAAAAAQAAAAAAAAAC2Fzc2V0X2luZGV4AAAAAAQAAAABAAAAAAAAAAR1c2VyAAAAEwAAAAEAAAAAAAAAC3Bvc2l0aW9uX2lkAAAAAAQAAAAAAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAAAAAAAg==",
-        "AAAABQAAAAAAAAAAAAAAEldpdGhkcmF3Q29sbGF0ZXJhbAAAAAAAAQAAABN3aXRoZHJhd19jb2xsYXRlcmFsAAAAAAQAAAAAAAAAC2Fzc2V0X2luZGV4AAAAAAQAAAABAAAAAAAAAAR1c2VyAAAAEwAAAAEAAAAAAAAAC3Bvc2l0aW9uX2lkAAAAAAQAAAAAAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAAAAAAAg==",
-        "AAAAAgAAAAAAAAAAAAAAEVRyYWRpbmdTdG9yYWdlS2V5AAAAAAAADQAAAAAAAAAAAAAABE5hbWUAAAAAAAAAAAAAAAZTdGF0dXMAAAAAAAAAAAAAAAAABVZhdWx0AAAAAAAAAAAAAAAAAAAFVG9rZW4AAAAAAAAAAAAAAAAAAAZDb25maWcAAAAAAAAAAAAAAAAADU1hcmtldENvdW50ZXIAAAAAAAAAAAAAAAAAAA9Qb3NpdGlvbkNvdW50ZXIAAAAAAAAAAAAAAAAMQ29uZmlnVXBkYXRlAAAAAQAAAAAAAAAKTWFya2V0SW5pdAAAAAAAAQAAB9AAAAAFQXNzZXQAAAAAAAABAAAAAAAAAAxNYXJrZXRDb25maWcAAAABAAAABAAAAAEAAAAAAAAACk1hcmtldERhdGEAAAAAAAEAAAAEAAAAAQAAAAAAAAANVXNlclBvc2l0aW9ucwAAAAAAAAEAAAATAAAAAQAAAAAAAAAIUG9zaXRpb24AAAABAAAABA==",
-        "AAAAAQAAAAAAAAAAAAAABk1hcmtldAAAAAAAAwAAAAAAAAALYXNzZXRfaW5kZXgAAAAABAAAAAAAAAAGY29uZmlnAAAAAAfQAAAADE1hcmtldENvbmZpZwAAAAAAAAAEZGF0YQAAB9AAAAAKTWFya2V0RGF0YQAA",
-        "AAAAAAAAAAAAAAAHZXhlY3V0ZQAAAAACAAAAAAAAAAZjYWxsZXIAAAAAABMAAAAAAAAACHJlcXVlc3RzAAAD6gAAB9AAAAAORXhlY3V0ZVJlcXVlc3QAAAAAAAEAAAPqAAAABA==",
-        "AAAAAAAAAAAAAAAHdXBncmFkZQAAAAABAAAAAAAAAAl3YXNtX2hhc2gAAAAAAAPuAAAAIAAAAAA=",
-        "AAAAAAAAAJBSZXR1cm5zIGBTb21lKEFkZHJlc3MpYCBpZiBvd25lcnNoaXAgaXMgc2V0LCBvciBgTm9uZWAgaWYgb3duZXJzaGlwIGhhcwpiZWVuIHJlbm91bmNlZC4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4AAAAJZ2V0X293bmVyAAAAAAAAAAAAAAEAAAPoAAAAEw==",
-        "AAAAAAAAAAAAAAAKaW5pdGlhbGl6ZQAAAAAAAwAAAAAAAAAEbmFtZQAAABAAAAAAAAAABXZhdWx0AAAAAAAAEwAAAAAAAAAGY29uZmlnAAAAAAfQAAAADVRyYWRpbmdDb25maWcAAAAAAAAA",
-        "AAAAAAAAAAAAAAAKc2V0X2NvbmZpZwAAAAAAAAAAAAA=",
-        "AAAAAAAAAAAAAAAKc2V0X21hcmtldAAAAAAAAQAAAAAAAAAFYXNzZXQAAAAAAAfQAAAABUFzc2V0AAAAAAAAAA==",
-        "AAAAAAAAAAAAAAAKc2V0X3N0YXR1cwAAAAAAAQAAAAAAAAAGc3RhdHVzAAAAAAAEAAAAAA==",
-        "AAAAAAAAAAAAAAAMc2V0X3RyaWdnZXJzAAAAAwAAAAAAAAALcG9zaXRpb25faWQAAAAABAAAAAAAAAALdGFrZV9wcm9maXQAAAAACwAAAAAAAAAJc3RvcF9sb3NzAAAAAAAACwAAAAA=",
-        "AAAAAAAAAAAAAAANX19jb25zdHJ1Y3RvcgAAAAAAAAEAAAAAAAAABW93bmVyAAAAAAAAEwAAAAA=",
-        "AAAAAAAAAAAAAAANb3Blbl9wb3NpdGlvbgAAAAAAAAgAAAAAAAAABHVzZXIAAAATAAAAAAAAAAthc3NldF9pbmRleAAAAAAEAAAAAAAAAApjb2xsYXRlcmFsAAAAAAALAAAAAAAAAA1ub3Rpb25hbF9zaXplAAAAAAAACwAAAAAAAAAHaXNfbG9uZwAAAAABAAAAAAAAAAtlbnRyeV9wcmljZQAAAAALAAAAAAAAAAt0YWtlX3Byb2ZpdAAAAAALAAAAAAAAAAlzdG9wX2xvc3MAAAAAAAALAAAAAQAAA+0AAAACAAAABAAAAAs=",
-        "AAAAAAAAAAAAAAAOY2xvc2VfcG9zaXRpb24AAAAAAAEAAAAAAAAAC3Bvc2l0aW9uX2lkAAAAAAQAAAABAAAD7QAAAAIAAAALAAAACw==",
-        "AAAAAAAAATBBY2NlcHRzIGEgcGVuZGluZyBvd25lcnNoaXAgdHJhbnNmZXIuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gdGhlIFNvcm9iYW4gZW52aXJvbm1lbnQuCgojIEVycm9ycwoKKiBbYGNyYXRlOjpyb2xlX3RyYW5zZmVyOjpSb2xlVHJhbnNmZXJFcnJvcjo6Tm9QZW5kaW5nVHJhbnNmZXJgXSAtIElmCnRoZXJlIGlzIG5vIHBlbmRpbmcgdHJhbnNmZXIgdG8gYWNjZXB0LgoKIyBFdmVudHMKCiogdG9waWNzIC0gYFsib3duZXJzaGlwX3RyYW5zZmVyX2NvbXBsZXRlZCJdYAoqIGRhdGEgLSBgW25ld19vd25lcjogQWRkcmVzc11gAAAAEGFjY2VwdF9vd25lcnNoaXAAAAAAAAAAAA==",
-        "AAAAAAAAAAAAAAAQcXVldWVfc2V0X2NvbmZpZwAAAAEAAAAAAAAABmNvbmZpZwAAAAAH0AAAAA1UcmFkaW5nQ29uZmlnAAAAAAAAAA==",
-        "AAAAAAAAAAAAAAAQcXVldWVfc2V0X21hcmtldAAAAAIAAAAAAAAABWFzc2V0AAAAAAAH0AAAAAVBc3NldAAAAAAAAAAAAAAGY29uZmlnAAAAAAfQAAAADE1hcmtldENvbmZpZwAAAAA=",
-        "AAAAAAAAAAAAAAARY2FuY2VsX3NldF9jb25maWcAAAAAAAAAAAAAAA==",
-        "AAAAAAAAAAAAAAARY2FuY2VsX3NldF9tYXJrZXQAAAAAAAABAAAAAAAAAAVhc3NldAAAAAAAB9AAAAAFQXNzZXQAAAAAAAAA",
-        "AAAAAAAAAAAAAAARbW9kaWZ5X2NvbGxhdGVyYWwAAAAAAAACAAAAAAAAAAtwb3NpdGlvbl9pZAAAAAAEAAAAAAAAAA5uZXdfY29sbGF0ZXJhbAAAAAAACwAAAAA=",
-        "AAAAAAAAAYVSZW5vdW5jZXMgb3duZXJzaGlwIG9mIHRoZSBjb250cmFjdC4KClBlcm1hbmVudGx5IHJlbW92ZXMgdGhlIG93bmVyLCBkaXNhYmxpbmcgYWxsIGZ1bmN0aW9ucyBnYXRlZCBieQpgI1tvbmx5X293bmVyXWAuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gdGhlIFNvcm9iYW4gZW52aXJvbm1lbnQuCgojIEVycm9ycwoKKiBbYE93bmFibGVFcnJvcjo6VHJhbnNmZXJJblByb2dyZXNzYF0gLSBJZiB0aGVyZSBpcyBhIHBlbmRpbmcgb3duZXJzaGlwCnRyYW5zZmVyLgoqIFtgT3duYWJsZUVycm9yOjpPd25lck5vdFNldGBdIC0gSWYgdGhlIG93bmVyIGlzIG5vdCBzZXQuCgojIE5vdGVzCgoqIEF1dGhvcml6YXRpb24gZm9yIHRoZSBjdXJyZW50IG93bmVyIGlzIHJlcXVpcmVkLgAAAAAAABJyZW5vdW5jZV9vd25lcnNoaXAAAAAAAAAAAAAA",
-        "AAAAAAAAA45Jbml0aWF0ZXMgYSAyLXN0ZXAgb3duZXJzaGlwIHRyYW5zZmVyIHRvIGEgbmV3IGFkZHJlc3MuCgpSZXF1aXJlcyBhdXRob3JpemF0aW9uIGZyb20gdGhlIGN1cnJlbnQgb3duZXIuIFRoZSBuZXcgb3duZXIgbXVzdCBsYXRlcgpjYWxsIGBhY2NlcHRfb3duZXJzaGlwKClgIHRvIGNvbXBsZXRlIHRoZSB0cmFuc2Zlci4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4KKiBgbmV3X293bmVyYCAtIFRoZSBwcm9wb3NlZCBuZXcgb3duZXIuCiogYGxpdmVfdW50aWxfbGVkZ2VyYCAtIExlZGdlciBudW1iZXIgdW50aWwgd2hpY2ggdGhlIG5ldyBvd25lciBjYW4KYWNjZXB0LiBBIHZhbHVlIG9mIGAwYCBjYW5jZWxzIGFueSBwZW5kaW5nIHRyYW5zZmVyLgoKIyBFcnJvcnMKCiogW2BPd25hYmxlRXJyb3I6Ok93bmVyTm90U2V0YF0gLSBJZiB0aGUgb3duZXIgaXMgbm90IHNldC4KKiBbYGNyYXRlOjpyb2xlX3RyYW5zZmVyOjpSb2xlVHJhbnNmZXJFcnJvcjo6Tm9QZW5kaW5nVHJhbnNmZXJgXSAtIElmCnRyeWluZyB0byBjYW5jZWwgYSB0cmFuc2ZlciB0aGF0IGRvZXNuJ3QgZXhpc3QuCiogW2BjcmF0ZTo6cm9sZV90cmFuc2Zlcjo6Um9sZVRyYW5zZmVyRXJyb3I6OkludmFsaWRMaXZlVW50aWxMZWRnZXJgXSAtCklmIHRoZSBzcGVjaWZpZWQgbGVkZ2VyIGlzIGluIHRoZSBwYXN0LgoqIFtgY3JhdGU6OnJvbGVfdHJhbnNmZXI6OlJvbGVUcmFuc2ZlckVycm9yOjpJbnZhbGlkUGVuZGluZ0FjY291bnRgXSAtCklmIHRoZSBzcGVjaWZpZWQgcGVuZGluZyBhY2NvdW50IGlzIG5vdCB0aGUgc2FtZSBhcyB0aGUgcHJvdmlkZWQgYG5ld2AKYWRkcmVzcy4KCiMgTm90ZXMKCiogQXV0aG9yaXphdGlvbiBmb3IgdGhlIGN1cnJlbnQgb3duZXIgaXMgcmVxdWlyZWQuAAAAAAASdHJhbnNmZXJfb3duZXJzaGlwAAAAAAACAAAAAAAAAAluZXdfb3duZXIAAAAAAAATAAAAAAAAABFsaXZlX3VudGlsX2xlZGdlcgAAAAAAAAQAAAAA",
-        "AAAAAgAAAApBc3NldCB0eXBlAAAAAAAAAAAABUFzc2V0AAAAAAAAAgAAAAEAAAAAAAAAB1N0ZWxsYXIAAAAAAQAAABMAAAABAAAAAAAAAAVPdGhlcgAAAAAAAAEAAAAR",
-        "AAAAAQAAAC9QcmljZSBkYXRhIGZvciBhbiBhc3NldCBhdCBhIHNwZWNpZmljIHRpbWVzdGFtcAAAAAAAAAAACVByaWNlRGF0YQAAAAAAAAIAAAAAAAAABXByaWNlAAAAAAAACwAAAAAAAAAJdGltZXN0YW1wAAAAAAAABg==",
-        "AAAABAAAAAAAAAAAAAAAEVJvbGVUcmFuc2ZlckVycm9yAAAAAAAAAwAAAAAAAAARTm9QZW5kaW5nVHJhbnNmZXIAAAAAAAiYAAAAAAAAABZJbnZhbGlkTGl2ZVVudGlsTGVkZ2VyAAAAAAiZAAAAAAAAABVJbnZhbGlkUGVuZGluZ0FjY291bnQAAAAAAAia",
-        "AAAABQAAACVFdmVudCBlbWl0dGVkIHdoZW4gYSByb2xlIGlzIGdyYW50ZWQuAAAAAAAAAAAAAAtSb2xlR3JhbnRlZAAAAAABAAAADHJvbGVfZ3JhbnRlZAAAAAMAAAAAAAAABHJvbGUAAAARAAAAAQAAAAAAAAAHYWNjb3VudAAAAAATAAAAAQAAAAAAAAAGY2FsbGVyAAAAAAATAAAAAAAAAAI=",
-        "AAAABQAAACVFdmVudCBlbWl0dGVkIHdoZW4gYSByb2xlIGlzIHJldm9rZWQuAAAAAAAAAAAAAAtSb2xlUmV2b2tlZAAAAAABAAAADHJvbGVfcmV2b2tlZAAAAAMAAAAAAAAABHJvbGUAAAARAAAAAQAAAAAAAAAHYWNjb3VudAAAAAATAAAAAQAAAAAAAAAGY2FsbGVyAAAAAAATAAAAAAAAAAI=",
-        "AAAABQAAAC9FdmVudCBlbWl0dGVkIHdoZW4gdGhlIGFkbWluIHJvbGUgaXMgcmVub3VuY2VkLgAAAAAAAAAADkFkbWluUmVub3VuY2VkAAAAAAABAAAAD2FkbWluX3Jlbm91bmNlZAAAAAABAAAAAAAAAAVhZG1pbgAAAAAAABMAAAABAAAAAg==",
-        "AAAABQAAACtFdmVudCBlbWl0dGVkIHdoZW4gYSByb2xlIGFkbWluIGlzIGNoYW5nZWQuAAAAAAAAAAAQUm9sZUFkbWluQ2hhbmdlZAAAAAEAAAAScm9sZV9hZG1pbl9jaGFuZ2VkAAAAAAADAAAAAAAAAARyb2xlAAAAEQAAAAEAAAAAAAAAE3ByZXZpb3VzX2FkbWluX3JvbGUAAAAAEQAAAAAAAAAAAAAADm5ld19hZG1pbl9yb2xlAAAAAAARAAAAAAAAAAI=",
-        "AAAABAAAAAAAAAAAAAAAEkFjY2Vzc0NvbnRyb2xFcnJvcgAAAAAACwAAAAAAAAAMVW5hdXRob3JpemVkAAAH0AAAAAAAAAALQWRtaW5Ob3RTZXQAAAAH0QAAAAAAAAAQSW5kZXhPdXRPZkJvdW5kcwAAB9IAAAAAAAAAEUFkbWluUm9sZU5vdEZvdW5kAAAAAAAH0wAAAAAAAAASUm9sZUNvdW50SXNOb3RaZXJvAAAAAAfUAAAAAAAAAAxSb2xlTm90Rm91bmQAAAfVAAAAAAAAAA9BZG1pbkFscmVhZHlTZXQAAAAH1gAAAAAAAAALUm9sZU5vdEhlbGQAAAAH1wAAAAAAAAALUm9sZUlzRW1wdHkAAAAH2AAAAAAAAAASVHJhbnNmZXJJblByb2dyZXNzAAAAAAfZAAAAAAAAABBNYXhSb2xlc0V4Y2VlZGVkAAAH2g==",
-        "AAAABQAAADJFdmVudCBlbWl0dGVkIHdoZW4gYW4gYWRtaW4gdHJhbnNmZXIgaXMgY29tcGxldGVkLgAAAAAAAAAAABZBZG1pblRyYW5zZmVyQ29tcGxldGVkAAAAAAABAAAAGGFkbWluX3RyYW5zZmVyX2NvbXBsZXRlZAAAAAIAAAAAAAAACW5ld19hZG1pbgAAAAAAABMAAAABAAAAAAAAAA5wcmV2aW91c19hZG1pbgAAAAAAEwAAAAAAAAAC",
-        "AAAABQAAADJFdmVudCBlbWl0dGVkIHdoZW4gYW4gYWRtaW4gdHJhbnNmZXIgaXMgaW5pdGlhdGVkLgAAAAAAAAAAABZBZG1pblRyYW5zZmVySW5pdGlhdGVkAAAAAAABAAAAGGFkbWluX3RyYW5zZmVyX2luaXRpYXRlZAAAAAMAAAAAAAAADWN1cnJlbnRfYWRtaW4AAAAAAAATAAAAAQAAAAAAAAAJbmV3X2FkbWluAAAAAAAAEwAAAAAAAAAAAAAAEWxpdmVfdW50aWxfbGVkZ2VyAAAAAAAABAAAAAAAAAAC",
-        "AAAAAQAAADFTdG9yYWdlIGtleSBmb3IgZW51bWVyYXRpb24gb2YgYWNjb3VudHMgcGVyIHJvbGUuAAAAAAAAAAAAAA5Sb2xlQWNjb3VudEtleQAAAAAAAgAAAAAAAAAFaW5kZXgAAAAAAAAEAAAAAAAAAARyb2xlAAAAEQ==",
-        "AAAAAgAAADxTdG9yYWdlIGtleXMgZm9yIHRoZSBkYXRhIGFzc29jaWF0ZWQgd2l0aCB0aGUgYWNjZXNzIGNvbnRyb2wAAAAAAAAAF0FjY2Vzc0NvbnRyb2xTdG9yYWdlS2V5AAAAAAcAAAAAAAAAAAAAAA1FeGlzdGluZ1JvbGVzAAAAAAAAAQAAAAAAAAAMUm9sZUFjY291bnRzAAAAAQAAB9AAAAAOUm9sZUFjY291bnRLZXkAAAAAAAEAAAAAAAAAB0hhc1JvbGUAAAAAAgAAABMAAAARAAAAAQAAAAAAAAARUm9sZUFjY291bnRzQ291bnQAAAAAAAABAAAAEQAAAAEAAAAAAAAACVJvbGVBZG1pbgAAAAAAAAEAAAARAAAAAAAAAAAAAAAFQWRtaW4AAAAAAAAAAAAAAAAAAAxQZW5kaW5nQWRtaW4=",
-        "AAAABAAAAAAAAAAAAAAADE93bmFibGVFcnJvcgAAAAMAAAAAAAAAC093bmVyTm90U2V0AAAACDQAAAAAAAAAElRyYW5zZmVySW5Qcm9ncmVzcwAAAAAINQAAAAAAAAAPT3duZXJBbHJlYWR5U2V0AAAACDY=",
-        "AAAABQAAADZFdmVudCBlbWl0dGVkIHdoZW4gYW4gb3duZXJzaGlwIHRyYW5zZmVyIGlzIGluaXRpYXRlZC4AAAAAAAAAAAART3duZXJzaGlwVHJhbnNmZXIAAAAAAAABAAAAEm93bmVyc2hpcF90cmFuc2ZlcgAAAAAAAwAAAAAAAAAJb2xkX293bmVyAAAAAAAAEwAAAAAAAAAAAAAACW5ld19vd25lcgAAAAAAABMAAAAAAAAAAAAAABFsaXZlX3VudGlsX2xlZGdlcgAAAAAAAAQAAAAAAAAAAg==",
-        "AAAABQAAACpFdmVudCBlbWl0dGVkIHdoZW4gb3duZXJzaGlwIGlzIHJlbm91bmNlZC4AAAAAAAAAAAAST3duZXJzaGlwUmVub3VuY2VkAAAAAAABAAAAE293bmVyc2hpcF9yZW5vdW5jZWQAAAAAAQAAAAAAAAAJb2xkX293bmVyAAAAAAAAEwAAAAAAAAAC",
-        "AAAABQAAADZFdmVudCBlbWl0dGVkIHdoZW4gYW4gb3duZXJzaGlwIHRyYW5zZmVyIGlzIGNvbXBsZXRlZC4AAAAAAAAAAAAaT3duZXJzaGlwVHJhbnNmZXJDb21wbGV0ZWQAAAAAAAEAAAAcb3duZXJzaGlwX3RyYW5zZmVyX2NvbXBsZXRlZAAAAAEAAAAAAAAACW5ld19vd25lcgAAAAAAABMAAAAAAAAAAg==",
-        "AAAAAgAAACNTdG9yYWdlIGtleXMgZm9yIGBPd25hYmxlYCB1dGlsaXR5LgAAAAAAAAAAEU93bmFibGVTdG9yYWdlS2V5AAAAAAAAAgAAAAAAAAAAAAAABU93bmVyAAAAAAAAAAAAAAAAAAAMUGVuZGluZ093bmVy"
-    ]);
-
     static readonly parsers = {
         // Admin methods (void)
-        initialize: () => {},
-        queueSetConfig: () => {},
-        cancelSetConfig: () => {},
         setConfig: () => {},
-        queueSetMarket: () => {},
-        cancelSetMarket: () => {},
         setMarket: () => {},
+        delMarket: () => {},
         setStatus: () => {},
+        updateStatus: () => {},
         upgrade: () => {},
+        applyFunding: () => {},
         // Ownable methods
         getOwner: (result: string): string | undefined =>
-            TradingContract.spec.funcResToNative('get_owner', result),
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         transferOwnership: () => {},
         acceptOwnership: () => {},
         renounceOwnership: () => {},
         // Trading methods
-        openPosition: (result: string): [u32, i128] =>
-            TradingContract.spec.funcResToNative('open_position', result),
-        closePosition: (result: string): [i128, i128] =>
-            TradingContract.spec.funcResToNative('close_position', result),
+        placeLimit: (result: string): u32 =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        openMarket: (result: string): u32 =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        cancelLimit: (result: string): i128 =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        closePosition: (result: string): i128 =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         modifyCollateral: () => {},
         setTriggers: () => {},
-        execute: (result: string): u32[] =>
-            TradingContract.spec.funcResToNative('execute', result),
+        execute: () => {},
         // View / Getter methods
         getPosition: (result: string) =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         getUserPositions: (result: string): u32[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        getMarket: (result: string) =>
+        getMarketConfig: (result: string) =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getMarketData: (result: string) =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getMarkets: (result: string): u32[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         getConfig: (result: string) =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
@@ -208,21 +151,22 @@ export class TradingContract extends Contract {
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         getVault: (result: string): string =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getPriceVerifier: (result: string): string =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         getToken: (result: string): string =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        getTreasury: (result: string): string =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
     };
 
     /**
      * Deploy a new instance of the Trading contract
-     * @param deployer - Address of the deployer (becomes owner)
-     * @param wasmHash - Hash of the Trading WASM contract code
-     * @param salt - Optional salt for deterministic address
-     * @param format - Format of wasmHash if string ('hex' or 'base64')
-     * @returns Base64-encoded XDR operation
+     * Constructor: __constructor(owner, token, vault, price_verifier, treasury, config)
      */
     static deploy(
         deployer: string,
         wasmHash: Buffer | string,
+        args: DeployArgs,
         salt?: Buffer,
         format: 'hex' | 'base64' = 'hex'
     ): string {
@@ -232,9 +176,14 @@ export class TradingContract extends Contract {
                 ? Buffer.from(wasmHash, format)
                 : wasmHash,
             salt,
-            constructorArgs: this.spec.funcArgsToScVals('__constructor', {
-                owner: deployer,
-            }),
+            constructorArgs: [
+                Address.fromString(args.owner).toScVal(),
+                Address.fromString(args.token).toScVal(),
+                Address.fromString(args.vault).toScVal(),
+                Address.fromString(args.price_verifier).toScVal(),
+                Address.fromString(args.treasury).toScVal(),
+                TradingContract.tradingConfigToScVal(args.config),
+            ],
         }).toXDR('base64');
     }
 
@@ -243,91 +192,43 @@ export class TradingContract extends Contract {
     // ============================================================
 
     /**
-     * Initialize the trading contract (owner only)
-     * @param args - Initialize arguments (name, vault, config)
-     * @returns XDR operation string
+     * Set the trading configuration (owner only)
      */
-    initialize(args: InitializeArgs): string {
+    setConfig(config: TradingConfigArgs): string {
         return this.call(
-            'initialize',
-            nativeToScVal(args.name, { type: 'string' }),
-            Address.fromString(args.vault).toScVal(),
-            this.tradingConfigToScVal(args.config),
+            'set_config',
+            TradingContract.tradingConfigToScVal(config),
         ).toXDR('base64');
     }
 
     /**
-     * Queue a configuration update (owner only)
-     * @param config - New trading configuration
-     * @returns XDR operation string
+     * Add or update a market (owner only)
+     * @param feedId - Pyth Lazer feed ID
+     * @param config - Market configuration
      */
-    queueSetConfig(config: TradingConfigArgs): string {
-        return this.call(
-            'queue_set_config',
-            this.tradingConfigToScVal(config),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Cancel a queued configuration update (owner only)
-     * @returns XDR operation string
-     */
-    cancelSetConfig(): string {
-        return this.call('cancel_set_config').toXDR('base64');
-    }
-
-    /**
-     * Execute queued configuration update
-     * @returns XDR operation string
-     */
-    setConfig(): string {
-        return this.call('set_config').toXDR('base64');
-    }
-
-    /**
-     * Queue setting data for a market (owner only)
-     * @param config - Market configuration (includes asset)
-     * @returns XDR operation string
-     */
-    queueSetMarket(config: MarketConfigArgs): string {
-        return this.call(
-            'queue_set_market',
-            this.marketConfigToScVal(config),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Cancel a queued market initialization (owner only)
-     * @param asset - The asset to cancel
-     * @returns XDR operation string
-     */
-    cancelSetMarket(asset: Asset): string {
-        return this.call(
-            'cancel_set_market',
-            assetToScVal(asset),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Execute queued market setup
-     * @param asset - The asset to setup
-     * @returns XDR operation string
-     */
-    setMarket(asset: Asset): string {
+    setMarket(feedId: u32, config: MarketConfigArgs): string {
         return this.call(
             'set_market',
-            assetToScVal(asset),
+            xdr.ScVal.scvU32(feedId),
+            TradingContract.marketConfigToScVal(config),
         ).toXDR('base64');
     }
 
     /**
-     * Set the trading contract status (owner only)
-     * @param status - ContractStatus enum value:
-     *   - Active (0): Full operation - all trading actions allowed
-     *   - OnIce (1): Blocks new positions, allows closing/modifying
-     *   - Frozen (2): Emergency lockdown - no trading actions
-     *   - Setup (99): Initial setup mode - no trading, immediate config changes
-     * @returns XDR operation string
+     * Remove a market (owner only)
+     * Fails if any positions remain (notional != 0).
+     * @param feedId - Pyth Lazer feed ID
+     */
+    delMarket(feedId: u32): string {
+        return this.call(
+            'del_market',
+            xdr.ScVal.scvU32(feedId),
+        ).toXDR('base64');
+    }
+
+    /**
+     * Set the contract status (owner only)
+     * Active(0), AdminOnIce(2), Frozen(3). Use updateStatus() for OnIce.
      */
     setStatus(status: u32): string {
         return this.call(
@@ -338,14 +239,13 @@ export class TradingContract extends Contract {
 
     /**
      * Upgrade contract WASM (owner only)
-     * @param wasmHash - New WASM hash (32 bytes)
-     * @returns XDR operation string
      */
-    upgrade(wasmHash: Buffer | Uint8Array): string {
+    upgrade(wasmHash: Buffer | Uint8Array, operator: string): string {
         const hashBuffer = wasmHash instanceof Buffer ? wasmHash : Buffer.from(wasmHash);
         return this.call(
             'upgrade',
             xdr.ScVal.scvBytes(hashBuffer),
+            Address.fromString(operator).toScVal(),
         ).toXDR('base64');
     }
 
@@ -353,20 +253,10 @@ export class TradingContract extends Contract {
     // Ownable Methods
     // ============================================================
 
-    /**
-     * Get the contract owner
-     * @returns XDR operation string
-     */
     getOwner(): string {
         return this.call('get_owner').toXDR('base64');
     }
 
-    /**
-     * Initiate a 2-step ownership transfer (owner only)
-     * @param newOwner - Proposed new owner address
-     * @param liveUntilLedger - Ledger number until which the new owner can accept (0 to cancel)
-     * @returns XDR operation string
-     */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
         return this.call(
@@ -376,18 +266,10 @@ export class TradingContract extends Contract {
         ).toXDR('base64');
     }
 
-    /**
-     * Accept a pending ownership transfer (new owner only)
-     * @returns XDR operation string
-     */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
 
-    /**
-     * Renounce ownership (owner only)
-     * @returns XDR operation string
-     */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');
     }
@@ -397,19 +279,14 @@ export class TradingContract extends Contract {
     // ============================================================
 
     /**
-     * Open a new position
-     * @param args - Position opening arguments
-     * @returns XDR operation string
+     * Place a pending limit order
+     * Returns position_id
      */
-    openPosition(args: OpenPositionArgs): string {
-        const userAddress = typeof args.user === 'string'
-            ? Address.fromString(args.user)
-            : args.user;
-
+    placeLimit(args: PlaceLimitArgs): string {
         return this.call(
-            'open_position',
-            userAddress.toScVal(),
-            xdr.ScVal.scvU32(args.asset_index),
+            'place_limit',
+            Address.fromString(args.user).toScVal(),
+            xdr.ScVal.scvU32(args.feed_id),
             nativeToScVal(args.collateral, { type: 'i128' }),
             nativeToScVal(args.notional_size, { type: 'i128' }),
             xdr.ScVal.scvBool(args.is_long),
@@ -420,34 +297,62 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Close a position (user auth required)
-     * @param positionId - Position ID to close
-     * @returns XDR operation string
+     * Open a market order (filled immediately at oracle price)
+     * Returns position_id
      */
-    closePosition(positionId: u32): string {
+    openMarket(args: OpenMarketArgs): string {
+        const priceBuffer = args.price instanceof Buffer ? args.price : Buffer.from(args.price);
         return this.call(
-            'close_position',
+            'open_market',
+            Address.fromString(args.user).toScVal(),
+            xdr.ScVal.scvU32(args.feed_id),
+            nativeToScVal(args.collateral, { type: 'i128' }),
+            nativeToScVal(args.notional_size, { type: 'i128' }),
+            xdr.ScVal.scvBool(args.is_long),
+            nativeToScVal(args.take_profit, { type: 'i128' }),
+            nativeToScVal(args.stop_loss, { type: 'i128' }),
+            xdr.ScVal.scvBytes(priceBuffer),
+        ).toXDR('base64');
+    }
+
+    /**
+     * Cancel a pending limit order (refunds collateral + fees)
+     */
+    cancelLimit(positionId: u32): string {
+        return this.call(
+            'cancel_limit',
             xdr.ScVal.scvU32(positionId),
         ).toXDR('base64');
     }
 
     /**
-     * Modify collateral on an open position
-     * @param args - Modify collateral arguments
-     * @returns XDR operation string
+     * Close a filled position
+     * Returns pnl (i128)
+     */
+    closePosition(positionId: u32, price: Buffer | Uint8Array): string {
+        const priceBuffer = price instanceof Buffer ? price : Buffer.from(price);
+        return this.call(
+            'close_position',
+            xdr.ScVal.scvU32(positionId),
+            xdr.ScVal.scvBytes(priceBuffer),
+        ).toXDR('base64');
+    }
+
+    /**
+     * Modify collateral on a position
      */
     modifyCollateral(args: ModifyCollateralArgs): string {
+        const priceBuffer = args.price instanceof Buffer ? args.price : Buffer.from(args.price);
         return this.call(
             'modify_collateral',
             xdr.ScVal.scvU32(args.position_id),
             nativeToScVal(args.new_collateral, { type: 'i128' }),
+            xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
     }
 
     /**
      * Set take profit and stop loss triggers
-     * @param args - Set triggers arguments
-     * @returns XDR operation string
      */
     setTriggers(args: SetTriggersArgs): string {
         return this.call(
@@ -460,11 +365,9 @@ export class TradingContract extends Contract {
 
     /**
      * Execute keeper actions (Fill, StopLoss, TakeProfit, Liquidate)
-     * @param caller - Keeper address receiving fees
-     * @param requests - Array of execute requests
-     * @returns XDR operation string
+     * Returns array of result codes (0 = success)
      */
-    execute(caller: Address | string, requests: ExecuteRequest[]): string {
+    execute(caller: Address | string, requests: ExecuteRequest[], price: Buffer | Uint8Array): string {
         const callerAddress = typeof caller === 'string'
             ? Address.fromString(caller)
             : caller;
@@ -473,22 +376,42 @@ export class TradingContract extends Contract {
             requests.map(req => this.executeRequestToScVal(req))
         );
 
+        const priceBuffer = price instanceof Buffer ? price : Buffer.from(price);
+
         return this.call(
             'execute',
             callerAddress.toScVal(),
             requestsScVal,
+            xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
+    }
+
+    // ============================================================
+    // Permissionless Methods
+    // ============================================================
+
+    /**
+     * Permissionless status update based on price data (circuit breaker / ADL)
+     */
+    updateStatus(price: Buffer | Uint8Array): string {
+        const priceBuffer = price instanceof Buffer ? price : Buffer.from(price);
+        return this.call(
+            'update_status',
+            xdr.ScVal.scvBytes(priceBuffer),
+        ).toXDR('base64');
+    }
+
+    /**
+     * Apply funding across all markets (permissionless, once per hour)
+     */
+    applyFunding(): string {
+        return this.call('apply_funding').toXDR('base64');
     }
 
     // ============================================================
     // View / Getter Methods
     // ============================================================
 
-    /**
-     * Get a position by ID
-     * @param positionId - The unique identifier of the position
-     * @returns XDR operation string
-     */
     getPosition(positionId: u32): string {
         return this.call(
             'get_position',
@@ -496,11 +419,6 @@ export class TradingContract extends Contract {
         ).toXDR('base64');
     }
 
-    /**
-     * Get all position IDs for a user
-     * @param user - The address of the user
-     * @returns XDR operation string
-     */
     getUserPositions(user: Address | string): string {
         const addr = typeof user === 'string' ? Address.fromString(user) : user;
         return this.call(
@@ -509,144 +427,127 @@ export class TradingContract extends Contract {
         ).toXDR('base64');
     }
 
-    /**
-     * Get market configuration and data by asset index
-     * @param assetIndex - The index of the market
-     * @returns XDR operation string
-     */
-    getMarket(assetIndex: u32): string {
+    getMarketConfig(feedId: u32): string {
         return this.call(
-            'get_market',
-            xdr.ScVal.scvU32(assetIndex),
+            'get_market_config',
+            xdr.ScVal.scvU32(feedId),
         ).toXDR('base64');
     }
 
-    /**
-     * Get the trading configuration
-     * @returns XDR operation string
-     */
+    getMarketData(feedId: u32): string {
+        return this.call(
+            'get_market_data',
+            xdr.ScVal.scvU32(feedId),
+        ).toXDR('base64');
+    }
+
+    getMarkets(): string {
+        return this.call('get_markets').toXDR('base64');
+    }
+
     getConfig(): string {
         return this.call('get_config').toXDR('base64');
     }
 
-    /**
-     * Get the contract status
-     * @returns XDR operation string
-     */
     getStatus(): string {
         return this.call('get_status').toXDR('base64');
     }
 
-    /**
-     * Get the vault address
-     * @returns XDR operation string
-     */
     getVault(): string {
         return this.call('get_vault').toXDR('base64');
     }
 
-    /**
-     * Get the collateral token address
-     * @returns XDR operation string
-     */
+    getPriceVerifier(): string {
+        return this.call('get_price_verifier').toXDR('base64');
+    }
+
     getToken(): string {
         return this.call('get_token').toXDR('base64');
+    }
+
+    getTreasury(): string {
+        return this.call('get_treasury').toXDR('base64');
     }
 
     // ============================================================
     // Internal Helpers
     // ============================================================
 
-    /**
-     * Convert TradingConfigArgs to ScVal
-     * @internal
-     */
-    private tradingConfigToScVal(config: TradingConfigArgs): xdr.ScVal {
+    /** @internal */
+    static tradingConfigToScVal(config: TradingConfigArgs): xdr.ScVal {
+        // Fields must be in alphabetical order for Soroban struct serialization
         return xdr.ScVal.scvMap([
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('caller_take_rate'),
-                val: nativeToScVal(config.caller_take_rate, { type: 'i128' }),
+                key: xdr.ScVal.scvSymbol('caller_rate'),
+                val: nativeToScVal(config.caller_rate, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('max_positions'),
-                val: xdr.ScVal.scvU32(config.max_positions),
+                key: xdr.ScVal.scvSymbol('fee_dom'),
+                val: nativeToScVal(config.fee_dom, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('max_price_age'),
-                val: xdr.ScVal.scvU32(config.max_price_age),
+                key: xdr.ScVal.scvSymbol('fee_non_dom'),
+                val: nativeToScVal(config.fee_non_dom, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('max_utilization'),
-                val: nativeToScVal(config.max_utilization, { type: 'i128' }),
+                key: xdr.ScVal.scvSymbol('max_notional'),
+                val: nativeToScVal(config.max_notional, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('min_open_time'),
-                val: nativeToScVal(config.min_open_time, { type: 'u64' }),
+                key: xdr.ScVal.scvSymbol('max_util'),
+                val: nativeToScVal(config.max_util, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('oracle'),
-                val: Address.fromString(config.oracle).toScVal(),
+                key: xdr.ScVal.scvSymbol('min_notional'),
+                val: nativeToScVal(config.min_notional, { type: 'i128' }),
+            }),
+            new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol('r_base'),
+                val: nativeToScVal(config.r_base, { type: 'i128' }),
+            }),
+            new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol('r_funding'),
+                val: nativeToScVal(config.r_funding, { type: 'i128' }),
+            }),
+            new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol('r_var'),
+                val: nativeToScVal(config.r_var, { type: 'i128' }),
             }),
         ]);
     }
 
-    /**
-     * Convert MarketConfigArgs to ScVal
-     * @internal
-     */
-    private marketConfigToScVal(config: MarketConfigArgs): xdr.ScVal {
+    /** @internal */
+    static marketConfigToScVal(config: MarketConfigArgs): xdr.ScVal {
+        // Fields must be in alphabetical order for Soroban struct serialization
         return xdr.ScVal.scvMap([
-            new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('asset'),
-                val: assetToScVal(config.asset),
-            }),
-            new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('base_fee'),
-                val: nativeToScVal(config.base_fee, { type: 'i128' }),
-            }),
-            new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('base_hourly_rate'),
-                val: nativeToScVal(config.base_hourly_rate, { type: 'i128' }),
-            }),
             new xdr.ScMapEntry({
                 key: xdr.ScVal.scvSymbol('enabled'),
                 val: xdr.ScVal.scvBool(config.enabled),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('init_margin'),
-                val: nativeToScVal(config.init_margin, { type: 'i128' }),
+                key: xdr.ScVal.scvSymbol('impact'),
+                val: nativeToScVal(config.impact, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('maintenance_margin'),
-                val: nativeToScVal(config.maintenance_margin, { type: 'i128' }),
+                key: xdr.ScVal.scvSymbol('liq_fee'),
+                val: nativeToScVal(config.liq_fee, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('max_collateral'),
-                val: nativeToScVal(config.max_collateral, { type: 'i128' }),
+                key: xdr.ScVal.scvSymbol('margin'),
+                val: nativeToScVal(config.margin, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('max_payout'),
-                val: nativeToScVal(config.max_payout, { type: 'i128' }),
+                key: xdr.ScVal.scvSymbol('max_util'),
+                val: nativeToScVal(config.max_util, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('min_collateral'),
-                val: nativeToScVal(config.min_collateral, { type: 'i128' }),
-            }),
-            new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('price_impact_scalar'),
-                val: nativeToScVal(config.price_impact_scalar, { type: 'i128' }),
-            }),
-            new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('ratio_cap'),
-                val: nativeToScVal(config.ratio_cap, { type: 'i128' }),
+                key: xdr.ScVal.scvSymbol('r_borrow'),
+                val: nativeToScVal(config.r_borrow, { type: 'i128' }),
             }),
         ]);
     }
 
-    /**
-     * Convert ExecuteRequest to ScVal
-     * @internal
-     */
+    /** @internal */
     private executeRequestToScVal(request: ExecuteRequest): xdr.ScVal {
         return xdr.ScVal.scvMap([
             new xdr.ScMapEntry({
