@@ -1,6 +1,6 @@
 {
     "name": "@zenith-protocols/zenex-sdk",
-    "version": "1.6.0",
+    "version": "1.6.1",
     "description": "Javascript SDK for Zenex",
     "author": "Robeart",
     "keywords": [
@@ -59,7 +59,7 @@
         "tsx": "^4.21.0",
         "typescript": "^5.1.6"
     },
-    "dependencies": {
-        "@stellar/stellar-sdk": "14.4.3"
+    "peerDependencies": {
+        "@stellar/stellar-sdk": ">=14.2.0"
     }
 }
