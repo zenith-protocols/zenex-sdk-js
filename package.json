@@ -20,7 +20,8 @@
         "build:esm": "npx tsc -p ./scripts/tsconfig.esm.json",
         "build:types": "npx tsc -p ./scripts/tsconfig.types.json",
         "build:pkg": "node -e \"fs=require('fs');fs.writeFileSync('dist/esm/package.json','{\\\"type\\\":\\\"module\\\"}');fs.writeFileSync('dist/cjs/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
-        "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types && npm run build:pkg"
+        "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types && npm run build:pkg",
+        "prepare": "npm run build"
     },
     "exports": {
         ".": {
