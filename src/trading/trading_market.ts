@@ -208,7 +208,7 @@ export class Market implements MarketConfig, MarketData {
                     config.maxUtil = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'r_var_market':
-                    config.rVarMarket = toFloat(scValToBigInt(value), 7);
+                    config.rVarMarket = toFloat(scValToBigInt(value), 18);
                     break;
                 case 'margin':
                     config.margin = toFloat(scValToBigInt(value), 7);
@@ -349,7 +349,7 @@ export class Market implements MarketConfig, MarketData {
 
         const util = this.getUtilization(vaultBalance);
         const rBase = Number(config.rBase) / 1e18;
-        const rVar = config.rVar;  // already descaled (SCALAR_7 → number)
+        const rVar = config.rVar;  // already descaled (SCALAR_18 → number)
         const rVarMarket = this.rVarMarket;
 
         // util^5

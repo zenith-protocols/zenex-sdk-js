@@ -206,7 +206,7 @@ export class TradingConfig implements TradingInstanceData {
             feeNonDom: toFloat(feeNonDom, 7),
             maxUtil: toFloat(maxUtil, 7),
             rFunding, rBase,
-            rVar: toFloat(rVar, 7),
+            rVar: toFloat(rVar, 18),
         };
     }
 
