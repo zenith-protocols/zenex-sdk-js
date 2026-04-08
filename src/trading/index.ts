@@ -7,11 +7,9 @@ export { TradingConfig } from './trading_config.js';
 // Contract types & enums
 export {
     ContractStatus,
-    ExecuteRequestType,
 } from './trading_contract.js';
 
 export type {
-    ExecuteRequest,
     PlaceLimitArgs,
     OpenMarketArgs,
     SetTriggersArgs,
@@ -65,9 +63,9 @@ export type {
     TradingLiquidationEvent,
     TradingTakeProfitEvent,
     TradingStopLossEvent,
-    TradingCancelLimitEvent,
     TradingModifyCollateralEvent,
     TradingSetTriggersEvent,
+    TradingRefundPositionEvent,
     TradingApplyFundingEvent,
     TradingADLTriggeredEvent,
     TradingADLMarketEvent,

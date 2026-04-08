@@ -232,6 +232,8 @@ export class VaultContract extends Contract {
             VaultContract.spec.funcResToNative('lock_time', result),
         lockDuration: (result: string): u64 =>
             VaultContract.spec.funcResToNative('lock_duration', result),
+        availableShares: (result: string): i128 =>
+            VaultContract.spec.funcResToNative('available_shares', result),
     };
 
     /**
@@ -658,6 +660,16 @@ export class VaultContract extends Contract {
      * @param amount - Amount to withdraw
      * @returns XDR operation string
      */
+    /**
+     * Get the number of shares available (unlocked) for a user
+     * @param user - User address
+     * @returns XDR operation string
+     */
+    availableShares(user: Address | string): string {
+        const addr = typeof user === 'string' ? Address.fromString(user) : user;
+        return this.call('available_shares', addr.toScVal()).toXDR('base64');
+    }
+
     strategyWithdraw(strategy: Address | string, amount: i128): string {
         const addr = typeof strategy === 'string' ? Address.fromString(strategy) : strategy;
         return this.call(

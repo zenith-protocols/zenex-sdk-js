@@ -69,51 +69,55 @@ export enum ContractErrorType {
     UserNotAllowed = 113,
     UserBlocked = 114,
 
-    // Trading Errors - matches Rust TradingError
-    // Access
-    Unauthorized = 1,
-    // Configuration
-    InvalidConfig = 702,
-    // Market
-    MarketNotFound = 710,
-    MarketDisabled = 712,
-    // Price
-    InvalidPrice = 720,
-    // Position
-    PositionNotFound = 730,
-    PositionNotPending = 733,
-    MaxPositionsReached = 734,
-    NegativeValueNotAllowed = 735,
-    NotionalBelowMinimum = 736,
-    NotionalAboveMaximum = 737,
-    LeverageAboveMaximum = 739,
-    CollateralUnchanged = 740,
-    WithdrawalBreaksMargin = 741,
-    InvalidTakeProfitPrice = 742,
-    InvalidStopLossPrice = 743,
-    TakeProfitNotTriggered = 744,
-    StopLossNotTriggered = 745,
-    PositionNotLiquidatable = 746,
-    LimitOrderNotFillable = 747,
-    PositionTooNew = 748,
-    // Action/Request
-    ActionNotAllowedForStatus = 750,
-    InvalidRequestType = 751,
-    // Status
-    InvalidStatus = 760,
-    ContractOnIce = 761,
-    ContractFrozen = 762,
-    // Market limits
-    MaxMarketsReached = 770,
-    MarketHasOpenPositions = 771,
-    // ADL / Circuit breaker
-    ThresholdNotMet = 780,
-    // Funding
-    FundingTooEarly = 790,
-    // Utilization
-    UtilizationExceeded = 791,
+    // Trading Errors (700-759) - matches Rust TradingError
+    // Config & Market (700-709)
+    InvalidConfig = 700,
+    MarketNotFound = 701,
+    MarketDisabled = 702,
+    MaxMarketsReached = 703,
+    // Price (710-719)
+    InvalidPrice = 710,
+    StalePrice = 711,
+    // Position (720-739)
+    PositionNotFound = 720,
+    PositionNotPending = 721,
+    MaxPositionsReached = 722,
+    NegativeValueNotAllowed = 723,
+    NotionalBelowMinimum = 724,
+    NotionalAboveMaximum = 725,
+    LeverageAboveMaximum = 726,
+    CollateralUnchanged = 727,
+    WithdrawalBreaksMargin = 728,
+    InvalidTakeProfitPrice = 729,
+    InvalidStopLossPrice = 730,
+    NotActionable = 731,
+    PositionTooNew = 732,
+    ActionNotAllowedForStatus = 733,
+    // Status (740-749)
+    InvalidStatus = 740,
+    ContractOnIce = 741,
+    ContractFrozen = 742,
+    // Utilization & Funding (750-759)
+    ThresholdNotMet = 750,
+    UtilizationExceeded = 751,
+    FundingTooEarly = 752,
 
-    // VaultTokenError (400-410) - from stellar_tokens vault
+    // Governance Errors (770-779)
+    GovNotQueued = 770,
+    GovNotUnlocked = 771,
+    GovInvalidDelay = 772,
+
+    // Price Verifier Errors (780-789)
+    PVInvalidData = 780,
+    PVInvalidPrice = 781,
+    PVPriceStale = 782,
+
+    // Strategy Vault Errors (790-799)
+    StrategyInvalidAmount = 790,
+    SharesLocked = 791,
+    UnauthorizedStrategy = 792,
+
+    // VaultTokenError (400-410) - from stellar_tokens vault (OZ)
     VaultAssetAddressNotSet = 400,
     VaultAssetAddressAlreadySet = 401,
     VaultVirtualDecimalsOffsetAlreadySet = 402,
@@ -126,10 +130,8 @@ export enum ContractErrorType {
     VaultMaxDecimalsOffsetExceeded = 409,
     VaultMathOverflow = 410,
 
-    // StrategyVaultError (420-422) - custom strategy vault errors
-    StrategyInvalidAmount = 420,
-    SharesLocked = 421,
-    UnauthorizedStrategy = 422,
+    // Treasury Errors (900)
+    TreasuryInvalidRate = 900,
 }
 
 export function parseError(

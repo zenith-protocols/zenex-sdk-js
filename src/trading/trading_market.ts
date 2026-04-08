@@ -8,7 +8,7 @@ import { TradingConfigData } from './trading_config.js';
 export interface MarketConfig {
     enabled: boolean;
     maxUtil: number;
-    rBorrow: number;
+    rVarMarket: number;
     margin: number;
     liqFee: number;
     impact: number;
@@ -43,7 +43,7 @@ export class Market implements MarketConfig, MarketData {
     // Market configuration
     enabled: boolean;
     maxUtil: number;
-    rBorrow: number;
+    rVarMarket: number;
     margin: number;
     liqFee: number;
     impact: number;
@@ -66,7 +66,7 @@ export class Market implements MarketConfig, MarketData {
         this.feedId = feedId;
         this.enabled = data.enabled;
         this.maxUtil = data.maxUtil;
-        this.rBorrow = data.rBorrow;
+        this.rVarMarket = data.rVarMarket;
         this.margin = data.margin;
         this.liqFee = data.liqFee;
         this.impact = data.impact;
@@ -207,8 +207,8 @@ export class Market implements MarketConfig, MarketData {
                 case 'max_util':
                     config.maxUtil = toFloat(scValToBigInt(value), 7);
                     break;
-                case 'r_borrow':
-                    config.rBorrow = toFloat(scValToBigInt(value), 7);
+                case 'r_var_market':
+                    config.rVarMarket = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'margin':
                     config.margin = toFloat(scValToBigInt(value), 7);
@@ -334,7 +334,7 @@ export class Market implements MarketConfig, MarketData {
     /**
      * Get the current borrowing rate per hour for the dominant side.
      *
-     * Formula: rBase × (1 + rVar × util^5) × rBorrow
+     * Formula: rBase × (1 + rVar × util^5) × rVarMarket
      * Only the side with more notional pays.
      *
      * @param config - Trading config (rBase, rVar as SCALAR_18 bigints)
@@ -350,7 +350,7 @@ export class Market implements MarketConfig, MarketData {
         const util = this.getUtilization(vaultBalance);
         const rBase = Number(config.rBase) / 1e18;
         const rVar = config.rVar;  // already descaled (SCALAR_7 → number)
-        const rBorrow = this.rBorrow;
+        const rVarMarket = this.rVarMarket;
 
         // util^5
         const u2 = util * util;
@@ -359,7 +359,7 @@ export class Market implements MarketConfig, MarketData {
 
         // multiplier = 1 + rVar × util^5
         const multiplier = 1 + rVar * u5;
-        const rate = rBase * multiplier * rBorrow;
+        const rate = rBase * multiplier * rVarMarket;
 
         const ratePercent = rate * 100;
 

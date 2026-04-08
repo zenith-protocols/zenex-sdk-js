@@ -15,10 +15,10 @@ export enum TradingEventType {
     Liquidation = 'Liquidation',
     TakeProfit = 'TakeProfit',
     StopLoss = 'StopLoss',
-    CancelLimit = 'CancelLimit',
     ModifyCollateral = 'ModifyCollateral',
     SetTriggers = 'SetTriggers',
     ApplyFunding = 'ApplyFunding',
+    RefundPosition = 'RefundPosition',
     ADLTriggered = 'ADLTriggered',
     ADLMarket = 'ADLMarket',
 }
@@ -133,14 +133,6 @@ export interface TradingStopLossEvent extends BaseTradingEvent {
     borrowingFee: i128;
 }
 
-// Limit order cancelled (topics only, no data fields)
-export interface TradingCancelLimitEvent extends BaseTradingEvent {
-    eventType: TradingEventType.CancelLimit;
-    feedId: u32;
-    user: string;
-    positionId: u32;
-}
-
 // Collateral modified (positive = deposit, negative = withdraw)
 export interface TradingModifyCollateralEvent extends BaseTradingEvent {
     eventType: TradingEventType.ModifyCollateral;
@@ -164,6 +156,15 @@ export interface TradingSetTriggersEvent extends BaseTradingEvent {
 export interface TradingApplyFundingEvent extends BaseTradingEvent {
     eventType: TradingEventType.ApplyFunding;
     rates: Record<number, i128>;
+}
+
+// Position refunded (market disabled or deleted)
+export interface TradingRefundPositionEvent extends BaseTradingEvent {
+    eventType: TradingEventType.RefundPosition;
+    feedId: u32;
+    user: string;
+    positionId: u32;
+    amount: i128;
 }
 
 // ADL triggered event
@@ -193,9 +194,9 @@ export type TradingEvent =
     | TradingLiquidationEvent
     | TradingTakeProfitEvent
     | TradingStopLossEvent
-    | TradingCancelLimitEvent
     | TradingModifyCollateralEvent
     | TradingSetTriggersEvent
+    | TradingRefundPositionEvent
     | TradingApplyFundingEvent
     | TradingADLTriggeredEvent
     | TradingADLMarketEvent;
@@ -370,15 +371,6 @@ export function parseTradingEvent(
                     borrowingFee: eventData.borrowing_fee,
                 } as TradingStopLossEvent;
 
-            case TradingEventType.CancelLimit:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.CancelLimit,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                } as TradingCancelLimitEvent;
-
             case TradingEventType.ModifyCollateral:
                 return {
                     ...baseEvent,
@@ -399,6 +391,16 @@ export function parseTradingEvent(
                     takeProfit: eventData.take_profit,
                     stopLoss: eventData.stop_loss,
                 } as TradingSetTriggersEvent;
+
+            case TradingEventType.RefundPosition:
+                return {
+                    ...baseEvent,
+                    eventType: TradingEventType.RefundPosition,
+                    feedId: extractU32(1),
+                    user: extractAddress(2),
+                    positionId: extractU32(3),
+                    amount: eventData.amount,
+                } as TradingRefundPositionEvent;
 
             case TradingEventType.ApplyFunding:
                 return {

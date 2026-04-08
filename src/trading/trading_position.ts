@@ -7,13 +7,13 @@ import { TradingConfigData } from './trading_config.js';
 
 // Error codes matching Rust TradingError
 export enum OrderValidationError {
-    MarketDisabled = 712,
-    NegativeValueNotAllowed = 735,
-    NotionalBelowMinimum = 736,
-    NotionalAboveMaximum = 737,
-    LeverageAboveMaximum = 739,
-    InvalidTakeProfitPrice = 742,
-    InvalidStopLossPrice = 743,
+    MarketDisabled = 702,
+    NegativeValueNotAllowed = 723,
+    NotionalBelowMinimum = 724,
+    NotionalAboveMaximum = 725,
+    LeverageAboveMaximum = 726,
+    InvalidTakeProfitPrice = 729,
+    InvalidStopLossPrice = 730,
 }
 
 // Input for fee-adjusted collateral calculation

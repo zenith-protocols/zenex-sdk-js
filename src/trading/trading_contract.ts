@@ -9,19 +9,6 @@ export enum ContractStatus {
     Frozen = 3,     // Emergency lockdown - no trading actions allowed
 }
 
-// Execute request types (matches Rust ExecuteRequestType)
-export enum ExecuteRequestType {
-    Fill = 0,
-    StopLoss = 1,
-    TakeProfit = 2,
-    Liquidate = 3,
-}
-
-// Execute request structure (matches Rust ExecuteRequest)
-export interface ExecuteRequest {
-    request_type: ExecuteRequestType;
-    position_id: u32;
-}
 
 // Place limit order arguments
 export interface PlaceLimitArgs {
@@ -64,7 +51,7 @@ export interface ModifyCollateralArgs {
 // Execute arguments
 export interface ExecuteArgs {
     caller: string;
-    requests: ExecuteRequest[];
+    position_ids: u32[];
     price: Buffer | Uint8Array;
 }
 
@@ -95,7 +82,7 @@ export interface TradingConfigArgs {
 export interface MarketConfigArgs {
     enabled: boolean;
     max_util: i128;
-    r_borrow: i128;
+    r_var_market: i128;
     margin: i128;
     liq_fee: i128;
     impact: i128;
@@ -127,7 +114,7 @@ export class TradingContract extends Contract {
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         openMarket: (result: string): u32 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        cancelLimit: (result: string): i128 =>
+        cancelPosition: (result: string): i128 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         closePosition: (result: string): i128 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
@@ -216,7 +203,8 @@ export class TradingContract extends Contract {
 
     /**
      * Remove a market (owner only)
-     * Fails if any positions remain (notional != 0).
+     * Subtracts remaining OI from total_notional. Existing positions
+     * are refunded via closePosition or execute.
      * @param feedId - Pyth Lazer feed ID
      */
     delMarket(feedId: u32): string {
@@ -316,11 +304,12 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Cancel a pending limit order (refunds collateral + fees)
+     * Cancel a position and refund collateral.
+     * Pending: always allowed. Filled: only if market deleted.
      */
-    cancelLimit(positionId: u32): string {
+    cancelPosition(positionId: u32): string {
         return this.call(
-            'cancel_limit',
+            'cancel_position',
             xdr.ScVal.scvU32(positionId),
         ).toXDR('base64');
     }
@@ -364,16 +353,15 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Execute keeper actions (Fill, StopLoss, TakeProfit, Liquidate)
-     * Returns array of result codes (0 = success)
+     * Execute keeper triggers (auto-detects: fill, liquidation, SL, TP)
      */
-    execute(caller: Address | string, requests: ExecuteRequest[], price: Buffer | Uint8Array): string {
+    execute(caller: Address | string, positionIds: u32[], price: Buffer | Uint8Array): string {
         const callerAddress = typeof caller === 'string'
             ? Address.fromString(caller)
             : caller;
 
-        const requestsScVal = xdr.ScVal.scvVec(
-            requests.map(req => this.executeRequestToScVal(req))
+        const idsScVal = xdr.ScVal.scvVec(
+            positionIds.map(id => xdr.ScVal.scvU32(id))
         );
 
         const priceBuffer = price instanceof Buffer ? price : Buffer.from(price);
@@ -381,7 +369,7 @@ export class TradingContract extends Contract {
         return this.call(
             'execute',
             callerAddress.toScVal(),
-            requestsScVal,
+            idsScVal,
             xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
     }
@@ -541,23 +529,10 @@ export class TradingContract extends Contract {
                 val: nativeToScVal(config.max_util, { type: 'i128' }),
             }),
             new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('r_borrow'),
-                val: nativeToScVal(config.r_borrow, { type: 'i128' }),
+                key: xdr.ScVal.scvSymbol('r_var_market'),
+                val: nativeToScVal(config.r_var_market, { type: 'i128' }),
             }),
         ]);
     }
 
-    /** @internal */
-    private executeRequestToScVal(request: ExecuteRequest): xdr.ScVal {
-        return xdr.ScVal.scvMap([
-            new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('position_id'),
-                val: xdr.ScVal.scvU32(request.position_id),
-            }),
-            new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol('request_type'),
-                val: xdr.ScVal.scvU32(request.request_type),
-            }),
-        ]);
-    }
 }
