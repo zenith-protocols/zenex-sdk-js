@@ -131,6 +131,21 @@ export type {
     TreasuryConstructorArgs,
 } from './treasury/index.js';
 
+// Smart Account Module
+export {
+    SmartAccountContract,
+    signerToScVal,
+    contextRuleTypeToScVal,
+    sessionConfigToScVal,
+} from './smart-account/index.js';
+
+export type {
+    Signer as SmartAccountSigner,
+    ContextRuleType,
+    SessionConfig,
+    AddContextRuleArgs,
+} from './smart-account/index.js';
+
 // Vault Module
 export {
     VaultContract,

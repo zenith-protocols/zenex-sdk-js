@@ -3,22 +3,22 @@ import { ZenexContractType, BaseZenexEvent, NormalizedEvent } from '../base_even
 
 // Trading event types (matches Rust events)
 export enum TradingEventType {
-    SetConfig = 'SetConfig',
-    SetMarket = 'SetMarket',
-    DelMarket = 'DelMarket',
-    SetStatus = 'SetStatus',
-    OpenMarket = 'OpenMarket',
-    PlaceLimit = 'PlaceLimit',
-    ClosePosition = 'ClosePosition',
-    FillLimit = 'FillLimit',
-    Liquidation = 'Liquidation',
-    TakeProfit = 'TakeProfit',
-    StopLoss = 'StopLoss',
-    ModifyCollateral = 'ModifyCollateral',
-    SetTriggers = 'SetTriggers',
-    ApplyFunding = 'ApplyFunding',
-    RefundPosition = 'RefundPosition',
-    ADLTriggered = 'ADLTriggered',
+    SetConfig = 'set_config',
+    SetMarket = 'set_market',
+    DelMarket = 'del_market',
+    SetStatus = 'set_status',
+    OpenMarket = 'open_market',
+    PlaceLimit = 'place_limit',
+    ClosePosition = 'close_position',
+    FillLimit = 'fill_limit',
+    Liquidation = 'liquidation',
+    TakeProfit = 'take_profit',
+    StopLoss = 'stop_loss',
+    ModifyCollateral = 'modify_collateral',
+    SetTriggers = 'set_triggers',
+    ApplyFunding = 'apply_funding',
+    RefundPosition = 'refund_position',
+    ADLTriggered = 'adl_triggered',
 }
 
 // Trading Events
@@ -184,7 +184,7 @@ export type TradingEvent =
 export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undefined {
     const { eventType, topicArgs, data } = event;
 
-    if (!(eventType in TradingEventType)) return undefined;
+    if (!Object.values(TradingEventType).includes(eventType as TradingEventType)) return undefined;
 
     const baseEvent: BaseTradingEvent = {
         id: event.id,
