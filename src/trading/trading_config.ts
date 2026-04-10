@@ -14,7 +14,7 @@ export interface TradingConfigData {
     maxUtil: number;
     rFunding: bigint;    // SCALAR_18
     rBase: bigint;       // SCALAR_18
-    rVar: number;
+    rVar: bigint;       // SCALAR_18
 }
 
 // Full instance + persistent state from a single getLedgerEntries call
@@ -28,15 +28,15 @@ export interface TradingInstanceData {
     positionCounter: number;
     totalNotional: number;
     lastFundingUpdate: number;
-    feedIds: number[];
+    marketIds: number[];
 }
 
 /**
  * TradingConfig - Trading contract state loader
  *
  * Single getLedgerEntries call fetches instance storage + Markets persistent key.
- * Returns all config, addresses, counters, and the list of active feed IDs.
- * Use feedIds with Market.loadMultiple() to fetch market data separately.
+ * Returns all config, addresses, counters, and the list of active market IDs.
+ * Use marketIds with Market.loadMultiple() to fetch market data separately.
  */
 export class TradingConfig implements TradingInstanceData {
     status: number;
@@ -48,7 +48,7 @@ export class TradingConfig implements TradingInstanceData {
     positionCounter: number;
     totalNotional: number;
     lastFundingUpdate: number;
-    feedIds: number[];
+    marketIds: number[];
     contractId: string;
 
     constructor(data: TradingInstanceData, contractId: string) {
@@ -61,14 +61,14 @@ export class TradingConfig implements TradingInstanceData {
         this.positionCounter = data.positionCounter;
         this.totalNotional = data.totalNotional;
         this.lastFundingUpdate = data.lastFundingUpdate;
-        this.feedIds = data.feedIds;
+        this.marketIds = data.marketIds;
         this.contractId = contractId;
     }
 
     /**
      * Load full trading contract state in a single getLedgerEntries call.
      * Fetches instance storage (config, addresses, counters) and the
-     * Markets persistent key (list of active feed IDs).
+     * Markets persistent key (list of active market IDs).
      */
     public static async load(
         network: Network,
@@ -92,21 +92,21 @@ export class TradingConfig implements TradingInstanceData {
 
         const instanceData = TradingConfig.parseInstanceStorage(storage);
 
-        // Parse feed IDs from Markets persistent key
-        let feedIds: number[] = [];
+        // Parse market IDs from Markets persistent key
+        let marketIds: number[] = [];
         if (response.entries.length > 1) {
             const vec = response.entries[1].val.contractData().val().vec();
-            if (vec) feedIds = vec.map(v => v.u32());
+            if (vec) marketIds = vec.map(v => v.u32());
         }
 
-        return new TradingConfig({ ...instanceData, feedIds }, contractId);
+        return new TradingConfig({ ...instanceData, marketIds }, contractId);
     }
 
     // === Parsers ===
 
     private static parseInstanceStorage(
         storage: xdr.ScMapEntry[]
-    ): Omit<TradingInstanceData, 'feedIds'> {
+    ): Omit<TradingInstanceData, 'marketIds'> {
         let status: number = 0;
         let vault: string | undefined;
         let token: string | undefined;
@@ -206,7 +206,7 @@ export class TradingConfig implements TradingInstanceData {
             feeNonDom: toFloat(feeNonDom, 7),
             maxUtil: toFloat(maxUtil, 7),
             rFunding, rBase,
-            rVar: toFloat(rVar, 18),
+            rVar,
         };
     }
 
@@ -222,5 +222,5 @@ export class TradingConfig implements TradingInstanceData {
     get maxUtil(): number { return this.config.maxUtil; }
     get rFunding(): bigint { return this.config.rFunding; }
     get rBase(): bigint { return this.config.rBase; }
-    get rVar(): number { return this.config.rVar; }
+    get rVar(): bigint { return this.config.rVar; }
 }

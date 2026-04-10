@@ -1,6 +1,5 @@
-import { rpc, scValToNative, xdr, Address } from '@stellar/stellar-sdk';
 import { i128 } from '../index.js';
-import { ZenexContractType, BaseZenexEvent } from '../base_event.js';
+import { ZenexContractType, BaseZenexEvent, NormalizedEvent } from '../base_event.js';
 
 // Vault event types
 export enum VaultEventType {
@@ -22,61 +21,34 @@ export interface VaultStrategyWithdrawEvent extends BaseVaultEvent {
 export type VaultEvent = VaultStrategyWithdrawEvent;
 
 /**
- * Parse a vault event from RPC event response
+ * Decode a normalized event into a typed VaultEvent.
+ * Returns undefined if the event type is not a known vault event.
  */
-export function parseVaultEvent(
-    eventResponse: rpc.Api.RawEventResponse
-): VaultEvent | undefined {
-    if (
-        eventResponse.type !== 'contract' ||
-        !eventResponse.topic ||
-        eventResponse.topic.length === 0 ||
-        eventResponse.contractId === undefined
-    ) {
-        return undefined;
-    }
+export function decodeVaultEvent(event: NormalizedEvent): VaultEvent | undefined {
+    const { eventType, topicArgs, data } = event;
 
-    const topic = eventResponse.topic;
+    if (!(eventType in VaultEventType)) return undefined;
 
-    try {
-        const topicXdr = xdr.ScVal.fromXDR(topic[0], 'base64');
-        const eventType = scValToNative(topicXdr) as string;
+    const baseEvent: BaseVaultEvent = {
+        id: event.id,
+        contractId: event.contractId,
+        contractType: ZenexContractType.Vault,
+        eventType: eventType as VaultEventType,
+        ledger: event.ledger,
+        ledgerClosedAt: event.ledgerClosedAt,
+        txHash: event.txHash,
+    };
 
-        const valueXdr = xdr.ScVal.fromXDR(eventResponse.value, 'base64');
-        const eventData = scValToNative(valueXdr);
+    switch (eventType) {
+        case VaultEventType.StrategyWithdraw:
+            return {
+                ...baseEvent,
+                eventType: VaultEventType.StrategyWithdraw,
+                strategy: topicArgs[0] as string ?? '',
+                amount: data.amount,
+            } as VaultStrategyWithdrawEvent;
 
-        const baseEvent: BaseVaultEvent = {
-            id: eventResponse.id,
-            contractId: eventResponse.contractId,
-            contractType: ZenexContractType.Vault,
-            eventType: eventType as VaultEventType,
-            ledger: eventResponse.ledger,
-            ledgerClosedAt: eventResponse.ledgerClosedAt,
-            txHash: eventResponse.txHash || '',
-        };
-
-        const extractAddress = (topicIndex: number): string => {
-            if (topic.length > topicIndex) {
-                const addressXdr = xdr.ScVal.fromXDR(topic[topicIndex], 'base64');
-                return Address.fromScVal(addressXdr).toString();
-            }
-            return '';
-        };
-
-        switch (eventType) {
-            case VaultEventType.StrategyWithdraw:
-                return {
-                    ...baseEvent,
-                    eventType: VaultEventType.StrategyWithdraw,
-                    strategy: extractAddress(1),
-                    amount: eventData.amount,
-                } as VaultStrategyWithdrawEvent;
-
-            default:
-                return undefined;
-        }
-    } catch (error) {
-        console.warn('Failed to parse vault event:', error);
-        return undefined;
+        default:
+            return undefined;
     }
 }

@@ -3,11 +3,6 @@
 // =============================================================================
 
 import { rpc } from '@stellar/stellar-sdk';
-import { ZenexContractType } from './base_event.js';
-import type { TradingEvent } from './trading/trading_events.js';
-import type { VaultEvent } from './vault/vault_events.js';
-import { parseTradingEvent } from './trading/trading_events.js';
-import { parseVaultEvent } from './vault/vault_events.js';
 
 // Types - Primitives and Network
 export type u32 = number;
@@ -31,12 +26,9 @@ export interface Network {
 export type { Asset } from './asset.js';
 export { getAssetKey, getAssetName, assetsEqual, assetToScVal, assetFromScVal, assetFromKey } from './asset.js';
 
-// Types - Base Event
-export { ZenexContractType } from './base_event.js';
-export type { BaseZenexEvent } from './base_event.js';
-
-// Union of all events
-export type ZenexEvent = TradingEvent | VaultEvent;
+// Base Event types, normalizers, and unified decoder
+export { ZenexContractType, normalizeRpc, normalizeMercury, decodeEvent } from './base_event.js';
+export type { BaseZenexEvent, NormalizedEvent, MercuryWebhookEvent, MercuryScVal, ZenexEvent } from './base_event.js';
 
 // Trading Module
 export {
@@ -47,7 +39,7 @@ export {
     ContractStatus,
     TradingEventType,
     OrderValidationError,
-    parseTradingEvent,
+    decodeTradingEvent,
 } from './trading/index.js';
 
 export type {
@@ -82,9 +74,12 @@ export type {
     TradingStopLossEvent,
     TradingModifyCollateralEvent,
     TradingSetTriggersEvent,
+    TradingRefundPositionEvent,
     TradingApplyFundingEvent,
     TradingADLTriggeredEvent,
     TradingEvent,
+    TradingConfigArgs,
+    MarketConfigArgs,
 } from './trading/index.js';
 
 // Factory Module
@@ -98,26 +93,54 @@ export type {
     FactoryConstructorArgs,
 } from './factory/index.js';
 
-// Governance Module (time-locked admin for trading)
+// Governance Module (generic timelock)
 export {
     GovernanceContract,
+    GovernanceEventType,
+    decodeGovernanceEvent,
 } from './governance/index.js';
 
 export type {
-    QueuedConfig,
-    QueuedMarket,
+    QueuedCall,
     GovernanceConstructorArgs,
+    BaseGovernanceEvent,
+    GovernanceQueuedEvent,
+    GovernanceExecutedEvent,
+    GovernanceCancelledEvent,
+    GovernanceStatusSetEvent,
+    GovernanceDelaySetEvent,
+    GovernanceEvent,
 } from './governance/index.js';
+
+// Price Verifier Module
+export {
+    PriceVerifierContract,
+} from './price-verifier/index.js';
+
+export type {
+    PriceVerifierPriceData,
+    PriceVerifierConstructorArgs,
+} from './price-verifier/index.js';
+
+// Treasury Module
+export {
+    TreasuryContract,
+} from './treasury/index.js';
+
+export type {
+    TreasuryConstructorArgs,
+} from './treasury/index.js';
 
 // Vault Module
 export {
     VaultContract,
     VaultState,
     VaultEventType,
-    parseVaultEvent,
+    decodeVaultEvent,
 } from './vault/index.js';
 
 export type {
+    VaultConstructorArgs,
     VaultStateData,
     BaseVaultEvent,
     VaultStrategyWithdrawEvent,
@@ -127,37 +150,6 @@ export type {
 // Oracle
 export { getOraclePrice, getOracleDecimals } from './oracle.js';
 export type { PriceData } from './oracle.js';
-
-// Events - Combined utilities
-/**
- * Parse any Zenex event from RPC event response
- * Tries trading first, then vault
- */
-export function parseEvent(
-    eventResponse: rpc.Api.RawEventResponse
-): ZenexEvent | undefined {
-    const tradingEvent = parseTradingEvent(eventResponse);
-    if (tradingEvent) return tradingEvent;
-
-    const vaultEvent = parseVaultEvent(eventResponse);
-    if (vaultEvent) return vaultEvent;
-
-    return undefined;
-}
-
-/**
- * Check if an event is a trading event
- */
-export function isTradingEvent(event: ZenexEvent): event is TradingEvent {
-    return event.contractType === ZenexContractType.Trading;
-}
-
-/**
- * Check if an event is a vault event
- */
-export function isVaultEvent(event: ZenexEvent): event is VaultEvent {
-    return event.contractType === ZenexContractType.Vault;
-}
 
 // Response Parser / Errors
 export {

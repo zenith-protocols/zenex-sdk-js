@@ -1,76 +1,60 @@
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
-import { u32, u64, i128 } from '../index.js';
-import { TradingConfigArgs, MarketConfigArgs, TradingContract } from '../trading/trading_contract.js';
+import { u32, u64 } from '../index.js';
 
-// Queued config update
-export interface QueuedConfig {
-    config: TradingConfigArgs;
-    unlock_time: u64;
-}
-
-// Queued market update
-export interface QueuedMarket {
-    config: MarketConfigArgs;
-    feed_id: u32;
-    nonce: u32;
-    unlock_time: u64;
+// Queued call returned by get_queued
+export interface QueuedCall {
+    target: string;
+    fn_name: string;
+    args: unknown[];
+    unlock_time: bigint;
 }
 
 // Constructor arguments
 export interface GovernanceConstructorArgs {
     owner: string;
-    trading: string;
-    delay: u64;
+    delay: bigint;
 }
 
 /**
  * GovernanceContract - Operation builder for the Zenex Governance contract
  *
- * Provides time-locked admin operations for the trading contract.
+ * Provides a generic timelock for arbitrary contract calls.
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class GovernanceContract extends Contract {
     static spec: contract.Spec = new contract.Spec([
-        "AAAABAAAAAAAAAAAAAAACkFkbWluRXJyb3IAAAAAAAMAAAAAAAAADFVuYXV0aG9yaXplZAAAAAEAAAAAAAAAD1VwZGF0ZU5vdFF1ZXVlZAAAAAACAAAAAAAAABFVcGRhdGVOb3RVbmxvY2tlZAAAAAAAAAM=",
-        "AAAAAQAAAAAAAAAAAAAADFF1ZXVlZENvbmZpZwAAAAIAAAAAAAAABmNvbmZpZwAAAAAH0AAAAA1UcmFkaW5nQ29uZmlnAAAAAAAAAAAAAAt1bmxvY2tfdGltZQAAAAAG",
-        "AAAAAQAAAAAAAAAAAAAADFF1ZXVlZE1hcmtldAAAAAQAAAAAAAAABmNvbmZpZwAAAAAH0AAAAAxNYXJrZXRDb25maWcAAAAAAAAAB2ZlZWRfaWQAAAAABAAAAAAAAAAFbm9uY2UAAAAAAAAEAAAAAAAAAAt1bmxvY2tfdGltZQAAAAAG",
-        "AAAAAgAAAAAAAAAAAAAAD0FkbWluU3RvcmFnZUtleQAAAAAFAAAAAAAAAAAAAAAHVHJhZGluZwAAAAAAAAAAAAAAAAVEZWxheQAAAAAAAAAAAAAAAAAADENvbmZpZ1VwZGF0ZQAAAAEAAAAAAAAADE1hcmtldFVwZGF0ZQAAAAEAAAAEAAAAAAAAAAAAAAALTWFya2V0Tm9uY2UA",
+        "AAAAAAAAAAAAAAAFcXVldWUAAAAAAAADAAAAAAAAAAZ0YXJnZXQAAAAAABMAAAAAAAAAB2ZuX25hbWUAAAAAEQAAAAAAAAAEYXJncwAAA+oAAAAAAAAAAQAAAAQ=",
+        "AAAAAAAAAAAAAAAGY2FuY2VsAAAAAAABAAAAAAAAAAVub25jZQAAAAAAAAQAAAAA",
+        "AAAAAAAAAAAAAAAHZXhlY3V0ZQAAAAABAAAAAAAAAAVub25jZQAAAAAAAAQAAAAA",
         "AAAAAAAAAAAAAAAHdXBncmFkZQAAAAACAAAAAAAAAA1uZXdfd2FzbV9oYXNoAAAAAAAD7gAAACAAAAAAAAAACG9wZXJhdG9yAAAAEwAAAAA=",
         "AAAAAAAAAAAAAAAJZ2V0X2RlbGF5AAAAAAAAAAAAAAEAAAAG",
         "AAAAAAAAAJBSZXR1cm5zIGBTb21lKEFkZHJlc3MpYCBpZiBvd25lcnNoaXAgaXMgc2V0LCBvciBgTm9uZWAgaWYgb3duZXJzaGlwIGhhcwpiZWVuIHJlbm91bmNlZC4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4AAAAJZ2V0X293bmVyAAAAAAAAAAAAAAEAAAPoAAAAEw==",
-        "AAAAAAAAAAAAAAAKc2V0X2NvbmZpZwAAAAAAAAAAAAA=",
-        "AAAAAAAAAAAAAAAKc2V0X21hcmtldAAAAAAAAQAAAAAAAAAFbm9uY2UAAAAAAAAEAAAAAA==",
-        "AAAAAAAAAAAAAAAKc2V0X3N0YXR1cwAAAAAAAQAAAAAAAAAGc3RhdHVzAAAAAAAEAAAAAA==",
-        "AAAAAAAAAAAAAAALZ2V0X3RyYWRpbmcAAAAAAAAAAAEAAAAT",
-        "AAAAAAAAAAAAAAANX19jb25zdHJ1Y3RvcgAAAAAAAAMAAAAAAAAABW93bmVyAAAAAAAAEwAAAAAAAAAHdHJhZGluZwAAAAATAAAAAAAAAAVkZWxheQAAAAAAAAYAAAAA",
+        "AAAAAAAAAAAAAAAJc2V0X2RlbGF5AAAAAAAAAQAAAAAAAAAJbmV3X2RlbGF5AAAAAAAABgAAAAA=",
+        "AAAAAAAAAAAAAAAKZ2V0X3F1ZXVlZAAAAAAAAQAAAAAAAAAFbm9uY2UAAAAAAAAEAAAAAQAAB9AAAAAKUXVldWVkQ2FsbAAA",
+        "AAAAAAAAAAAAAAAKc2V0X3N0YXR1cwAAAAAAAgAAAAAAAAAGdGFyZ2V0AAAAAAATAAAAAAAAAAZzdGF0dXMAAAAAAAQAAAAA",
+        "AAAAAAAAAAAAAAALYXBwbHlfZGVsYXkAAAAAAAAAAAA=",
+        "AAAAAAAAAOoKSW5pdGlhbGl6ZSB0aGUgZ292ZXJuYW5jZSBjb250cmFjdCB3aXRoIGFuIG93bmVyIGFuZCBkZWxheSBwZXJpb2QuCgojIFBhcmFtZXRlcnMKLSBgb3duZXJgIC0gQWRtaW4gYWRkcmVzcyBhdXRob3JpemVkIHRvIHF1ZXVlL2NhbmNlbCBjYWxscyBhbmQgc2V0IHN0YXR1cwotIGBkZWxheWAgLSBNYW5kYXRvcnkgd2FpdGluZyBwZXJpb2QgaW4gc2Vjb25kcyBiZWZvcmUgcXVldWVkIGNhbGxzIGNhbiBleGVjdXRlAAAAAA1fX2NvbnN0cnVjdG9yAAAAAAAAAgAAAAAAAAAFb3duZXIAAAAAAAATAAAAAAAAAAVkZWxheQAAAAAAAAYAAAAA",
         "AAAAAAAAATBBY2NlcHRzIGEgcGVuZGluZyBvd25lcnNoaXAgdHJhbnNmZXIuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gdGhlIFNvcm9iYW4gZW52aXJvbm1lbnQuCgojIEVycm9ycwoKKiBbYGNyYXRlOjpyb2xlX3RyYW5zZmVyOjpSb2xlVHJhbnNmZXJFcnJvcjo6Tm9QZW5kaW5nVHJhbnNmZXJgXSAtIElmCnRoZXJlIGlzIG5vIHBlbmRpbmcgdHJhbnNmZXIgdG8gYWNjZXB0LgoKIyBFdmVudHMKCiogdG9waWNzIC0gYFsib3duZXJzaGlwX3RyYW5zZmVyX2NvbXBsZXRlZCJdYAoqIGRhdGEgLSBgW25ld19vd25lcjogQWRkcmVzc11gAAAAEGFjY2VwdF9vd25lcnNoaXAAAAAAAAAAAA==",
-        "AAAAAAAAAAAAAAAQcXVldWVfc2V0X2NvbmZpZwAAAAEAAAAAAAAABmNvbmZpZwAAAAAH0AAAAA1UcmFkaW5nQ29uZmlnAAAAAAAAAA==",
-        "AAAAAAAAAAAAAAAQcXVldWVfc2V0X21hcmtldAAAAAIAAAAAAAAAB2ZlZWRfaWQAAAAABAAAAAAAAAAGY29uZmlnAAAAAAfQAAAADE1hcmtldENvbmZpZwAAAAEAAAAE",
-        "AAAAAAAAAAAAAAARY2FuY2VsX3NldF9jb25maWcAAAAAAAAAAAAAAA==",
-        "AAAAAAAAAAAAAAARY2FuY2VsX3NldF9tYXJrZXQAAAAAAAABAAAAAAAAAAVub25jZQAAAAAAAAQAAAAA",
-        "AAAAAAAAAAAAAAARZ2V0X3F1ZXVlZF9jb25maWcAAAAAAAAAAAAAAQAAB9AAAAAMUXVldWVkQ29uZmln",
-        "AAAAAAAAAAAAAAARZ2V0X3F1ZXVlZF9tYXJrZXQAAAAAAAABAAAAAAAAAAVub25jZQAAAAAAAAQAAAABAAAH0AAAAAxRdWV1ZWRNYXJrZXQ=",
+        "AAAAAAAAAYVSZW5vdW5jZXMgb3duZXJzaGlwIG9mIHRoZSBjb250cmFjdC4KClBlcm1hbmVudGx5IHJlbW92ZXMgdGhlIG93bmVyLCBkaXNhYmxpbmcgYWxsIGZ1bmN0aW9ucyBnYXRlZCBieQpgI1tvbmx5X293bmVyXWAuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gdGhlIFNvcm9iYW4gZW52aXJvbm1lbnQuCgojIEVycm9ycwoKKiBbYE93bmFibGVFcnJvcjo6VHJhbnNmZXJJblByb2dyZXNzYF0gLSBJZiB0aGVyZSBpcyBhIHBlbmRpbmcgb3duZXJzaGlwCnRyYW5zZmVyLgoqIFtgT3duYWJsZUVycm9yOjpPd25lck5vdFNldGBdIC0gSWYgdGhlIG93bmVyIGlzIG5vdCBzZXQuCgojIE5vdGVzCgoqIEF1dGhvcml6YXRpb24gZm9yIHRoZSBjdXJyZW50IG93bmVyIGlzIHJlcXVpcmVkLgAAAAAAABJyZW5vdW5jZV9vd25lcnNoaXAAAAAAAAAAAAAA",
+        "AAAAAAAAA45Jbml0aWF0ZXMgYSAyLXN0ZXAgb3duZXJzaGlwIHRyYW5zZmVyIHRvIGEgbmV3IGFkZHJlc3MuCgpSZXF1aXJlcyBhdXRob3JpemF0aW9uIGZyb20gdGhlIGN1cnJlbnQgb3duZXIuIFRoZSBuZXcgb3duZXIgbXVzdCBsYXRlcgpjYWxsIGBhY2NlcHRfb3duZXJzaGlwKClgIHRvIGNvbXBsZXRlIHRoZSB0cmFuc2Zlci4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4KKiBgbmV3X293bmVyYCAtIFRoZSBwcm9wb3NlZCBuZXcgb3duZXIuCiogYGxpdmVfdW50aWxfbGVkZ2VyYCAtIExlZGdlciBudW1iZXIgdW50aWwgd2hpY2ggdGhlIG5ldyBvd25lciBjYW4KYWNjZXB0LiBBIHZhbHVlIG9mIGAwYCBjYW5jZWxzIGFueSBwZW5kaW5nIHRyYW5zZmVyLgoKIyBFcnJvcnMKCiogW2BPd25hYmxlRXJyb3I6Ok93bmVyTm90U2V0YF0gLSBJZiB0aGUgb3duZXIgaXMgbm90IHNldC4KKiBbYGNyYXRlOjpyb2xlX3RyYW5zZmVyOjpSb2xlVHJhbnNmZXJFcnJvcjo6Tm9QZW5kaW5nVHJhbnNmZXJgXSAtIElmCnRyeWluZyB0byBjYW5jZWwgYSB0cmFuc2ZlciB0aGF0IGRvZXNuJ3QgZXhpc3QuCiogW2BjcmF0ZTo6cm9sZV90cmFuc2Zlcjo6Um9sZVRyYW5zZmVyRXJyb3I6OkludmFsaWRMaXZlVW50aWxMZWRnZXJgXSAtCklmIHRoZSBzcGVjaWZpZWQgbGVkZ2VyIGlzIGluIHRoZSBwYXN0LgoqIFtgY3JhdGU6OnJvbGVfdHJhbnNmZXI6OlJvbGVUcmFuc2ZlckVycm9yOjpJbnZhbGlkUGVuZGluZ0FjY291bnRgXSAtCklmIHRoZSBzcGVjaWZpZWQgcGVuZGluZyBhY2NvdW50IGlzIG5vdCB0aGUgc2FtZSBhcyB0aGUgcHJvdmlkZWQgYG5ld2AKYWRkcmVzcy4KCiMgTm90ZXMKCiogQXV0aG9yaXphdGlvbiBmb3IgdGhlIGN1cnJlbnQgb3duZXIgaXMgcmVxdWlyZWQuAAAAAAASdHJhbnNmZXJfb3duZXJzaGlwAAAAAAACAAAAAAAAAAluZXdfb3duZXIAAAAAAAATAAAAAAAAABFsaXZlX3VudGlsX2xlZGdlcgAAAAAAAAQAAAAA",
+        "AAAAAQAAAAAAAAAAAAAAClF1ZXVlZENhbGwAAAAAAAQAAAAAAAAABGFyZ3MAAAPqAAAAAAAAAAAAAAAHZm5fbmFtZQAAAAARAAAAAAAAAAZ0YXJnZXQAAAAAABMAAAAAAAAAC3VubG9ja190aW1lAAAAAAY=",
     ]);
 
     static readonly parsers = {
-        // Admin methods
-        queueSetConfig: () => {},
-        cancelSetConfig: () => {},
-        setConfig: () => {},
-        queueSetMarket: (result: string): u32 =>
+        // Timelock methods
+        queue: (result: string): u32 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        cancelSetMarket: () => {},
-        setMarket: () => {},
+        cancel: () => {},
+        execute: () => {},
+        // Admin methods
         setStatus: () => {},
+        setDelay: () => {},
+        applyDelay: () => {},
         upgrade: () => {},
         // Getters
-        getTrading: (result: string): string =>
-            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         getDelay: (result: string): u64 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        getQueuedConfig: (result: string): QueuedConfig =>
-            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        getQueuedMarket: (result: string): QueuedMarket =>
+        getQueued: (result: string): QueuedCall =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // Ownable
         getOwner: (result: string): string | undefined =>
@@ -82,7 +66,7 @@ export class GovernanceContract extends Contract {
 
     /**
      * Deploy a new instance of the Governance contract
-     * Constructor: __constructor(owner, trading, delay)
+     * Constructor: __constructor(owner, delay)
      */
     static deploy(
         deployer: string,
@@ -99,80 +83,86 @@ export class GovernanceContract extends Contract {
             salt,
             constructorArgs: [
                 Address.fromString(args.owner).toScVal(),
-                Address.fromString(args.trading).toScVal(),
                 nativeToScVal(args.delay, { type: 'u64' }),
             ],
         }).toXDR('base64');
     }
 
     // ============================================================
-    // Time-locked Admin Methods (Owner only)
+    // Timelock Methods
     // ============================================================
 
     /**
-     * Queue a config update for the trading contract (owner only)
+     * Queue an arbitrary contract call (owner only)
+     * Returns the nonce for tracking the queued call
+     * @param target - Address of the contract to call
+     * @param fnName - Name of the function to call on the target
+     * @param args - Pre-serialized ScVal arguments for the target function
      */
-    queueSetConfig(config: TradingConfigArgs): string {
+    queue(target: string, fnName: string, args: xdr.ScVal[]): string {
         return this.call(
-            'queue_set_config',
-            TradingContract.tradingConfigToScVal(config),
+            'queue',
+            Address.fromString(target).toScVal(),
+            nativeToScVal(fnName, { type: 'symbol' }),
+            xdr.ScVal.scvVec(args),
         ).toXDR('base64');
     }
 
     /**
-     * Cancel a queued config update (owner only)
+     * Cancel a queued call (owner only)
+     * @param nonce - Nonce of the queued call to cancel
      */
-    cancelSetConfig(): string {
-        return this.call('cancel_set_config').toXDR('base64');
-    }
-
-    /**
-     * Apply a queued config update after the delay has passed (permissionless)
-     */
-    setConfig(): string {
-        return this.call('set_config').toXDR('base64');
-    }
-
-    /**
-     * Queue a new market for the trading contract (owner only)
-     * Returns the nonce for this queued market
-     */
-    queueSetMarket(feedId: u32, config: MarketConfigArgs): string {
+    cancel(nonce: u32): string {
         return this.call(
-            'queue_set_market',
-            xdr.ScVal.scvU32(feedId),
-            TradingContract.marketConfigToScVal(config),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Cancel a queued market (owner only)
-     */
-    cancelSetMarket(nonce: u32): string {
-        return this.call(
-            'cancel_set_market',
+            'cancel',
             xdr.ScVal.scvU32(nonce),
         ).toXDR('base64');
     }
 
     /**
-     * Apply a queued market after the delay has passed (permissionless)
+     * Execute a queued call after the delay has passed (permissionless)
+     * @param nonce - Nonce of the queued call to execute
      */
-    setMarket(nonce: u32): string {
+    execute(nonce: u32): string {
         return this.call(
-            'set_market',
+            'execute',
             xdr.ScVal.scvU32(nonce),
         ).toXDR('base64');
     }
 
+    // ============================================================
+    // Admin Methods (Owner only)
+    // ============================================================
+
     /**
-     * Set the status on the trading contract (immediate, no delay) (owner only)
+     * Set the status on a target contract (immediate, no delay) (owner only)
+     * @param target - Address of the contract to set status on
+     * @param status - Status value to set
      */
-    setStatus(status: u32): string {
+    setStatus(target: string, status: u32): string {
         return this.call(
             'set_status',
+            Address.fromString(target).toScVal(),
             xdr.ScVal.scvU32(status),
         ).toXDR('base64');
+    }
+
+    /**
+     * Queue a delay change (owner only, goes through timelock)
+     * @param newDelay - New delay value in seconds
+     */
+    setDelay(newDelay: bigint): string {
+        return this.call(
+            'set_delay',
+            nativeToScVal(newDelay, { type: 'u64' }),
+        ).toXDR('base64');
+    }
+
+    /**
+     * Apply a pending delay change (permissionless)
+     */
+    applyDelay(): string {
+        return this.call('apply_delay').toXDR('base64');
     }
 
     // ============================================================
@@ -221,13 +211,6 @@ export class GovernanceContract extends Contract {
     // ============================================================
 
     /**
-     * Get the trading contract address
-     */
-    getTrading(): string {
-        return this.call('get_trading').toXDR('base64');
-    }
-
-    /**
      * Get the configured delay in seconds
      */
     getDelay(): string {
@@ -235,18 +218,11 @@ export class GovernanceContract extends Contract {
     }
 
     /**
-     * Get a queued config update (if any)
+     * Get a queued call by nonce
      */
-    getQueuedConfig(): string {
-        return this.call('get_queued_config').toXDR('base64');
-    }
-
-    /**
-     * Get a queued market by nonce
-     */
-    getQueuedMarket(nonce: u32): string {
+    getQueued(nonce: u32): string {
         return this.call(
-            'get_queued_market',
+            'get_queued',
             xdr.ScVal.scvU32(nonce),
         ).toXDR('base64');
     }

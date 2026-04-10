@@ -1,19 +1,22 @@
 import { rpc, xdr, scValToBigInt, Address } from '@stellar/stellar-sdk';
 import { Network } from '../index.js';
-import { toFloat, toFixed, SCALAR_7, SCALAR_18, mulFloor, mulCeil, divCeil } from '../math.js';
+import { toFloat, toFixed, SCALAR_7, SCALAR_18, mulFloor, mulCeil, divFloor, divCeil } from '../math.js';
 import { persistentLedgerKey } from '../ledger-keys.js';
 import { Market, type MarketConfig } from './trading_market.js';
 import { TradingConfigData } from './trading_config.js';
 
 // Error codes matching Rust TradingError
+// Client-side order validation errors.
+// Codes 702-726 mirror contract TradingError. Codes 729-730 are SDK-only
+// (the contract does not emit dedicated trigger validation error codes).
 export enum OrderValidationError {
     MarketDisabled = 702,
     NegativeValueNotAllowed = 723,
     NotionalBelowMinimum = 724,
     NotionalAboveMaximum = 725,
     LeverageAboveMaximum = 726,
-    InvalidTakeProfitPrice = 729,
-    InvalidStopLossPrice = 730,
+    InvalidTakeProfitPrice = 729,  // SDK-only, not a contract error code
+    InvalidStopLossPrice = 730,    // SDK-only, not a contract error code
 }
 
 // Input for fee-adjusted collateral calculation
@@ -78,7 +81,7 @@ export interface PositionData {
     id: number;
     user: string;
     filled: boolean;
-    feed: number;
+    marketId: number;
     long: boolean;
     sl: number;
     tp: number;
@@ -99,7 +102,7 @@ export class Position implements PositionData {
     id: number;
     user: string;
     filled: boolean;
-    feed: number;
+    marketId: number;
     long: boolean;
     sl: number;
     tp: number;
@@ -116,7 +119,7 @@ export class Position implements PositionData {
         this.id = data.id;
         this.user = data.user;
         this.filled = data.filled;
-        this.feed = data.feed;
+        this.marketId = data.marketId;
         this.long = data.long;
         this.sl = data.sl;
         this.tp = data.tp;
@@ -190,13 +193,13 @@ export class Position implements PositionData {
 
     /**
      * Load multiple positions in a single RPC call
-     * @param getFeedDecimals - Callback to resolve feed exponent magnitude by feedId
+     * @param getFeedDecimals - Callback to resolve feed exponent magnitude by marketId
      */
     public static async loadMultiple(
         network: Network,
         contractId: string,
         positionIds: number[],
-        getFeedDecimals: (feedId: number) => number,
+        getFeedDecimals: (marketId: number) => number,
     ): Promise<Position[]> {
         if (positionIds.length === 0) return [];
 
@@ -210,19 +213,24 @@ export class Position implements PositionData {
             ])
         );
 
-        try {
-            const response = await stellarRpc.getLedgerEntries(...keys);
+        const response = await stellarRpc.getLedgerEntries(...keys);
 
-            response.entries.forEach((entry, i) => {
-                try {
-                    const position = Position.fromScVal(entry.val.contractData().val(), positionIds[i], getFeedDecimals);
-                    positions.push(position);
-                } catch (error) {
-                    console.error('Failed to parse position:', error);
-                }
-            });
-        } catch (error) {
-            console.error('Failed to load positions:', error);
+        // Build map from XDR key → entry value
+        const entryMap = new Map<string, xdr.LedgerEntryData>();
+        for (const entry of response.entries) {
+            entryMap.set(entry.key.toXDR('base64'), entry.val);
+        }
+
+        for (let i = 0; i < positionIds.length; i++) {
+            const entryVal = entryMap.get(keys[i].toXDR('base64'));
+            if (!entryVal) continue;
+
+            try {
+                const position = Position.fromScVal(entryVal.contractData().val(), positionIds[i], getFeedDecimals);
+                positions.push(position);
+            } catch {
+                // skip unparseable entry
+            }
         }
 
         return positions;
@@ -232,13 +240,13 @@ export class Position implements PositionData {
      * Parse Position from ScVal (matches Rust Position struct)
      * @param val - The ScVal to parse
      * @param id - Position ID (from storage key, not in struct)
-     * @param priceDecimalsOrLookup - Feed exponent magnitude, or callback to resolve by feedId
+     * @param priceDecimalsOrLookup - Feed exponent magnitude, or callback to resolve by marketId
      * @internal
      */
     static fromScVal(
         val: xdr.ScVal,
         id: number = 0,
-        priceDecimalsOrLookup: number | ((feedId: number) => number),
+        priceDecimalsOrLookup: number | ((marketId: number) => number),
     ): Position {
         const map = val.map();
         if (!map) {
@@ -247,7 +255,7 @@ export class Position implements PositionData {
 
         let user: string | undefined;
         let filled: boolean | undefined;
-        let feed: number | undefined;
+        let marketId: number | undefined;
         let long: boolean | undefined;
         let sl: bigint | undefined;
         let tp: bigint | undefined;
@@ -269,8 +277,8 @@ export class Position implements PositionData {
                 case 'filled':
                     filled = entry.val().b();
                     break;
-                case 'feed':
-                    feed = entry.val().u32();
+                case 'market_id':
+                    marketId = entry.val().u32();
                     break;
                 case 'long':
                     long = entry.val().b();
@@ -308,7 +316,7 @@ export class Position implements PositionData {
         if (
             user === undefined ||
             filled === undefined ||
-            feed === undefined ||
+            marketId === undefined ||
             long === undefined ||
             sl === undefined ||
             tp === undefined ||
@@ -324,14 +332,14 @@ export class Position implements PositionData {
         }
 
         const priceDecimals = typeof priceDecimalsOrLookup === 'function'
-            ? priceDecimalsOrLookup(feed)
+            ? priceDecimalsOrLookup(marketId)
             : priceDecimalsOrLookup;
 
         return new Position({
             id,
             user,
             filled,
-            feed,
+            marketId,
             long,
             sl: toFloat(sl, priceDecimals),
             tp: toFloat(tp, priceDecimals),
@@ -368,8 +376,12 @@ export class Position implements PositionData {
         if (notional > tradingConfig.maxNotional) {
             return OrderValidationError.NotionalAboveMaximum;
         }
-        // leverage check: notional * margin > collateral means leverage too high
-        if (notional * marketConfig.margin > collateral) {
+        // leverage check: fixed_mul_ceil(notional, margin, SCALAR_7) > collateral
+        // Matches contract: self.notional.fixed_mul_ceil(e, &margin, &SCALAR_7) > self.col
+        const notionalBig = toFixed(notional, 7);
+        const marginBig = toFixed(marketConfig.margin, 7);
+        const collateralBig = toFixed(collateral, 7);
+        if (mulCeil(notionalBig, marginBig, SCALAR_7) > collateralBig) {
             return OrderValidationError.LeverageAboveMaximum;
         }
 
@@ -398,23 +410,29 @@ export class Position implements PositionData {
      * Calculate the collateral to send to the contract so that the post-fee
      * collateral equals the desired amount.
      *
-     * Mirrors the contract's market.open() fee logic:
-     *   base_fee = notional * fee_rate (dominant or non-dominant)
-     *   impact_fee = notional / impact
+     * Mirrors the contract's market.open() fee logic in fixed-point:
+     *   base_fee = fixed_mul_ceil(notional, fee_rate, SCALAR_7)
+     *   impact_fee = fixed_div_ceil(notional, impact, SCALAR_7)
      *   position.col -= base_fee + impact_fee
      */
     static grossCollateral(params: GrossCollateralParams): GrossCollateralResult {
         const { collateral, notional, isLong, marketConfig, tradingConfig, lNotional, sNotional } = params;
 
+        const notionalBig = toFixed(notional, 7);
+        const longNotionalBig = toFixed(lNotional, 7);
+        const shortNotionalBig = toFixed(sNotional, 7);
+
         // Determine if this position would be on the dominant side
         const isDominant = isLong
-            ? (lNotional + notional) > sNotional
-            : (sNotional + notional) > lNotional;
+            ? (longNotionalBig + notionalBig) > shortNotionalBig
+            : (shortNotionalBig + notionalBig) > longNotionalBig;
 
-        const feeRate = isDominant ? tradingConfig.feeDom : tradingConfig.feeNonDom;
-        const baseFee = notional * feeRate;
-        const impactFee = marketConfig.impact > 0 ? notional / marketConfig.impact : 0;
-        const fee = baseFee + impactFee;
+        const feeRate = toFixed(isDominant ? tradingConfig.feeDom : tradingConfig.feeNonDom, 7);
+        const impactBig = toFixed(marketConfig.impact, 7);
+
+        const baseFee = mulCeil(notionalBig, feeRate, SCALAR_7);
+        const impactFee = impactBig > 0n ? divFloor(notionalBig, impactBig, SCALAR_7) : 0n;
+        const fee = toFloat(baseFee + impactFee, 7);
 
         return {
             collateral: collateral + fee,
@@ -447,39 +465,50 @@ export class Position implements PositionData {
     }
 
     /**
+     * Compute raw fee components in bigint (token_decimals = SCALAR_7).
+     * Shared by getFeeBreakdown() and getLiquidationPrice() to avoid float round-trips.
+     * @internal
+     */
+    private _computeRawFees(
+        market: Market,
+        tradingConfig: TradingConfigData,
+    ): { baseFee: bigint; priceImpact: bigint; funding: bigint; borrowingFee: bigint } {
+        const notionalBig = toFixed(this.notional, 7);
+        const impactScalar = toFixed(market.impact, 7);
+
+        const longNotional = toFixed(market.lNotional, 7);
+        const shortNotional = toFixed(market.sNotional, 7);
+        const isDominantAfterClose = this.long
+            ? (longNotional - notionalBig) > shortNotional
+            : (shortNotional - notionalBig) > longNotional;
+
+        const baseFeeRate = isDominantAfterClose
+            ? toFixed(tradingConfig.feeNonDom, 7)
+            : toFixed(tradingConfig.feeDom, 7);
+
+        const baseFee = mulCeil(notionalBig, baseFeeRate, SCALAR_7);
+        const priceImpact = divFloor(notionalBig, impactScalar, SCALAR_7);
+
+        const currentFundingIndex = this.long ? market.lFundIdx : market.sFundIdx;
+        const fundingDiff = currentFundingIndex - this.fundIdx;
+        const funding = fundingDiff >= 0n
+            ? mulCeil(notionalBig, fundingDiff, SCALAR_18)
+            : mulFloor(notionalBig, fundingDiff, SCALAR_18);
+
+        const currentBorrowingIndex = this.long ? market.lBorrIdx : market.sBorrIdx;
+        const borrowingFee = mulCeil(notionalBig, currentBorrowingIndex - this.borrIdx, SCALAR_18);
+
+        return { baseFee, priceImpact, funding, borrowingFee };
+    }
+
+    /**
      * Get the fee breakdown for closing this position.
      *
      * @param market - The market data for price impact, funding, and borrowing calculation
      * @param tradingConfig - The trading config for base fee rates
      */
     getFeeBreakdown(market: Market, tradingConfig: TradingConfigData): FeeBreakdown {
-        const notionalBig = toFixed(this.notional, 7);
-        const impactScalar = toFixed(market.impact, 7);
-
-        // Closing from dominant side rebalances -> lower fee; from non-dominant worsens -> higher fee
-        const longNotional = toFixed(market.lNotional, 7);
-        const shortNotional = toFixed(market.sNotional, 7);
-        // When closing, we're removing notional, so check is_dominant with -notional
-        const closingIsDominant = this.long
-            ? (longNotional - notionalBig) < shortNotional
-            : (shortNotional - notionalBig) < longNotional;
-
-        const baseFeeRate = closingIsDominant
-            ? toFixed(tradingConfig.feeNonDom, 7)
-            : toFixed(tradingConfig.feeDom, 7);
-
-        const baseFee = mulCeil(notionalBig, baseFeeRate, SCALAR_7);
-        const priceImpact = divCeil(notionalBig, impactScalar, SCALAR_7);
-
-        const currentFundingIndex = this.long
-            ? market.lFundIdx
-            : market.sFundIdx;
-        const funding = mulFloor(notionalBig, currentFundingIndex - this.fundIdx, SCALAR_18);
-
-        const currentBorrowingIndex = this.long
-            ? market.lBorrIdx
-            : market.sBorrIdx;
-        const borrowingFee = mulCeil(notionalBig, currentBorrowingIndex - this.borrIdx, SCALAR_18);
+        const { baseFee, priceImpact, funding, borrowingFee } = this._computeRawFees(market, tradingConfig);
 
         return {
             baseFee: toFloat(baseFee, 7),
@@ -491,7 +520,12 @@ export class Position implements PositionData {
     }
 
     /**
-     * Calculate the position's profit and loss
+     * Calculate the position's profit and loss using fixed-point arithmetic.
+     *
+     * Mirrors contract (position.rs settle()):
+     *   ratio = price_diff.fixed_div_floor(entry_price, price_scalar)
+     *   pnl = notional.fixed_mul_floor(ratio, price_scalar)
+     *
      * @param currentPrice - The current market price
      * @param market - Market for fee calculation
      * @param tradingConfig - Trading config for fee rates
@@ -502,10 +536,13 @@ export class Position implements PositionData {
             return { pnl: 0, fee: emptyFee, netPnl: 0 };
         }
 
-        const priceDiff = this.long
-            ? currentPrice - this.entryPrice
-            : this.entryPrice - currentPrice;
-        const pnl = this.notional * (priceDiff / this.entryPrice);
+        const priceScalar = BigInt(10 ** this.priceDecimals);
+        const priceDiffBig = this.long
+            ? toFixed(currentPrice, this.priceDecimals) - toFixed(this.entryPrice, this.priceDecimals)
+            : toFixed(this.entryPrice, this.priceDecimals) - toFixed(currentPrice, this.priceDecimals);
+        const ratio = divFloor(priceDiffBig, toFixed(this.entryPrice, this.priceDecimals), priceScalar);
+        const pnlBig = mulFloor(toFixed(this.notional, 7), ratio, priceScalar);
+        const pnl = toFloat(pnlBig, 7);
 
         const fee = (market && tradingConfig)
             ? this.getFeeBreakdown(market, tradingConfig)
@@ -520,17 +557,20 @@ export class Position implements PositionData {
 
     /**
      * Full position breakdown: PnL, fee components, equity, and return.
-     * Use for position rows and close previews.
+     * Uses fixed-point arithmetic matching contract settle().
      */
     getBreakdown(currentPrice: number, market: Market, tradingConfig: TradingConfigData): PositionBreakdown {
         if (!this.filled) {
             return { pnl: 0, baseFee: 0, impactFee: 0, funding: 0, borrowingFee: 0, totalFee: 0, equity: this.col, netPnl: 0, returnPct: 0 };
         }
 
-        const priceDiff = this.long
-            ? currentPrice - this.entryPrice
-            : this.entryPrice - currentPrice;
-        const pnl = this.notional * (priceDiff / this.entryPrice);
+        const priceScalar = BigInt(10 ** this.priceDecimals);
+        const priceDiffBig = this.long
+            ? toFixed(currentPrice, this.priceDecimals) - toFixed(this.entryPrice, this.priceDecimals)
+            : toFixed(this.entryPrice, this.priceDecimals) - toFixed(currentPrice, this.priceDecimals);
+        const ratio = divFloor(priceDiffBig, toFixed(this.entryPrice, this.priceDecimals), priceScalar);
+        const pnlBig = mulFloor(toFixed(this.notional, 7), ratio, priceScalar);
+        const pnl = toFloat(pnlBig, 7);
 
         const fee = this.getFeeBreakdown(market, tradingConfig);
         const netPnl = Math.max(-this.col, pnl - fee.total);
@@ -553,6 +593,7 @@ export class Position implements PositionData {
     /**
      * Get the liquidation price for the position.
      * Uses the per-market liq_fee as the liquidation threshold.
+     * Computes fees entirely in bigint to avoid float round-trip precision loss.
      *
      * @param market - The market containing funding/borrowing indices and liq_fee
      * @param tradingConfig - The trading config for fee rates
@@ -560,11 +601,21 @@ export class Position implements PositionData {
     getLiquidationPrice(market: Market, tradingConfig: TradingConfigData): number {
         if (!this.filled) return 0;
 
-        const notionalBig = toFixed(this.notional, 7);
+        // ADL adjustment: scale notional by current_adl_idx / position.adl_idx
+        // (matches contract position.rs settle() lines 181-184)
+        const adlIndex = this.long ? market.lAdlIdx : market.sAdlIdx;
+        let notionalBig = toFixed(this.notional, 7);
+        if (this.adlIdx !== adlIndex && this.adlIdx !== 0n) {
+            notionalBig = mulFloor(notionalBig, adlIndex, this.adlIdx);
+        }
+
         const collateral = toFixed(this.col, 7);
         const entryPrice = toFixed(this.entryPrice, this.priceDecimals);
         const liqFee = toFixed(market.liqFee, 7);
-        const totalFee = toFixed(this.getFeeBreakdown(market, tradingConfig).total, 7);
+
+        // Compute total fee in bigint — no float round-trip
+        const { baseFee, priceImpact, funding, borrowingFee } = this._computeRawFees(market, tradingConfig);
+        const totalFee = baseFee + priceImpact + funding + borrowingFee;
 
         // Liquidation threshold: equity <= liq_fee * notional
         const requiredMargin = mulFloor(notionalBig, liqFee, SCALAR_7);

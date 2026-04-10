@@ -230,8 +230,6 @@ export class VaultContract extends Contract {
         // Custom StrategyVault parsers
         lockTime: (result: string): u64 =>
             VaultContract.spec.funcResToNative('lock_time', result),
-        lockDuration: (result: string): u64 =>
-            VaultContract.spec.funcResToNative('lock_duration', result),
         availableShares: (result: string): i128 =>
             VaultContract.spec.funcResToNative('available_shares', result),
     };
@@ -642,16 +640,6 @@ export class VaultContract extends Contract {
      */
     lockTime(): string {
         return this.call('lock_time').toXDR('base64');
-    }
-
-    /**
-     * Get seconds remaining until user's shares unlock, or 0 if not locked
-     * @param user - Address to check
-     * @returns XDR operation string
-     */
-    lockDuration(user: Address | string): string {
-        const addr = typeof user === 'string' ? Address.fromString(user) : user;
-        return this.call('lock_duration', addr.toScVal()).toXDR('base64');
     }
 
     /**

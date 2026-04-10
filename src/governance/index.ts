@@ -1,7 +1,22 @@
 export { GovernanceContract } from './governance_contract.js';
 
 export type {
-    QueuedConfig,
-    QueuedMarket,
+    QueuedCall,
     GovernanceConstructorArgs,
 } from './governance_contract.js';
+
+// Events
+export {
+    GovernanceEventType,
+    decodeGovernanceEvent,
+} from './governance_events.js';
+
+export type {
+    BaseGovernanceEvent,
+    GovernanceQueuedEvent,
+    GovernanceExecutedEvent,
+    GovernanceCancelledEvent,
+    GovernanceStatusSetEvent,
+    GovernanceDelaySetEvent,
+    GovernanceEvent,
+} from './governance_events.js';

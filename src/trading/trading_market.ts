@@ -1,14 +1,15 @@
 import { rpc, xdr, scValToBigInt } from '@stellar/stellar-sdk';
 import { Network } from '../index.js';
-import { toFloat } from '../math.js';
+import { toFloat, toFixed, mulFloor, mulCeil, divFloor, divCeil, SCALAR_7, SCALAR_18 } from '../math.js';
 import { persistentLedgerKey } from '../ledger-keys.js';
 import { TradingConfigData } from './trading_config.js';
 
 // Market configuration (matches Rust MarketConfig)
 export interface MarketConfig {
+    feedId: number;
     enabled: boolean;
     maxUtil: number;
-    rVarMarket: number;
+    rVarMarket: bigint;
     margin: number;
     liqFee: number;
     impact: number;
@@ -34,16 +35,18 @@ export interface MarketData {
  * Market - Trading market class with config and dynamic data
  *
  * Contains both configuration and real-time market data.
- * Markets are indexed by feedId (Pyth Lazer feed ID).
+ * Markets are indexed by marketId. Each market has a feedId (Pyth Lazer feed ID)
+ * stored in its config.
  */
 export class Market implements MarketConfig, MarketData {
     // Market identity
-    feedId: number;
+    marketId: number;
 
-    // Market configuration
+    // Market configuration (feedId = Pyth price feed from config)
+    feedId: number;
     enabled: boolean;
     maxUtil: number;
-    rVarMarket: number;
+    rVarMarket: bigint;
     margin: number;
     liqFee: number;
     impact: number;
@@ -62,8 +65,9 @@ export class Market implements MarketConfig, MarketData {
     lAdlIdx: bigint;
     sAdlIdx: bigint;
 
-    constructor(feedId: number, data: MarketConfig & MarketData) {
-        this.feedId = feedId;
+    constructor(marketId: number, data: MarketConfig & MarketData) {
+        this.marketId = marketId;
+        this.feedId = data.feedId;
         this.enabled = data.enabled;
         this.maxUtil = data.maxUtil;
         this.rVarMarket = data.rVarMarket;
@@ -87,23 +91,23 @@ export class Market implements MarketConfig, MarketData {
     // === Static Loaders ===
 
     /**
-     * Load trading market data from the blockchain by feed ID
+     * Load trading market data from the blockchain by market ID
      */
     public static async load(
         network: Network,
         contractId: string,
-        feedId: number
+        marketId: number
     ): Promise<Market | null> {
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
 
         const keys = [
             persistentLedgerKey(contractId, [
                 xdr.ScVal.scvSymbol('MarketConfig'),
-                xdr.ScVal.scvU32(feedId)
+                xdr.ScVal.scvU32(marketId)
             ]),
             persistentLedgerKey(contractId, [
                 xdr.ScVal.scvSymbol('MarketData'),
-                xdr.ScVal.scvU32(feedId)
+                xdr.ScVal.scvU32(marketId)
             ])
         ];
 
@@ -115,7 +119,7 @@ export class Market implements MarketConfig, MarketData {
             const configScVal = response.entries[0].val.contractData().val();
             const dataScVal = response.entries[1].val.contractData().val();
 
-            return Market.fromScVals(feedId, configScVal, dataScVal);
+            return Market.fromScVals(marketId, configScVal, dataScVal);
         } catch {
             return null;
         }
@@ -127,46 +131,52 @@ export class Market implements MarketConfig, MarketData {
     public static async loadMultiple(
         network: Network,
         contractId: string,
-        feedIds: number[]
+        marketIds: number[]
     ): Promise<Market[]> {
-        if (feedIds.length === 0) return [];
+        if (marketIds.length === 0) return [];
 
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
         const markets: Market[] = [];
 
-        const keys: xdr.LedgerKey[] = [];
-        feedIds.forEach((feedId) => {
-            keys.push(persistentLedgerKey(contractId, [
-                xdr.ScVal.scvSymbol('MarketConfig'),
-                xdr.ScVal.scvU32(feedId)
-            ]));
+        const configKeys: xdr.LedgerKey[] = [];
+        const dataKeys: xdr.LedgerKey[] = [];
+        const allKeys: xdr.LedgerKey[] = [];
 
-            keys.push(persistentLedgerKey(contractId, [
+        marketIds.forEach((marketId) => {
+            const ck = persistentLedgerKey(contractId, [
+                xdr.ScVal.scvSymbol('MarketConfig'),
+                xdr.ScVal.scvU32(marketId)
+            ]);
+            const dk = persistentLedgerKey(contractId, [
                 xdr.ScVal.scvSymbol('MarketData'),
-                xdr.ScVal.scvU32(feedId)
-            ]));
+                xdr.ScVal.scvU32(marketId)
+            ]);
+            configKeys.push(ck);
+            dataKeys.push(dk);
+            allKeys.push(ck, dk);
         });
 
-        try {
-            const response = await stellarRpc.getLedgerEntries(...keys);
+        const response = await stellarRpc.getLedgerEntries(...allKeys);
 
-            for (let i = 0; i < feedIds.length; i++) {
-                const configIndex = i * 2;
-                const dataIndex = i * 2 + 1;
+        // Build map from XDR key → entry value
+        const entryMap = new Map<string, xdr.LedgerEntryData>();
+        for (const entry of response.entries) {
+            entryMap.set(entry.key.toXDR('base64'), entry.val);
+        }
 
-                if (configIndex < response.entries.length && dataIndex < response.entries.length) {
-                    try {
-                        const configScVal = response.entries[configIndex].val.contractData().val();
-                        const dataScVal = response.entries[dataIndex].val.contractData().val();
-                        const market = Market.fromScVals(feedIds[i], configScVal, dataScVal);
-                        markets.push(market);
-                    } catch (error) {
-                        console.error(`Failed to parse market for feed ID ${feedIds[i]}:`, error);
-                    }
-                }
+        for (let i = 0; i < marketIds.length; i++) {
+            const configEntry = entryMap.get(configKeys[i].toXDR('base64'));
+            const dataEntry = entryMap.get(dataKeys[i].toXDR('base64'));
+            if (!configEntry || !dataEntry) continue;
+
+            try {
+                const configScVal = configEntry.contractData().val();
+                const dataScVal = dataEntry.contractData().val();
+                const market = Market.fromScVals(marketIds[i], configScVal, dataScVal);
+                markets.push(market);
+            } catch {
+                continue;
             }
-        } catch (error) {
-            console.error('Failed to load markets:', error);
         }
 
         return markets;
@@ -174,14 +184,14 @@ export class Market implements MarketConfig, MarketData {
 
     /** @internal */
     static fromScVals(
-        feedId: number,
+        marketId: number,
         configVal: xdr.ScVal,
         dataVal: xdr.ScVal
     ): Market {
         const config = Market.parseMarketConfig(configVal);
         const data = Market.parseMarketData(dataVal);
 
-        return new Market(feedId, {
+        return new Market(marketId, {
             ...config,
             ...data,
         });
@@ -201,6 +211,9 @@ export class Market implements MarketConfig, MarketData {
             const value = entry.val();
 
             switch (key) {
+                case 'feed_id':
+                    config.feedId = value.u32();
+                    break;
                 case 'enabled':
                     config.enabled = value.b();
                     break;
@@ -208,7 +221,7 @@ export class Market implements MarketConfig, MarketData {
                     config.maxUtil = toFloat(scValToBigInt(value), 7);
                     break;
                 case 'r_var_market':
-                    config.rVarMarket = toFloat(scValToBigInt(value), 18);
+                    config.rVarMarket = scValToBigInt(value);
                     break;
                 case 'margin':
                     config.margin = toFloat(scValToBigInt(value), 7);
@@ -299,24 +312,30 @@ export class Market implements MarketConfig, MarketData {
 
     /**
      * Estimate the opening fee for a position.
-     * Needs TradingConfigData for fee rates since they live in trading config now.
+     * Mirrors contract fixed-point rounding: mulCeil for base fee, divCeil for impact.
      *
-     * @param notionalSize - Notional size of the position
+     * @param notionalSize - Notional size of the position (descaled number)
      * @param isLong - True for long, false for short
      * @param tradingConfig - Trading config with fee rates
      */
     estimateOpenFee(notionalSize: number, isLong: boolean, tradingConfig: TradingConfigData): number {
+        const notionalBig = toFixed(notionalSize, 7);
+        const longNotional = toFixed(this.lNotional, 7);
+        const shortNotional = toFixed(this.sNotional, 7);
+
         // Check if this trade is on the dominant side
         const isDominant = isLong
-            ? (this.lNotional + notionalSize) > this.sNotional
-            : (this.sNotional + notionalSize) > this.lNotional;
+            ? (longNotional + notionalBig) > shortNotional
+            : (shortNotional + notionalBig) > longNotional;
 
-        const baseFee = isDominant
-            ? notionalSize * tradingConfig.feeDom
-            : notionalSize * tradingConfig.feeNonDom;
-        const priceImpact = notionalSize / this.impact;
+        const feeRate = toFixed(isDominant ? tradingConfig.feeDom : tradingConfig.feeNonDom, 7);
+        const impactBig = toFixed(this.impact, 7);
 
-        return baseFee + priceImpact;
+        // Contract: fixed_mul_ceil for base fee, fixed_div_floor for impact
+        const baseFee = mulCeil(notionalBig, feeRate, SCALAR_7);
+        const priceImpact = divFloor(notionalBig, impactBig, SCALAR_7);
+
+        return toFloat(baseFee + priceImpact, 7);
     }
 
     /**
@@ -334,82 +353,121 @@ export class Market implements MarketConfig, MarketData {
     /**
      * Get the current borrowing rate per hour for the dominant side.
      *
-     * Formula: rBase × (1 + rVar × util^5) × rVarMarket
-     * Only the side with more notional pays.
+     * Mirrors on-chain calc_borrowing_rate exactly in fixed-point bigint:
+     *   rate = r_base + r_var × util_vault^5 + r_var_market × util_market^3
+     *
+     * All rate values are SCALAR_18. Utilizations are SCALAR_7.
+     * Power operations use mulCeil with SCALAR_7 denominator.
      *
      * @param config - Trading config (rBase, rVar as SCALAR_18 bigints)
      * @param vaultBalance - Total assets in the vault (descaled number)
+     * @param totalNotional - Total notional across all markets (descaled number)
      * @returns { longRate, shortRate } as percentage per hour. Only the dominant side is nonzero.
      */
-    getBorrowingRates(config: TradingConfigData, vaultBalance: number): { longRate: number; shortRate: number } {
-        const L = this.lNotional;
-        const S = this.sNotional;
+    getBorrowingRates(
+        config: TradingConfigData,
+        vaultBalance: number,
+        totalNotional: number,
+    ): { longRate: number; shortRate: number } {
+        const L = toFixed(this.lNotional, 7);
+        const S = toFixed(this.sNotional, 7);
 
-        if (L === S) return { longRate: 0, shortRate: 0 };
+        if (L === 0n && S === 0n) return { longRate: 0, shortRate: 0 };
 
-        const util = this.getUtilization(vaultBalance);
-        const rBase = Number(config.rBase) / 1e18;
-        const rVar = config.rVar;  // already descaled (SCALAR_18 → number)
-        const rVarMarket = this.rVarMarket;
+        // All rates in SCALAR_18
+        const rBase = config.rBase;
+        const rVar = config.rVar;                         // bigint (SCALAR_18)
+        const rVarMarket = this.rVarMarket;  // already bigint (SCALAR_18)
 
-        // util^5
-        const u2 = util * util;
-        const u4 = u2 * u2;
-        const u5 = u4 * util;
+        let rate = rBase;
 
-        // multiplier = 1 + rVar × util^5
-        const multiplier = 1 + rVar * u5;
-        const rate = rBase * multiplier * rVarMarket;
+        // --- calc_util for vault ---
+        // Contract: cap = vault_balance.fixed_mul_floor(max_util, SCALAR_7)
+        //           util = min(notional.fixed_div_ceil(cap, SCALAR_7), SCALAR_7)
+        const vaultBalanceBig = toFixed(vaultBalance, 7);
+        const totalNotionalBig = toFixed(totalNotional, 7);
+        const maxUtilGlobal = toFixed(config.maxUtil, 7);
 
-        const ratePercent = rate * 100;
+        // Vault term: r_var × util_vault^5
+        if (rVar > 0n && vaultBalanceBig > 0n) {
+            const cap = mulFloor(vaultBalanceBig, maxUtilGlobal, SCALAR_7);
+            let utilVault = 0n;
+            if (cap > 0n && totalNotionalBig > 0n) {
+                const raw = divCeil(totalNotionalBig, cap, SCALAR_7);
+                utilVault = raw < SCALAR_7 ? raw : SCALAR_7;
+            }
+            if (utilVault > 0n) {
+                const u2 = mulCeil(utilVault, utilVault, SCALAR_7);
+                const u4 = mulCeil(u2, u2, SCALAR_7);
+                const u5 = mulCeil(u4, utilVault, SCALAR_7);
+                rate += mulCeil(rVar, u5, SCALAR_7);
+            }
+        }
 
+        // Market term: r_var_market × util_market^3
+        if (rVarMarket > 0n && vaultBalanceBig > 0n) {
+            const marketNotional = L + S;
+            const maxUtilMarket = toFixed(this.maxUtil, 7);
+            const cap = mulFloor(vaultBalanceBig, maxUtilMarket, SCALAR_7);
+            let utilMarket = 0n;
+            if (cap > 0n && marketNotional > 0n) {
+                const raw = divCeil(marketNotional, cap, SCALAR_7);
+                utilMarket = raw < SCALAR_7 ? raw : SCALAR_7;
+            }
+            if (utilMarket > 0n) {
+                const u2 = mulCeil(utilMarket, utilMarket, SCALAR_7);
+                const u3 = mulCeil(u2, utilMarket, SCALAR_7);
+                rate += mulCeil(rVarMarket, u3, SCALAR_7);
+            }
+        }
+
+        const ratePercent = toFloat(rate, 18) * 100;
+
+        // Contract: L > S → longs pay, S > L → shorts pay, L == S (both > 0) → both pay
         if (L > S) {
             return { longRate: ratePercent, shortRate: 0 };
-        } else {
+        } else if (S > L) {
             return { longRate: 0, shortRate: ratePercent };
+        } else {
+            return { longRate: ratePercent, shortRate: ratePercent };
         }
     }
 
     /**
-     * Get the current funding rate as a percentage per hour.
+     * Get the funding rates for both sides as percentage per hour.
      *
-     * Computed client-side from L/S sizes and base rate so it's always
-     * up-to-date (the on-chain stored rate only refreshes on execute_apply_funding).
+     * The paying side rate is `fundRate` (already stored on-chain).
+     * The receive side mirrors the contract's fixed-point path:
+     *   ratio = pay_notional / recv_notional  (SCALAR_18, floor)
+     *   recv_delta = pay_delta × ratio         (SCALAR_18, floor)
      *
-     * Formula: baseRate * |L - S| / (L + S)
-     * Positive = longs pay, negative = shorts pay.
-     *
-     * @param rFunding - Base hourly funding rate (SCALAR_18 precision bigint from TradingConfigData)
-     * @returns { longRate, shortRate } as percentage numbers
+     * @returns { longRate, shortRate } as percentage numbers.
+     *   Positive = paying, negative = receiving.
      */
-    getFundingRates(rFunding: bigint): { longRate: number; shortRate: number } {
-        const L = this.lNotional;
-        const S = this.sNotional;
-        const total = L + S;
+    getFundingRates(): { longRate: number; shortRate: number } {
+        const L = toFixed(this.lNotional, 7);
+        const S = toFixed(this.sNotional, 7);
+        const absFundRate = this.fundRate < 0n ? -this.fundRate : this.fundRate;
 
-        if (total === 0) {
+        if (absFundRate === 0n || L === 0n || S === 0n) {
             return { longRate: 0, shortRate: 0 };
         }
 
-        const baseRate = Number(rFunding) / 1e18;
-        const imbalance = Math.abs(L - S);
-        // Pay rate per unit (same as on-chain calc_funding_rate)
-        const payRate = baseRate * (imbalance / total);
+        const payRate = toFloat(absFundRate, 18);
+        const [payNotional, recvNotional] = this.fundRate > 0n ? [L, S] : [S, L];
 
-        if (L >= S) {
-            // Longs pay payRate per unit
-            // Shorts receive payRate x (L/S) per unit (self-balancing)
-            const receiveRate = S > 0 ? payRate * (L / S) : 0;
+        // Mirror contract: ratio = pay / recv (SCALAR_18 floor), recv = pay × ratio (floor)
+        const ratio = divFloor(payNotional, recvNotional, SCALAR_18);
+        const recvRate = toFloat(mulFloor(absFundRate, ratio, SCALAR_18), 18);
+
+        if (this.fundRate > 0n) {
             return {
                 longRate: payRate * 100,
-                shortRate: -receiveRate * 100,
+                shortRate: -recvRate * 100,
             };
         } else {
-            // Shorts pay payRate per unit
-            // Longs receive payRate x (S/L) per unit (self-balancing)
-            const receiveRate = L > 0 ? payRate * (S / L) : 0;
             return {
-                longRate: -receiveRate * 100,
+                longRate: -recvRate * 100,
                 shortRate: payRate * 100,
             };
         }

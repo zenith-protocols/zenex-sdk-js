@@ -11,7 +11,7 @@ export type { VaultStateData } from './vault_state.js';
 // Events
 export {
     VaultEventType,
-    parseVaultEvent,
+    decodeVaultEvent,
 } from './vault_events.js';
 
 export type {

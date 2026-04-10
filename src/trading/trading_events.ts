@@ -1,6 +1,5 @@
-import { rpc, scValToNative, xdr, Address } from '@stellar/stellar-sdk';
 import { i128, u32 } from '../index.js';
-import { ZenexContractType, BaseZenexEvent } from '../base_event.js';
+import { ZenexContractType, BaseZenexEvent, NormalizedEvent } from '../base_event.js';
 
 // Trading event types (matches Rust events)
 export enum TradingEventType {
@@ -20,7 +19,6 @@ export enum TradingEventType {
     ApplyFunding = 'ApplyFunding',
     RefundPosition = 'RefundPosition',
     ADLTriggered = 'ADLTriggered',
-    ADLMarket = 'ADLMarket',
 }
 
 // Trading Events
@@ -36,12 +34,12 @@ export interface TradingSetConfigEvent extends BaseTradingEvent {
 
 export interface TradingSetMarketEvent extends BaseTradingEvent {
     eventType: TradingEventType.SetMarket;
-    feedId: u32;
+    marketId: u32;
 }
 
 export interface TradingDelMarketEvent extends BaseTradingEvent {
     eventType: TradingEventType.DelMarket;
-    feedId: u32;
+    marketId: u32;
 }
 
 export interface TradingSetStatusEvent extends BaseTradingEvent {
@@ -49,28 +47,25 @@ export interface TradingSetStatusEvent extends BaseTradingEvent {
     status: u32;
 }
 
-// Position events - market order open
 export interface TradingOpenMarketEvent extends BaseTradingEvent {
     eventType: TradingEventType.OpenMarket;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
     baseFee: i128;
     impactFee: i128;
 }
 
-// Limit order placed (topics only, no data fields)
 export interface TradingPlaceLimitEvent extends BaseTradingEvent {
     eventType: TradingEventType.PlaceLimit;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
 }
 
-// Position closed
 export interface TradingClosePositionEvent extends BaseTradingEvent {
     eventType: TradingEventType.ClosePosition;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
     price: i128;
@@ -81,20 +76,18 @@ export interface TradingClosePositionEvent extends BaseTradingEvent {
     borrowingFee: i128;
 }
 
-// Limit order filled
 export interface TradingFillLimitEvent extends BaseTradingEvent {
     eventType: TradingEventType.FillLimit;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
     baseFee: i128;
     impactFee: i128;
 }
 
-// Liquidation
 export interface TradingLiquidationEvent extends BaseTradingEvent {
     eventType: TradingEventType.Liquidation;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
     price: i128;
@@ -105,10 +98,9 @@ export interface TradingLiquidationEvent extends BaseTradingEvent {
     liqFee: i128;
 }
 
-// Take profit triggered
 export interface TradingTakeProfitEvent extends BaseTradingEvent {
     eventType: TradingEventType.TakeProfit;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
     price: i128;
@@ -119,10 +111,9 @@ export interface TradingTakeProfitEvent extends BaseTradingEvent {
     borrowingFee: i128;
 }
 
-// Stop loss triggered
 export interface TradingStopLossEvent extends BaseTradingEvent {
     eventType: TradingEventType.StopLoss;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
     price: i128;
@@ -133,53 +124,39 @@ export interface TradingStopLossEvent extends BaseTradingEvent {
     borrowingFee: i128;
 }
 
-// Collateral modified (positive = deposit, negative = withdraw)
 export interface TradingModifyCollateralEvent extends BaseTradingEvent {
     eventType: TradingEventType.ModifyCollateral;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
     amount: i128;
 }
 
-// Triggers set
 export interface TradingSetTriggersEvent extends BaseTradingEvent {
     eventType: TradingEventType.SetTriggers;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
     takeProfit: i128;
     stopLoss: i128;
 }
 
-// Apply funding event
 export interface TradingApplyFundingEvent extends BaseTradingEvent {
     eventType: TradingEventType.ApplyFunding;
-    rates: Record<number, i128>;
 }
 
-// Position refunded (market disabled or deleted)
 export interface TradingRefundPositionEvent extends BaseTradingEvent {
     eventType: TradingEventType.RefundPosition;
-    feedId: u32;
+    marketId: u32;
     user: string;
     positionId: u32;
     amount: i128;
 }
 
-// ADL triggered event
 export interface TradingADLTriggeredEvent extends BaseTradingEvent {
     eventType: TradingEventType.ADLTriggered;
     reductionPct: i128;
     deficit: i128;
-}
-
-// ADL market event
-export interface TradingADLMarketEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ADLMarket;
-    feedId: u32;
-    factor: i128;
-    long: boolean;
 }
 
 export type TradingEvent =
@@ -198,239 +175,197 @@ export type TradingEvent =
     | TradingSetTriggersEvent
     | TradingRefundPositionEvent
     | TradingApplyFundingEvent
-    | TradingADLTriggeredEvent
-    | TradingADLMarketEvent;
+    | TradingADLTriggeredEvent;
 
 /**
- * Parse a trading event from RPC event response
+ * Decode a normalized event into a typed TradingEvent.
+ * Returns undefined if the event type is not a known trading event.
  */
-export function parseTradingEvent(
-    eventResponse: rpc.Api.RawEventResponse
-): TradingEvent | undefined {
-    if (
-        eventResponse.type !== 'contract' ||
-        !eventResponse.topic ||
-        eventResponse.topic.length === 0 ||
-        eventResponse.contractId === undefined
-    ) {
-        return undefined;
-    }
+export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undefined {
+    const { eventType, topicArgs, data } = event;
 
-    const topic = eventResponse.topic;
+    if (!(eventType in TradingEventType)) return undefined;
 
-    try {
-        const topicXdr = xdr.ScVal.fromXDR(topic[0], 'base64');
-        const eventType = scValToNative(topicXdr) as string;
+    const baseEvent: BaseTradingEvent = {
+        id: event.id,
+        contractId: event.contractId,
+        contractType: ZenexContractType.Trading,
+        eventType: eventType as TradingEventType,
+        ledger: event.ledger,
+        ledgerClosedAt: event.ledgerClosedAt,
+        txHash: event.txHash,
+    };
 
-        const valueXdr = xdr.ScVal.fromXDR(eventResponse.value, 'base64');
-        const eventData = scValToNative(valueXdr);
+    const marketId = topicArgs[0] as number ?? 0;
+    const user = topicArgs[1] as string ?? '';
+    const positionId = topicArgs[2] as number ?? 0;
 
-        const baseEvent: BaseTradingEvent = {
-            id: eventResponse.id,
-            contractId: eventResponse.contractId,
-            contractType: ZenexContractType.Trading,
-            eventType: eventType as TradingEventType,
-            ledger: eventResponse.ledger,
-            ledgerClosedAt: eventResponse.ledgerClosedAt,
-            txHash: eventResponse.txHash || '',
-        };
+    switch (eventType) {
+        case TradingEventType.SetConfig:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.SetConfig,
+                config: data,
+            } as TradingSetConfigEvent;
 
-        const extractAddress = (topicIndex: number): string => {
-            if (topic.length > topicIndex) {
-                const addressXdr = xdr.ScVal.fromXDR(topic[topicIndex], 'base64');
-                return Address.fromScVal(addressXdr).toString();
-            }
-            return '';
-        };
+        case TradingEventType.SetMarket:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.SetMarket,
+                marketId,
+            } as TradingSetMarketEvent;
 
-        const extractU32 = (topicIndex: number): number => {
-            if (topic.length > topicIndex) {
-                const u32Xdr = xdr.ScVal.fromXDR(topic[topicIndex], 'base64');
-                return scValToNative(u32Xdr) as number;
-            }
-            return 0;
-        };
+        case TradingEventType.DelMarket:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.DelMarket,
+                marketId,
+            } as TradingDelMarketEvent;
 
-        switch (eventType) {
-            case TradingEventType.SetConfig:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.SetConfig,
-                    config: eventData,
-                } as TradingSetConfigEvent;
+        case TradingEventType.SetStatus:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.SetStatus,
+                status: data.status as number,
+            } as TradingSetStatusEvent;
 
-            case TradingEventType.SetMarket:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.SetMarket,
-                    feedId: extractU32(1),
-                } as TradingSetMarketEvent;
+        case TradingEventType.OpenMarket:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.OpenMarket,
+                marketId,
+                user,
+                positionId,
+                baseFee: data.base_fee,
+                impactFee: data.impact_fee,
+            } as TradingOpenMarketEvent;
 
-            case TradingEventType.DelMarket:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.DelMarket,
-                    feedId: extractU32(1),
-                } as TradingDelMarketEvent;
+        case TradingEventType.PlaceLimit:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.PlaceLimit,
+                marketId,
+                user,
+                positionId,
+            } as TradingPlaceLimitEvent;
 
-            case TradingEventType.SetStatus:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.SetStatus,
-                    status: eventData.status,
-                } as TradingSetStatusEvent;
+        case TradingEventType.ClosePosition:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.ClosePosition,
+                marketId,
+                user,
+                positionId,
+                price: data.price,
+                pnl: data.pnl,
+                baseFee: data.base_fee,
+                impactFee: data.impact_fee,
+                funding: data.funding,
+                borrowingFee: data.borrowing_fee,
+            } as TradingClosePositionEvent;
 
-            case TradingEventType.OpenMarket:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.OpenMarket,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                    baseFee: eventData.base_fee,
-                    impactFee: eventData.impact_fee,
-                } as TradingOpenMarketEvent;
+        case TradingEventType.FillLimit:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.FillLimit,
+                marketId,
+                user,
+                positionId,
+                baseFee: data.base_fee,
+                impactFee: data.impact_fee,
+            } as TradingFillLimitEvent;
 
-            case TradingEventType.PlaceLimit:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.PlaceLimit,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                } as TradingPlaceLimitEvent;
+        case TradingEventType.Liquidation:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.Liquidation,
+                marketId,
+                user,
+                positionId,
+                price: data.price,
+                baseFee: data.base_fee,
+                impactFee: data.impact_fee,
+                funding: data.funding,
+                borrowingFee: data.borrowing_fee,
+                liqFee: data.liq_fee,
+            } as TradingLiquidationEvent;
 
-            case TradingEventType.ClosePosition:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.ClosePosition,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                    price: eventData.price,
-                    pnl: eventData.pnl,
-                    baseFee: eventData.base_fee,
-                    impactFee: eventData.impact_fee,
-                    funding: eventData.funding,
-                    borrowingFee: eventData.borrowing_fee,
-                } as TradingClosePositionEvent;
+        case TradingEventType.TakeProfit:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.TakeProfit,
+                marketId,
+                user,
+                positionId,
+                price: data.price,
+                pnl: data.pnl,
+                baseFee: data.base_fee,
+                impactFee: data.impact_fee,
+                funding: data.funding,
+                borrowingFee: data.borrowing_fee,
+            } as TradingTakeProfitEvent;
 
-            case TradingEventType.FillLimit:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.FillLimit,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                    baseFee: eventData.base_fee,
-                    impactFee: eventData.impact_fee,
-                } as TradingFillLimitEvent;
+        case TradingEventType.StopLoss:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.StopLoss,
+                marketId,
+                user,
+                positionId,
+                price: data.price,
+                pnl: data.pnl,
+                baseFee: data.base_fee,
+                impactFee: data.impact_fee,
+                funding: data.funding,
+                borrowingFee: data.borrowing_fee,
+            } as TradingStopLossEvent;
 
-            case TradingEventType.Liquidation:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.Liquidation,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                    price: eventData.price,
-                    baseFee: eventData.base_fee,
-                    impactFee: eventData.impact_fee,
-                    funding: eventData.funding,
-                    borrowingFee: eventData.borrowing_fee,
-                    liqFee: eventData.liq_fee,
-                } as TradingLiquidationEvent;
+        case TradingEventType.ModifyCollateral:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.ModifyCollateral,
+                marketId,
+                user,
+                positionId,
+                amount: data.amount,
+            } as TradingModifyCollateralEvent;
 
-            case TradingEventType.TakeProfit:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.TakeProfit,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                    price: eventData.price,
-                    pnl: eventData.pnl,
-                    baseFee: eventData.base_fee,
-                    impactFee: eventData.impact_fee,
-                    funding: eventData.funding,
-                    borrowingFee: eventData.borrowing_fee,
-                } as TradingTakeProfitEvent;
+        case TradingEventType.SetTriggers:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.SetTriggers,
+                marketId,
+                user,
+                positionId,
+                takeProfit: data.take_profit,
+                stopLoss: data.stop_loss,
+            } as TradingSetTriggersEvent;
 
-            case TradingEventType.StopLoss:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.StopLoss,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                    price: eventData.price,
-                    pnl: eventData.pnl,
-                    baseFee: eventData.base_fee,
-                    impactFee: eventData.impact_fee,
-                    funding: eventData.funding,
-                    borrowingFee: eventData.borrowing_fee,
-                } as TradingStopLossEvent;
+        case TradingEventType.RefundPosition:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.RefundPosition,
+                marketId,
+                user,
+                positionId,
+                amount: data.amount,
+            } as TradingRefundPositionEvent;
 
-            case TradingEventType.ModifyCollateral:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.ModifyCollateral,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                    amount: eventData.amount,
-                } as TradingModifyCollateralEvent;
+        case TradingEventType.ApplyFunding:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.ApplyFunding,
+            } as TradingApplyFundingEvent;
 
-            case TradingEventType.SetTriggers:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.SetTriggers,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                    takeProfit: eventData.take_profit,
-                    stopLoss: eventData.stop_loss,
-                } as TradingSetTriggersEvent;
+        case TradingEventType.ADLTriggered:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.ADLTriggered,
+                reductionPct: data.reduction_pct,
+                deficit: data.deficit,
+            } as TradingADLTriggeredEvent;
 
-            case TradingEventType.RefundPosition:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.RefundPosition,
-                    feedId: extractU32(1),
-                    user: extractAddress(2),
-                    positionId: extractU32(3),
-                    amount: eventData.amount,
-                } as TradingRefundPositionEvent;
-
-            case TradingEventType.ApplyFunding:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.ApplyFunding,
-                    rates: eventData.rates,
-                } as TradingApplyFundingEvent;
-
-            case TradingEventType.ADLTriggered:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.ADLTriggered,
-                    reductionPct: eventData.reduction_pct,
-                    deficit: eventData.deficit,
-                } as TradingADLTriggeredEvent;
-
-            case TradingEventType.ADLMarket:
-                return {
-                    ...baseEvent,
-                    eventType: TradingEventType.ADLMarket,
-                    feedId: extractU32(1),
-                    factor: eventData.factor,
-                    long: eventData.long,
-                } as TradingADLMarketEvent;
-
-            default:
-                return undefined;
-        }
-    } catch (error) {
-        console.warn('Failed to parse trading event:', error);
-        return undefined;
+        default:
+            return undefined;
     }
 }

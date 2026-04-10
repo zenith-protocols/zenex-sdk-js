@@ -48,6 +48,7 @@ export type {
 // Events
 export {
     TradingEventType,
+    decodeTradingEvent,
 } from './trading_events.js';
 
 export type {
@@ -68,9 +69,5 @@ export type {
     TradingRefundPositionEvent,
     TradingApplyFundingEvent,
     TradingADLTriggeredEvent,
-    TradingADLMarketEvent,
     TradingEvent,
 } from './trading_events.js';
-
-// Parser
-export { parseTradingEvent } from './trading_events.js';

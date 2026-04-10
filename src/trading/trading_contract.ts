@@ -13,7 +13,7 @@ export enum ContractStatus {
 // Place limit order arguments
 export interface PlaceLimitArgs {
     user: string;
-    feed_id: u32;
+    market_id: u32;
     collateral: i128;
     notional_size: i128;
     is_long: boolean;
@@ -25,7 +25,7 @@ export interface PlaceLimitArgs {
 // Open market order arguments
 export interface OpenMarketArgs {
     user: string;
-    feed_id: u32;
+    market_id: u32;
     collateral: i128;
     notional_size: i128;
     is_long: boolean;
@@ -51,6 +51,7 @@ export interface ModifyCollateralArgs {
 // Execute arguments
 export interface ExecuteArgs {
     caller: string;
+    market_id: u32;
     position_ids: u32[];
     price: Buffer | Uint8Array;
 }
@@ -80,6 +81,7 @@ export interface TradingConfigArgs {
 
 // Market config arguments (raw i128 values for contract calls)
 export interface MarketConfigArgs {
+    feed_id: u32;
     enabled: boolean;
     max_util: i128;
     r_var_market: i128;
@@ -190,13 +192,13 @@ export class TradingContract extends Contract {
 
     /**
      * Add or update a market (owner only)
-     * @param feedId - Pyth Lazer feed ID
-     * @param config - Market configuration
+     * @param marketId - Market identifier
+     * @param config - Market configuration (includes feed_id for Pyth price feed)
      */
-    setMarket(feedId: u32, config: MarketConfigArgs): string {
+    setMarket(marketId: u32, config: MarketConfigArgs): string {
         return this.call(
             'set_market',
-            xdr.ScVal.scvU32(feedId),
+            xdr.ScVal.scvU32(marketId),
             TradingContract.marketConfigToScVal(config),
         ).toXDR('base64');
     }
@@ -205,12 +207,12 @@ export class TradingContract extends Contract {
      * Remove a market (owner only)
      * Subtracts remaining OI from total_notional. Existing positions
      * are refunded via closePosition or execute.
-     * @param feedId - Pyth Lazer feed ID
+     * @param marketId - Market identifier
      */
-    delMarket(feedId: u32): string {
+    delMarket(marketId: u32): string {
         return this.call(
             'del_market',
-            xdr.ScVal.scvU32(feedId),
+            xdr.ScVal.scvU32(marketId),
         ).toXDR('base64');
     }
 
@@ -274,7 +276,7 @@ export class TradingContract extends Contract {
         return this.call(
             'place_limit',
             Address.fromString(args.user).toScVal(),
-            xdr.ScVal.scvU32(args.feed_id),
+            xdr.ScVal.scvU32(args.market_id),
             nativeToScVal(args.collateral, { type: 'i128' }),
             nativeToScVal(args.notional_size, { type: 'i128' }),
             xdr.ScVal.scvBool(args.is_long),
@@ -293,7 +295,7 @@ export class TradingContract extends Contract {
         return this.call(
             'open_market',
             Address.fromString(args.user).toScVal(),
-            xdr.ScVal.scvU32(args.feed_id),
+            xdr.ScVal.scvU32(args.market_id),
             nativeToScVal(args.collateral, { type: 'i128' }),
             nativeToScVal(args.notional_size, { type: 'i128' }),
             xdr.ScVal.scvBool(args.is_long),
@@ -355,7 +357,7 @@ export class TradingContract extends Contract {
     /**
      * Execute keeper triggers (auto-detects: fill, liquidation, SL, TP)
      */
-    execute(caller: Address | string, positionIds: u32[], price: Buffer | Uint8Array): string {
+    execute(caller: Address | string, marketId: u32, positionIds: u32[], price: Buffer | Uint8Array): string {
         const callerAddress = typeof caller === 'string'
             ? Address.fromString(caller)
             : caller;
@@ -369,6 +371,7 @@ export class TradingContract extends Contract {
         return this.call(
             'execute',
             callerAddress.toScVal(),
+            xdr.ScVal.scvU32(marketId),
             idsScVal,
             xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
@@ -415,17 +418,17 @@ export class TradingContract extends Contract {
         ).toXDR('base64');
     }
 
-    getMarketConfig(feedId: u32): string {
+    getMarketConfig(marketId: u32): string {
         return this.call(
             'get_market_config',
-            xdr.ScVal.scvU32(feedId),
+            xdr.ScVal.scvU32(marketId),
         ).toXDR('base64');
     }
 
-    getMarketData(feedId: u32): string {
+    getMarketData(marketId: u32): string {
         return this.call(
             'get_market_data',
-            xdr.ScVal.scvU32(feedId),
+            xdr.ScVal.scvU32(marketId),
         ).toXDR('base64');
     }
 
@@ -511,6 +514,10 @@ export class TradingContract extends Contract {
             new xdr.ScMapEntry({
                 key: xdr.ScVal.scvSymbol('enabled'),
                 val: xdr.ScVal.scvBool(config.enabled),
+            }),
+            new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol('feed_id'),
+                val: xdr.ScVal.scvU32(config.feed_id),
             }),
             new xdr.ScMapEntry({
                 key: xdr.ScVal.scvSymbol('impact'),
