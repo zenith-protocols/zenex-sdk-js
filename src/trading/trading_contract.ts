@@ -36,14 +36,16 @@ export interface OpenMarketArgs {
 
 // Set triggers arguments
 export interface SetTriggersArgs {
-    position_id: u32;
+    user: string;
+    id: u32;
     take_profit: i128;
     stop_loss: i128;
 }
 
 // Modify collateral arguments
 export interface ModifyCollateralArgs {
-    position_id: u32;
+    user: string;
+    id: u32;
     new_collateral: i128;
     price: Buffer | Uint8Array;
 }
@@ -52,7 +54,8 @@ export interface ModifyCollateralArgs {
 export interface ExecuteArgs {
     caller: string;
     market_id: u32;
-    position_ids: u32[];
+    users: string[];
+    ids: u32[];
     price: Buffer | Uint8Array;
 }
 
@@ -126,7 +129,7 @@ export class TradingContract extends Contract {
         // View / Getter methods
         getPosition: (result: string) =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        getUserPositions: (result: string): u32[] =>
+        getUserCounter: (result: string): u32 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         getMarketConfig: (result: string) =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
@@ -307,24 +310,26 @@ export class TradingContract extends Contract {
 
     /**
      * Cancel a position and refund collateral.
-     * Pending: always allowed. Filled: only if market deleted.
+     * Pending: requires user auth. Filled: only if market deleted (permissionless).
      */
-    cancelPosition(positionId: u32): string {
+    cancelPosition(user: string, id: u32): string {
         return this.call(
             'cancel_position',
-            xdr.ScVal.scvU32(positionId),
+            Address.fromString(user).toScVal(),
+            xdr.ScVal.scvU32(id),
         ).toXDR('base64');
     }
 
     /**
      * Close a filled position
-     * Returns pnl (i128)
+     * Returns user payout (i128)
      */
-    closePosition(positionId: u32, price: Buffer | Uint8Array): string {
+    closePosition(user: string, id: u32, price: Buffer | Uint8Array): string {
         const priceBuffer = price instanceof Buffer ? price : Buffer.from(price);
         return this.call(
             'close_position',
-            xdr.ScVal.scvU32(positionId),
+            Address.fromString(user).toScVal(),
+            xdr.ScVal.scvU32(id),
             xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
     }
@@ -336,7 +341,8 @@ export class TradingContract extends Contract {
         const priceBuffer = args.price instanceof Buffer ? args.price : Buffer.from(args.price);
         return this.call(
             'modify_collateral',
-            xdr.ScVal.scvU32(args.position_id),
+            Address.fromString(args.user).toScVal(),
+            xdr.ScVal.scvU32(args.id),
             nativeToScVal(args.new_collateral, { type: 'i128' }),
             xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
@@ -348,7 +354,8 @@ export class TradingContract extends Contract {
     setTriggers(args: SetTriggersArgs): string {
         return this.call(
             'set_triggers',
-            xdr.ScVal.scvU32(args.position_id),
+            Address.fromString(args.user).toScVal(),
+            xdr.ScVal.scvU32(args.id),
             nativeToScVal(args.take_profit, { type: 'i128' }),
             nativeToScVal(args.stop_loss, { type: 'i128' }),
         ).toXDR('base64');
@@ -356,14 +363,19 @@ export class TradingContract extends Contract {
 
     /**
      * Execute keeper triggers (auto-detects: fill, liquidation, SL, TP)
+     * @param users - Position owner addresses (parallel with ids)
+     * @param ids - Per-user position IDs (parallel with users)
      */
-    execute(caller: Address | string, marketId: u32, positionIds: u32[], price: Buffer | Uint8Array): string {
+    execute(caller: Address | string, marketId: u32, users: string[], ids: u32[], price: Buffer | Uint8Array): string {
         const callerAddress = typeof caller === 'string'
             ? Address.fromString(caller)
             : caller;
 
+        const usersScVal = xdr.ScVal.scvVec(
+            users.map(u => Address.fromString(u).toScVal())
+        );
         const idsScVal = xdr.ScVal.scvVec(
-            positionIds.map(id => xdr.ScVal.scvU32(id))
+            ids.map(id => xdr.ScVal.scvU32(id))
         );
 
         const priceBuffer = price instanceof Buffer ? price : Buffer.from(price);
@@ -372,6 +384,7 @@ export class TradingContract extends Contract {
             'execute',
             callerAddress.toScVal(),
             xdr.ScVal.scvU32(marketId),
+            usersScVal,
             idsScVal,
             xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
@@ -403,17 +416,18 @@ export class TradingContract extends Contract {
     // View / Getter Methods
     // ============================================================
 
-    getPosition(positionId: u32): string {
+    getPosition(user: string, id: u32): string {
         return this.call(
             'get_position',
-            xdr.ScVal.scvU32(positionId),
+            Address.fromString(user).toScVal(),
+            xdr.ScVal.scvU32(id),
         ).toXDR('base64');
     }
 
-    getUserPositions(user: Address | string): string {
+    getUserCounter(user: Address | string): string {
         const addr = typeof user === 'string' ? Address.fromString(user) : user;
         return this.call(
-            'get_user_positions',
+            'get_user_counter',
             addr.toScVal(),
         ).toXDR('base64');
     }

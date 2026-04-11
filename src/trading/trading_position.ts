@@ -79,7 +79,7 @@ export interface PositionBreakdown {
 // Position data for SDK consumers (descaled)
 export interface PositionData {
     id: number;
-    user: string;
+    user: string;        // position owner (from storage key, not in on-chain struct)
     filled: boolean;
     marketId: number;
     long: boolean;
@@ -136,41 +136,42 @@ export class Position implements PositionData {
     // === Static Loaders ===
 
     /**
-     * Load user's position IDs from the blockchain
+     * Load the user's position counter (number of positions ever created).
+     * Position IDs for this user are 0..counter-1 (not all may still exist).
      */
-    public static async loadUserPositionIds(
+    public static async loadUserCounter(
         network: Network,
         contractId: string,
         userId: string
-    ): Promise<number[]> {
+    ): Promise<number> {
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
 
         const key = persistentLedgerKey(contractId, [
-            xdr.ScVal.scvSymbol('UserPositions'),
+            xdr.ScVal.scvSymbol('UserCounter'),
             Address.fromString(userId).toScVal()
         ]);
 
         try {
             const response = await stellarRpc.getLedgerEntries(key);
-            if (response.entries.length === 0) return [];
+            if (response.entries.length === 0) return 0;
 
             const scVal = response.entries[0].val.contractData().val();
-            const vec = scVal.vec();
-            if (!vec) return [];
-
-            return vec.map(val => val.u32());
+            return scVal.u32();
         } catch {
-            return [];
+            return 0;
         }
     }
 
     /**
      * Load a single trading position from the blockchain
+     * @param userId - Position owner address
+     * @param positionId - Per-user position ID
      * @param priceDecimals - Feed exponent magnitude for descaling price fields (e.g. 8 for Pyth -8)
      */
     public static async load(
         network: Network,
         contractId: string,
+        userId: string,
         positionId: number,
         priceDecimals: number,
     ): Promise<Position | null> {
@@ -178,6 +179,7 @@ export class Position implements PositionData {
 
         const key = persistentLedgerKey(contractId, [
             xdr.ScVal.scvSymbol('Position'),
+            Address.fromString(userId).toScVal(),
             xdr.ScVal.scvU32(positionId)
         ]);
 
@@ -185,19 +187,22 @@ export class Position implements PositionData {
             const response = await stellarRpc.getLedgerEntries(key);
             if (response.entries.length === 0) return null;
 
-            return Position.fromScVal(response.entries[0].val.contractData().val(), positionId, priceDecimals);
+            return Position.fromScVal(response.entries[0].val.contractData().val(), positionId, userId, priceDecimals);
         } catch {
             return null;
         }
     }
 
     /**
-     * Load multiple positions in a single RPC call
+     * Load multiple positions for a single user in a single RPC call
+     * @param userId - Position owner address
+     * @param positionIds - Per-user position IDs to load
      * @param getFeedDecimals - Callback to resolve feed exponent magnitude by marketId
      */
     public static async loadMultiple(
         network: Network,
         contractId: string,
+        userId: string,
         positionIds: number[],
         getFeedDecimals: (marketId: number) => number,
     ): Promise<Position[]> {
@@ -209,6 +214,7 @@ export class Position implements PositionData {
         const keys = positionIds.map(id =>
             persistentLedgerKey(contractId, [
                 xdr.ScVal.scvSymbol('Position'),
+                Address.fromString(userId).toScVal(),
                 xdr.ScVal.scvU32(id)
             ])
         );
@@ -226,7 +232,7 @@ export class Position implements PositionData {
             if (!entryVal) continue;
 
             try {
-                const position = Position.fromScVal(entryVal.contractData().val(), positionIds[i], getFeedDecimals);
+                const position = Position.fromScVal(entryVal.contractData().val(), positionIds[i], userId, getFeedDecimals);
                 positions.push(position);
             } catch {
                 // skip unparseable entry
@@ -239,13 +245,15 @@ export class Position implements PositionData {
     /**
      * Parse Position from ScVal (matches Rust Position struct)
      * @param val - The ScVal to parse
-     * @param id - Position ID (from storage key, not in struct)
+     * @param id - Position ID (from storage key)
+     * @param user - Position owner address (from storage key, not in struct)
      * @param priceDecimalsOrLookup - Feed exponent magnitude, or callback to resolve by marketId
      * @internal
      */
     static fromScVal(
         val: xdr.ScVal,
         id: number = 0,
+        user: string = '',
         priceDecimalsOrLookup: number | ((marketId: number) => number),
     ): Position {
         const map = val.map();
@@ -253,7 +261,6 @@ export class Position implements PositionData {
             throw new Error('Invalid position data: expected map');
         }
 
-        let user: string | undefined;
         let filled: boolean | undefined;
         let marketId: number | undefined;
         let long: boolean | undefined;
@@ -271,9 +278,6 @@ export class Position implements PositionData {
             const key = entry.key().sym().toString();
 
             switch (key) {
-                case 'user':
-                    user = Address.fromScVal(entry.val()).toString();
-                    break;
                 case 'filled':
                     filled = entry.val().b();
                     break;
@@ -314,7 +318,6 @@ export class Position implements PositionData {
         });
 
         if (
-            user === undefined ||
             filled === undefined ||
             marketId === undefined ||
             long === undefined ||
