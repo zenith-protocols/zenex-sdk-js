@@ -1,4 +1,4 @@
-import { i128, u32 } from '../index.js';
+import { i128, u32, u64 } from '../index.js';
 import { ZenexContractType, BaseZenexEvent, NormalizedEvent } from '../base_event.js';
 
 // Trading event types (matches Rust events)
@@ -52,6 +52,17 @@ export interface TradingOpenMarketEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
+    // Full post-fill position state (Position has no prior row).
+    long: boolean;
+    col: i128;
+    notional: i128;
+    entryPrice: i128;
+    sl: i128;
+    tp: i128;
+    fundIdx: i128;
+    borrIdx: i128;
+    adlIdx: i128;
+    createdAt: u64;
     baseFee: i128;
     impactFee: i128;
 }
@@ -61,6 +72,15 @@ export interface TradingPlaceLimitEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
+    // Initial limit-order state. Indices (fund/borr/adl) are snapshotted
+    // at fill, not at placement — use FillLimit event for those.
+    long: boolean;
+    col: i128;
+    notional: i128;
+    entryPrice: i128; // limit trigger price
+    sl: i128;
+    tp: i128;
+    createdAt: u64;
 }
 
 export interface TradingClosePositionEvent extends BaseTradingEvent {
@@ -81,6 +101,13 @@ export interface TradingFillLimitEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
+    // Fill-time state. long/col/notional/sl/tp inherited from prior
+    // PlaceLimit row; only fill-specific fields emitted here.
+    entryPrice: i128; // actual fill price (may differ from limit trigger)
+    fundIdx: i128;
+    borrIdx: i128;
+    adlIdx: i128;
+    createdAt: u64; // fill time supersedes placement time
     baseFee: i128;
     impactFee: i128;
 }
@@ -129,7 +156,7 @@ export interface TradingModifyCollateralEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
-    amount: i128;
+    col: i128; // new collateral; delta = col - prior_col (caller computes)
 }
 
 export interface TradingSetTriggersEvent extends BaseTradingEvent {
@@ -137,8 +164,8 @@ export interface TradingSetTriggersEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
-    takeProfit: i128;
-    stopLoss: i128;
+    sl: i128;
+    tp: i128;
 }
 
 export interface TradingApplyFundingEvent extends BaseTradingEvent {
@@ -150,7 +177,6 @@ export interface TradingRefundPositionEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
-    amount: i128;
 }
 
 export interface TradingADLTriggeredEvent extends BaseTradingEvent {
@@ -236,6 +262,16 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
+                long: data.long,
+                col: data.col,
+                notional: data.notional,
+                entryPrice: data.entry_price,
+                sl: data.sl,
+                tp: data.tp,
+                fundIdx: data.fund_idx,
+                borrIdx: data.borr_idx,
+                adlIdx: data.adl_idx,
+                createdAt: data.created_at,
                 baseFee: data.base_fee,
                 impactFee: data.impact_fee,
             } as TradingOpenMarketEvent;
@@ -247,6 +283,13 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
+                long: data.long,
+                col: data.col,
+                notional: data.notional,
+                entryPrice: data.entry_price,
+                sl: data.sl,
+                tp: data.tp,
+                createdAt: data.created_at,
             } as TradingPlaceLimitEvent;
 
         case TradingEventType.ClosePosition:
@@ -271,6 +314,11 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
+                entryPrice: data.entry_price,
+                fundIdx: data.fund_idx,
+                borrIdx: data.borr_idx,
+                adlIdx: data.adl_idx,
+                createdAt: data.created_at,
                 baseFee: data.base_fee,
                 impactFee: data.impact_fee,
             } as TradingFillLimitEvent;
@@ -327,7 +375,7 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
-                amount: data.amount,
+                col: data.col,
             } as TradingModifyCollateralEvent;
 
         case TradingEventType.SetTriggers:
@@ -337,8 +385,8 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
-                takeProfit: data.take_profit,
-                stopLoss: data.stop_loss,
+                sl: data.sl,
+                tp: data.tp,
             } as TradingSetTriggersEvent;
 
         case TradingEventType.RefundPosition:
@@ -348,7 +396,6 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
-                amount: data.amount,
             } as TradingRefundPositionEvent;
 
         case TradingEventType.ApplyFunding:

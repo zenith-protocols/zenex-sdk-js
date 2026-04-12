@@ -96,6 +96,35 @@ export interface PositionData {
 }
 
 /**
+ * Raw on-chain position state — no descaling.
+ *
+ * Use this when you need byte-exact fidelity with the contract's
+ * i128 storage (indexing, reconciliation, accounting, auditing).
+ * `col`, `notional`, `sl`, `tp`, `entryPrice` are the raw scaled
+ * integers the contract stores.
+ *
+ * `priceDecimals` is preserved so a consumer can descale on demand
+ * without needing a separate market lookup.
+ */
+export interface PositionRaw {
+    id: number;
+    user: string;
+    filled: boolean;
+    marketId: number;
+    long: boolean;
+    sl: bigint;          // scaled by 10^priceDecimals
+    tp: bigint;          // scaled by 10^priceDecimals
+    entryPrice: bigint;  // scaled by 10^priceDecimals
+    col: bigint;         // scaled by 10^7 (USDC)
+    notional: bigint;    // scaled by 10^7 (USDC)
+    fundIdx: bigint;     // SCALAR_18
+    borrIdx: bigint;     // SCALAR_18
+    adlIdx: bigint;      // SCALAR_18
+    createdAt: number;
+    priceDecimals: number;
+}
+
+/**
  * Position - Trading position class with loaders and computed properties
  */
 export class Position implements PositionData {
@@ -194,6 +223,39 @@ export class Position implements PositionData {
     }
 
     /**
+     * Load a single position without descaling — returns raw bigints
+     * for money/price fields so callers preserve byte-exact on-chain
+     * state. Intended for indexers, reconcilers, and accounting paths.
+     */
+    public static async loadRaw(
+        network: Network,
+        contractId: string,
+        userId: string,
+        positionId: number,
+        priceDecimals: number,
+    ): Promise<PositionRaw | null> {
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+
+        const key = persistentLedgerKey(contractId, [
+            xdr.ScVal.scvSymbol('Position'),
+            Address.fromString(userId).toScVal(),
+            xdr.ScVal.scvU32(positionId)
+        ]);
+
+        try {
+            const response = await stellarRpc.getLedgerEntries(key);
+            if (response.entries.length === 0) return null;
+
+            return Position.fromScValRaw(
+                response.entries[0].val.contractData().val(),
+                positionId, userId, priceDecimals,
+            );
+        } catch {
+            return null;
+        }
+    }
+
+    /**
      * Load multiple positions for a single user in a single RPC call
      * @param userId - Position owner address
      * @param positionIds - Per-user position IDs to load
@@ -243,19 +305,71 @@ export class Position implements PositionData {
     }
 
     /**
-     * Parse Position from ScVal (matches Rust Position struct)
-     * @param val - The ScVal to parse
-     * @param id - Position ID (from storage key)
-     * @param user - Position owner address (from storage key, not in struct)
-     * @param priceDecimalsOrLookup - Feed exponent magnitude, or callback to resolve by marketId
+     * Load multiple positions for a single user in one RPC call,
+     * returning raw (non-descaled) on-chain state. Parallels
+     * `loadMultiple` but preserves bigint fidelity — use in indexers,
+     * reconcilers, and anywhere rounding cannot be tolerated.
+     */
+    public static async loadMultipleRaw(
+        network: Network,
+        contractId: string,
+        userId: string,
+        positionIds: number[],
+        getFeedDecimals: (marketId: number) => number,
+    ): Promise<PositionRaw[]> {
+        if (positionIds.length === 0) return [];
+
+        const stellarRpc = new rpc.Server(network.rpc, network.opts);
+        const out: PositionRaw[] = [];
+
+        const keys = positionIds.map(id =>
+            persistentLedgerKey(contractId, [
+                xdr.ScVal.scvSymbol('Position'),
+                Address.fromString(userId).toScVal(),
+                xdr.ScVal.scvU32(id)
+            ])
+        );
+
+        const response = await stellarRpc.getLedgerEntries(...keys);
+
+        const entryMap = new Map<string, xdr.LedgerEntryData>();
+        for (const entry of response.entries) {
+            entryMap.set(entry.key.toXDR('base64'), entry.val);
+        }
+
+        for (let i = 0; i < positionIds.length; i++) {
+            const entryVal = entryMap.get(keys[i].toXDR('base64'));
+            if (!entryVal) continue;
+
+            try {
+                const raw = Position.fromScValRaw(
+                    entryVal.contractData().val(),
+                    positionIds[i], userId, getFeedDecimals,
+                );
+                out.push(raw);
+            } catch {
+                // skip unparseable entry
+            }
+        }
+
+        return out;
+    }
+
+    /**
+     * Parse raw Position state from ScVal — no descaling.
+     *
+     * Consumers that need byte-exact on-chain state (indexers,
+     * reconcilers, accounting) should prefer this over `fromScVal`
+     * which descales money/price fields to `number`.
+     *
      * @internal
      */
-    static fromScVal(
+    static fromScValRaw(
         val: xdr.ScVal,
         id: number = 0,
         user: string = '',
         priceDecimalsOrLookup: number | ((marketId: number) => number),
-    ): Position {
+    ): PositionRaw {
         const map = val.map();
         if (!map) {
             throw new Error('Invalid position data: expected map');
@@ -338,22 +452,37 @@ export class Position implements PositionData {
             ? priceDecimalsOrLookup(marketId)
             : priceDecimalsOrLookup;
 
-        return new Position({
-            id,
-            user,
-            filled,
-            marketId,
-            long,
-            sl: toFloat(sl, priceDecimals),
-            tp: toFloat(tp, priceDecimals),
-            entryPrice: toFloat(entryPrice, priceDecimals),
-            col: toFloat(col, 7),
-            notional: toFloat(notional, 7),
-            fundIdx,
-            borrIdx,
-            adlIdx,
+        return {
+            id, user, filled, marketId, long,
+            sl, tp, entryPrice, col, notional,
+            fundIdx, borrIdx, adlIdx,
             createdAt: Number(createdAt),
             priceDecimals,
+        };
+    }
+
+    /**
+     * Parse Position from ScVal (matches Rust Position struct), descaling
+     * money/price fields to `number` for typical SDK consumers.
+     *
+     * For byte-exact on-chain state, use `fromScValRaw` instead.
+     *
+     * @internal
+     */
+    static fromScVal(
+        val: xdr.ScVal,
+        id: number = 0,
+        user: string = '',
+        priceDecimalsOrLookup: number | ((marketId: number) => number),
+    ): Position {
+        const raw = Position.fromScValRaw(val, id, user, priceDecimalsOrLookup);
+        return new Position({
+            ...raw,
+            sl: toFloat(raw.sl, raw.priceDecimals),
+            tp: toFloat(raw.tp, raw.priceDecimals),
+            entryPrice: toFloat(raw.entryPrice, raw.priceDecimals),
+            col: toFloat(raw.col, 7),
+            notional: toFloat(raw.notional, 7),
         });
     }
 

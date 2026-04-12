@@ -26,6 +26,7 @@ export type {
     PositionPnL,
     PositionBreakdown,
     PositionData,
+    PositionRaw,
     ValidateOrderParams,
     GrossCollateralParams,
     GrossCollateralResult,
