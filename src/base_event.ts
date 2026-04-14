@@ -81,9 +81,20 @@ export type MercuryScVal =
 
 /**
  * Normalize an RPC event response into the source-agnostic intermediate.
+ *
+ * Accepts both shapes emitted by `@stellar/stellar-sdk`:
+ *   - `rpc.Api.RawEventResponse` — base64 strings in `topic`/`value`, strkey
+ *     `contractId`. Returned by JSON-RPC directly and by the internal
+ *     `_getEvents` path.
+ *   - `rpc.Api.EventResponse` (SDK ≥15) — `topic`/`value` are already
+ *     `xdr.ScVal` objects and `contractId` is a `Contract` instance.
+ *     Returned by `rpc.Server.getEvents()` after its built-in normalization.
+ *
+ * Previously this function assumed only the raw shape and silently dropped
+ * SDK-normalized events (base64 decode threw, caught, returned undefined).
  */
 export function normalizeRpc(
-    eventResponse: rpc.Api.RawEventResponse
+    eventResponse: rpc.Api.RawEventResponse | rpc.Api.EventResponse
 ): NormalizedEvent | undefined {
     if (
         eventResponse.type !== 'contract' ||
@@ -95,15 +106,15 @@ export function normalizeRpc(
     }
 
     try {
-        const topic = eventResponse.topic;
+        const topic = eventResponse.topic as (string | xdr.ScVal)[];
+        const toScVal = (v: string | xdr.ScVal): xdr.ScVal =>
+            typeof v === 'string' ? xdr.ScVal.fromXDR(v, 'base64') : v;
 
-        const eventType = scValToNative(
-            xdr.ScVal.fromXDR(topic[0], 'base64')
-        ) as string;
+        const eventType = scValToNative(toScVal(topic[0])) as string;
 
         const topicArgs: unknown[] = [];
         for (let i = 1; i < topic.length; i++) {
-            const scVal = xdr.ScVal.fromXDR(topic[i], 'base64');
+            const scVal = toScVal(topic[i]);
             if (scVal.switch().name === 'scvAddress') {
                 topicArgs.push(Address.fromScVal(scVal).toString());
             } else {
@@ -111,12 +122,16 @@ export function normalizeRpc(
             }
         }
 
-        const data = scValToNative(
-            xdr.ScVal.fromXDR(eventResponse.value, 'base64')
-        ) as Record<string, unknown>;
+        const rawValue = eventResponse.value as string | xdr.ScVal;
+        const data = scValToNative(toScVal(rawValue)) as Record<string, unknown>;
+
+        // `contractId` is either a strkey string (raw JSON-RPC) or a
+        // `Contract` instance whose toString() returns the strkey.
+        const cid = eventResponse.contractId as unknown;
+        const contractId = typeof cid === 'string' ? cid : String(cid);
 
         return {
-            contractId: eventResponse.contractId,
+            contractId,
             txHash: eventResponse.txHash || '',
             ledger: eventResponse.ledger,
             ledgerClosedAt: eventResponse.ledgerClosedAt,
@@ -209,9 +224,11 @@ export type ZenexEvent = TradingEvent | VaultEvent | GovernanceEvent;
  * Decode a Zenex event from any source (RPC or Mercury webhook).
  * Normalizes the input, then tries trading and vault decoders.
  */
-export function decodeEvent(raw: rpc.Api.RawEventResponse | MercuryWebhookEvent): ZenexEvent | undefined {
+export function decodeEvent(
+    raw: rpc.Api.RawEventResponse | rpc.Api.EventResponse | MercuryWebhookEvent
+): ZenexEvent | undefined {
     const normalized = ('type' in raw && 'topic' in raw)
-        ? normalizeRpc(raw as rpc.Api.RawEventResponse)
+        ? normalizeRpc(raw as rpc.Api.RawEventResponse | rpc.Api.EventResponse)
         : normalizeMercury(raw as MercuryWebhookEvent);
 
     if (!normalized) return undefined;
