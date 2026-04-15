@@ -88,6 +88,7 @@ export interface TradingClosePositionEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
+    notional: i128; // post-ADL notional actually settled (≤ placement notional)
     price: i128;
     pnl: i128;
     baseFee: i128;
@@ -117,6 +118,7 @@ export interface TradingLiquidationEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
+    notional: i128; // post-ADL notional actually settled
     price: i128;
     baseFee: i128;
     impactFee: i128;
@@ -130,6 +132,7 @@ export interface TradingTakeProfitEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
+    notional: i128; // post-ADL notional actually settled
     price: i128;
     pnl: i128;
     baseFee: i128;
@@ -143,6 +146,7 @@ export interface TradingStopLossEvent extends BaseTradingEvent {
     marketId: u32;
     user: string;
     positionId: u32;
+    notional: i128; // post-ADL notional actually settled
     price: i128;
     pnl: i128;
     baseFee: i128;
@@ -299,6 +303,7 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
+                notional: data.notional,
                 price: data.price,
                 pnl: data.pnl,
                 baseFee: data.base_fee,
@@ -330,6 +335,7 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
+                notional: data.notional,
                 price: data.price,
                 baseFee: data.base_fee,
                 impactFee: data.impact_fee,
@@ -345,6 +351,7 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
+                notional: data.notional,
                 price: data.price,
                 pnl: data.pnl,
                 baseFee: data.base_fee,
@@ -360,6 +367,7 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
                 marketId,
                 user,
                 positionId,
+                notional: data.notional,
                 price: data.price,
                 pnl: data.pnl,
                 baseFee: data.base_fee,
