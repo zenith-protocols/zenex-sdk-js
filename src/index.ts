@@ -27,8 +27,8 @@ export type { Asset } from './asset.js';
 export { getAssetKey, getAssetName, assetsEqual, assetToScVal, assetFromScVal, assetFromKey } from './asset.js';
 
 // Base Event types, normalizers, and unified decoder
-export { ZenexContractType, normalizeRpc, normalizeMercury, decodeEvent } from './base_event.js';
-export type { BaseZenexEvent, NormalizedEvent, MercuryWebhookEvent, MercuryScVal, ZenexEvent } from './base_event.js';
+export { ZenexContractType, normalizeRpc, normalizeMercury, normalizeGoldsky, decodeEvent } from './base_event.js';
+export type { BaseZenexEvent, NormalizedEvent, MercuryWebhookEvent, MercuryScVal, GoldskyWebhookEvent, ZenexEvent } from './base_event.js';
 
 // Trading Module
 export {

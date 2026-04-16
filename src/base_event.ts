@@ -175,6 +175,81 @@ function mercuryScValToNative(val: MercuryScVal): unknown {
 }
 
 /**
+ * Goldsky Turbo webhook event shape. See the `stellar_testnet.events` and
+ * `stellar_mainnet.events` dataset schemas.
+ *
+ * `topics` and `data` are JSON **strings** (stringified, then wrapped in the
+ * outer JSON envelope). The inner tagged shape matches `MercuryScVal`.
+ */
+export interface GoldskyWebhookEvent {
+    id: string;
+    type: 'contract' | 'system' | 'diagnostic';
+    contract_id: string;
+    topics: string;
+    data: string;
+    in_successful_contract_call: boolean;
+    transaction_hash: string;
+    transaction_successful: boolean;
+    ledger_sequence: number;
+    ledger_closed_at: string;
+}
+
+/**
+ * Normalize a Goldsky Turbo webhook event into the source-agnostic intermediate.
+ *
+ * Returns undefined for non-contract events and events from unsuccessful
+ * transactions or contract calls; callers should also filter these at the
+ * pipeline level (SQL transform) but the defensive check here keeps the
+ * indexer tolerant of pipeline misconfiguration.
+ */
+export function normalizeGoldsky(
+    e: GoldskyWebhookEvent
+): NormalizedEvent | undefined {
+    if (
+        e.type !== 'contract' ||
+        !e.in_successful_contract_call ||
+        !e.transaction_successful ||
+        !e.contract_id ||
+        !e.topics
+    ) {
+        return undefined;
+    }
+
+    try {
+        const topics = JSON.parse(e.topics) as MercuryScVal[];
+        if (!Array.isArray(topics) || topics.length === 0) return undefined;
+        const firstTopic = topics[0];
+        if (firstTopic === undefined) return undefined;
+
+        const eventType = mercuryScValToNative(firstTopic) as string;
+
+        const topicArgs: unknown[] = [];
+        for (let i = 1; i < topics.length; i++) {
+            const t = topics[i];
+            if (t === undefined) continue;
+            topicArgs.push(mercuryScValToNative(t));
+        }
+
+        const eventData = e.data
+            ? (mercuryScValToNative(JSON.parse(e.data) as MercuryScVal) as Record<string, unknown>)
+            : {};
+
+        return {
+            contractId: e.contract_id,
+            txHash: e.transaction_hash,
+            ledger: e.ledger_sequence,
+            ledgerClosedAt: e.ledger_closed_at,
+            id: e.id,
+            eventType,
+            topicArgs,
+            data: eventData,
+        };
+    } catch {
+        return undefined;
+    }
+}
+
+/**
  * Normalize a Mercury webhook event payload into the source-agnostic intermediate.
  */
 export function normalizeMercury(
@@ -221,15 +296,24 @@ export function normalizeMercury(
 export type ZenexEvent = TradingEvent | VaultEvent | GovernanceEvent;
 
 /**
- * Decode a Zenex event from any source (RPC or Mercury webhook).
- * Normalizes the input, then tries trading and vault decoders.
+ * Decode a Zenex event from any supported source (RPC, Mercury, or Goldsky).
+ * Dispatches to the right normalizer by shape, then tries each domain decoder.
  */
 export function decodeEvent(
-    raw: rpc.Api.RawEventResponse | rpc.Api.EventResponse | MercuryWebhookEvent
+    raw:
+        | rpc.Api.RawEventResponse
+        | rpc.Api.EventResponse
+        | MercuryWebhookEvent
+        | GoldskyWebhookEvent
 ): ZenexEvent | undefined {
-    const normalized = ('type' in raw && 'topic' in raw)
-        ? normalizeRpc(raw as rpc.Api.RawEventResponse | rpc.Api.EventResponse)
-        : normalizeMercury(raw as MercuryWebhookEvent);
+    let normalized: NormalizedEvent | undefined;
+    if ('type' in raw && 'topic' in raw) {
+        normalized = normalizeRpc(raw as rpc.Api.RawEventResponse | rpc.Api.EventResponse);
+    } else if ('topics' in raw && typeof (raw as GoldskyWebhookEvent).topics === 'string') {
+        normalized = normalizeGoldsky(raw as GoldskyWebhookEvent);
+    } else {
+        normalized = normalizeMercury(raw as MercuryWebhookEvent);
+    }
 
     if (!normalized) return undefined;
 
