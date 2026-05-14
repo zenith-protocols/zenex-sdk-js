@@ -12,6 +12,7 @@ export {
 export type {
     PlaceLimitArgs,
     OpenMarketArgs,
+    ClosePositionArgs,
     SetTriggersArgs,
     ModifyCollateralArgs,
     ExecuteArgs,

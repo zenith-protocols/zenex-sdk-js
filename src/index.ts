@@ -57,6 +57,7 @@ export type {
     TradingInstanceData,
     PlaceLimitArgs,
     OpenMarketArgs,
+    ClosePositionArgs,
     SetTriggersArgs,
     ModifyCollateralArgs,
     ExecuteArgs,

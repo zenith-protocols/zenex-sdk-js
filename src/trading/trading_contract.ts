@@ -31,6 +31,35 @@ export interface OpenMarketArgs {
     is_long: boolean;
     take_profit: i128;
     stop_loss: i128;
+    /**
+     * Slippage bound on the fill price. For longs this is a ceiling
+     * (revert if fill > bound). For shorts this is a floor
+     * (revert if fill < bound). `0` disables the check.
+     */
+    price_bound: i128;
+    /**
+     * Absolute Stellar ledger sequence after which the call reverts
+     * with `Expired` (760). `0` disables the check.
+     */
+    expiration_ledger: u32;
+    price: Buffer | Uint8Array;
+}
+
+// Close position arguments
+export interface ClosePositionArgs {
+    user: string;
+    id: u32;
+    /**
+     * Slippage bound on the fill price. For longs this is a floor
+     * (revert if fill < bound). For shorts this is a ceiling
+     * (revert if fill > bound). `0` disables the check.
+     */
+    price_bound: i128;
+    /**
+     * Absolute Stellar ledger sequence after which the call reverts
+     * with `Expired` (760). `0` disables the check.
+     */
+    expiration_ledger: u32;
     price: Buffer | Uint8Array;
 }
 
@@ -47,6 +76,11 @@ export interface ModifyCollateralArgs {
     user: string;
     id: u32;
     new_collateral: i128;
+    /**
+     * Absolute Stellar ledger sequence after which the call reverts
+     * with `Expired` (760). `0` disables the check.
+     */
+    expiration_ledger: u32;
     price: Buffer | Uint8Array;
 }
 
@@ -291,6 +325,12 @@ export class TradingContract extends Contract {
 
     /**
      * Open a market order (filled immediately at oracle price)
+     *
+     * `price_bound` enforces direction-aware slippage at the contract layer
+     * (revert `PriceSlippage` / 712). `expiration_ledger` makes the call revert
+     * with `Expired` (760) once the current ledger passes it. Pass `0` on either
+     * to opt out.
+     *
      * Returns position_id
      */
     openMarket(args: OpenMarketArgs): string {
@@ -304,6 +344,8 @@ export class TradingContract extends Contract {
             xdr.ScVal.scvBool(args.is_long),
             nativeToScVal(args.take_profit, { type: 'i128' }),
             nativeToScVal(args.stop_loss, { type: 'i128' }),
+            nativeToScVal(args.price_bound, { type: 'i128' }),
+            xdr.ScVal.scvU32(args.expiration_ledger),
             xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
     }
@@ -322,20 +364,31 @@ export class TradingContract extends Contract {
 
     /**
      * Close a filled position
+     *
+     * `price_bound` enforces direction-aware slippage at the contract layer
+     * (revert `PriceSlippage` / 712). `expiration_ledger` makes the call revert
+     * with `Expired` (760) once the current ledger passes it. Pass `0` on either
+     * to opt out.
+     *
      * Returns user payout (i128)
      */
-    closePosition(user: string, id: u32, price: Buffer | Uint8Array): string {
-        const priceBuffer = price instanceof Buffer ? price : Buffer.from(price);
+    closePosition(args: ClosePositionArgs): string {
+        const priceBuffer = args.price instanceof Buffer ? args.price : Buffer.from(args.price);
         return this.call(
             'close_position',
-            Address.fromString(user).toScVal(),
-            xdr.ScVal.scvU32(id),
+            Address.fromString(args.user).toScVal(),
+            xdr.ScVal.scvU32(args.id),
+            nativeToScVal(args.price_bound, { type: 'i128' }),
+            xdr.ScVal.scvU32(args.expiration_ledger),
             xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
     }
 
     /**
      * Modify collateral on a position
+     *
+     * `expiration_ledger` makes the call revert with `Expired` (760) once the
+     * current ledger passes it. Pass `0` to opt out.
      */
     modifyCollateral(args: ModifyCollateralArgs): string {
         const priceBuffer = args.price instanceof Buffer ? args.price : Buffer.from(args.price);
@@ -344,6 +397,7 @@ export class TradingContract extends Contract {
             Address.fromString(args.user).toScVal(),
             xdr.ScVal.scvU32(args.id),
             nativeToScVal(args.new_collateral, { type: 'i128' }),
+            xdr.ScVal.scvU32(args.expiration_ledger),
             xdr.ScVal.scvBytes(priceBuffer),
         ).toXDR('base64');
     }

@@ -78,6 +78,7 @@ export enum ContractErrorType {
     MaxMarketsReached = 703,
     InvalidPrice = 710,
     StalePrice = 711,
+    PriceSlippage = 712,
     PositionNotFound = 720,
     PositionNotPending = 721,
     NegativeValueNotAllowed = 723,
@@ -96,6 +97,7 @@ export enum ContractErrorType {
     ThresholdNotMet = 750,
     UtilizationExceeded = 751,
     FundingTooEarly = 752,
+    Expired = 760,
 
     // Governance Errors (770-772)
     GovNotQueued = 770,
@@ -195,7 +197,8 @@ const errorMessages: Record<number, string> = {
     [702]: 'Market is disabled — new positions cannot be opened',
     [703]: 'Maximum number of markets reached',
     [710]: 'Price verification failed or feed ID mismatch',
-    [711]: 'Price data is stale — predates position open time',
+    [711]: 'Price data is stale, predates position open time',
+    [712]: 'Fill price outside the user-supplied price_bound (slippage)',
     [720]: 'Position not found',
     [721]: 'Position is already filled — expected pending',
     [723]: 'Parameter must be positive',
@@ -214,6 +217,7 @@ const errorMessages: Record<number, string> = {
     [750]: 'PnL threshold not met for status change',
     [751]: 'Position would exceed utilization cap',
     [752]: 'Funding can only be applied once per hour',
+    [760]: 'Transaction expired (current ledger past expiration_ledger)',
 
     // Governance
     [770]: 'Queued call not found or has expired',
