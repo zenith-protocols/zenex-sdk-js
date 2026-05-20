@@ -104,15 +104,17 @@ export enum ContractErrorType {
     GovNotUnlocked = 771,
     GovInvalidDelay = 772,
 
-    // Price Verifier Errors (780-782)
+    // Price Verifier Errors (780-783)
     PVInvalidData = 780,
     PVInvalidPrice = 781,
     PVPriceStale = 782,
+    PVInvalidStaleness = 783,
 
-    // Strategy Vault Errors (790-792)
+    // Strategy Vault Errors (790-793)
     StrategyInvalidAmount = 790,
     SharesLocked = 791,
     UnauthorizedStrategy = 792,
+    BelowMinDeposit = 793,
 
     // Treasury Errors (900)
     TreasuryInvalidRate = 900,
@@ -227,12 +229,14 @@ const errorMessages: Record<number, string> = {
     // Price Verifier
     [780]: 'Price update signature or format is invalid',
     [781]: 'Price confidence exceeds bounds or required fields missing',
-    [782]: 'Price update is stale — exceeds max staleness threshold',
+    [782]: 'Price update is stale (exceeds max staleness threshold)',
+    [783]: 'max_staleness exceeds MAX_STALENESS_SECONDS cap (30)',
 
     // Strategy Vault
     [790]: 'Invalid amount for strategy operation',
     [791]: 'Shares are still locked — wait for lock period to expire',
     [792]: 'Caller is not the authorized strategy contract',
+    [793]: 'Deposit/mint asset amount is below the vault min_deposit',
 
     // Treasury
     [900]: 'Fee rate out of range — must be between 0 and 50%',
