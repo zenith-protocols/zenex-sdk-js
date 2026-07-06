@@ -82,11 +82,20 @@ export enum ContractErrorType {
     GovNotUnlocked = 771,
     GovInvalidDelay = 772,
 
-    // Price Verifier Errors (780-783)
+    // Price Verifier Errors (780-791). 790 (FeedNotFound) and 791 (WrongExponent)
+    // are intentionally absent: they collide with StrategyInvalidAmount (790) and
+    // SharesLocked (791) in the Strategy Vault section below, and this flat enum
+    // cannot hold both meanings for one number.
     PVInvalidData = 780,
     PVInvalidPrice = 781,
     PVPriceStale = 782,
     PVInvalidStaleness = 783,
+    PVTruncatedData = 784,
+    PVInvalidPayloadLength = 785,
+    PVInvalidPayloadMagic = 786,
+    PVInvalidChannel = 787,
+    PVInvalidProperty = 788,
+    PVInvalidMarketSession = 789,
 
     // Strategy Vault Errors (790-793)
     StrategyInvalidAmount = 790,
@@ -171,9 +180,9 @@ const errorMessages: Record<number, string> = {
     [409]: 'Decimals offset exceeds maximum (10)',
     [410]: 'Vault math overflow',
 
-    // Trading (v1 messages removed; v2 trading errors are decoded via the
-    // dedicated `TradingError` enum below, not this table — see the comment
-    // on the removed Trading section of ContractErrorType above).
+    // Trading: v1 messages removed. The v2 trading messages live in
+    // `tradingErrorMessages` below and resolve through the dedicated
+    // `TradingError` enum (see the note in ContractErrorType above).
 
     // Governance
     [770]: 'Queued call not found or has expired',
@@ -185,6 +194,12 @@ const errorMessages: Record<number, string> = {
     [781]: 'Price confidence exceeds bounds or required fields missing',
     [782]: 'Price update is stale (exceeds max staleness threshold)',
     [783]: 'max_staleness exceeds MAX_STALENESS_SECONDS cap (15)',
+    [784]: 'Price update payload is truncated',
+    [785]: 'Price update payload has trailing bytes (invalid length)',
+    [786]: 'Price update payload magic number is invalid',
+    [787]: 'Price update payload channel is invalid',
+    [788]: 'Price update payload contains an unknown property',
+    [789]: 'Price update payload market session is invalid',
 
     // Strategy Vault
     [790]: 'Invalid amount for strategy operation',
@@ -197,12 +212,53 @@ const errorMessages: Record<number, string> = {
 };
 
 export class ContractError extends Error {
-    public type: ContractErrorType;
+    public type: ContractErrorType | TradingError;
 
-    constructor(type: ContractErrorType) {
-        super(errorMessages[type] ?? `Contract error ${type}`);
+    constructor(type: ContractErrorType | TradingError, message?: string) {
+        super(message ?? errorMessages[type] ?? `Contract error ${type}`);
         this.type = type;
     }
+}
+
+/** Contract-type hint for resolving codes that are ambiguous across contracts. */
+export type ContractErrorSource = 'trading' | 'governance';
+
+/**
+ * Resolve a raw on-chain error code to a ContractError.
+ *
+ * Codes 770-772 exist in BOTH the v2 trading contract (AdlNotTriggered,
+ * AdlOvershoot, AdlNotEligible) and the governance contract (NotQueued,
+ * NotUnlocked, InvalidDelay). For those three codes the name is
+ * context-dependent, so they only resolve when the caller passes a
+ * `contractType` hint; without one they return UnknownError rather than
+ * guessing. Every other code is unambiguous: it resolves from
+ * ContractErrorType first, then falls back to the standalone TradingError
+ * enum (trading codes 700-760 are not in the merged enum).
+ */
+export function contractErrorFromCode(
+    code: number,
+    contractType?: ContractErrorSource
+): ContractError {
+    const inMerged = code in ContractErrorType;
+    const inTrading = code in TradingError;
+
+    if (inMerged && inTrading) {
+        // Ambiguous (770-772): only a hint can disambiguate.
+        if (contractType === 'trading') {
+            return new ContractError(code as TradingError, tradingErrorMessages[code]);
+        }
+        if (contractType === 'governance') {
+            return new ContractError(code as ContractErrorType);
+        }
+        return new ContractError(ContractErrorType.UnknownError);
+    }
+    if (inMerged) {
+        return new ContractError(code as ContractErrorType);
+    }
+    if (inTrading) {
+        return new ContractError(code as TradingError, tradingErrorMessages[code]);
+    }
+    return new ContractError(ContractErrorType.UnknownError);
 }
 
 /**
@@ -292,3 +348,37 @@ export enum TradingError {
     /** ADL close did not reduce the side's pending PnL. */
     AdlNotEligible = 772,
 }
+
+/** Human-readable messages for the v2 TradingError codes. */
+export const tradingErrorMessages: Record<number, string> = {
+    [700]: 'Trading config value out of bounds or invariant violated',
+    [701]: 'Flat settlement price is not strictly positive',
+    [702]: 'Illegal status transition or action requires a different status',
+    [703]: 'Borrowing rate changed without a same-ledger accrue',
+    [704]: 'Action halted by operational status (Frozen, or Retired on trading paths)',
+    [705]: 'Increase executed while the market does not accept opens',
+    [706]: 'Retirement attempted while positions remain open',
+    [710]: 'A number that must be non-negative is negative',
+    [711]: 'Resulting position notional is below min_position_notional',
+    [712]: 'Position notional exceeds max_position_notional',
+    [713]: 'Equity below the initial-margin floor',
+    [714]: 'Open interest would exceed the utilization cap',
+    [715]: 'Open interest would exceed the max_open_interest ceiling',
+    [720]: 'No position exists for (user, is_long)',
+    [721]: 'Requested close exceeds the unlocked notional',
+    [722]: 'Liquidation attempted while equity is above maintenance margin',
+    [730]: 'No keeper order exists for (user, id)',
+    [731]: 'Order expiration is behind the current ledger sequence',
+    [732]: 'Invalid order (delta pair, dust floor, or expiration horizon)',
+    [740]: 'Verified price predates the position or order (anti-replay)',
+    [741]: 'Fill price is worse than the order price_bound',
+    [742]: 'Order trigger_price has not been crossed at the verified price',
+    [750]: 'No vault order exists for (user, id)',
+    [751]: 'Redeem order filled before its redeem_lock cooldown elapsed',
+    [752]: 'Vault order filled while pending trader PnL exceeds the gate factor',
+    [753]: 'Deposit fill would push the vault balance above max_vault_balance',
+    [760]: 'Claim attempted with no claimable funding balance',
+    [770]: 'ADL execution attempted while the PnL ratio is at or below the trigger',
+    [771]: 'ADL close left the pending PnL under the clear target',
+    [772]: 'ADL close did not reduce the pending PnL',
+};

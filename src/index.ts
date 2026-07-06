@@ -144,9 +144,11 @@ export {
     ContractError,
     ContractErrorType,
     TradingError,
+    contractErrorFromCode,
     parseError,
     parseResult,
 } from './response_parser.js';
+export type { ContractErrorSource } from './response_parser.js';
 
 // Fixed-Point Math
 export * as FixedMath from './math.js';

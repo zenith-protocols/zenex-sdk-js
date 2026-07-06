@@ -1,21 +1,40 @@
 import { rpc } from '@stellar/stellar-sdk';
-import { ContractError, ContractErrorType } from './errors.js';
+import {
+    ContractError,
+    ContractErrorType,
+    ContractErrorSource,
+    contractErrorFromCode,
+} from './errors.js';
 
-export { ContractError, ContractErrorType, TradingError } from './errors.js';
+export { ContractError, ContractErrorType, TradingError, contractErrorFromCode } from './errors.js';
+export type { ContractErrorSource } from './errors.js';
 
+/**
+ * Parse an RPC error response into a ContractError.
+ *
+ * @param contractType - Optional hint naming the contract that raised the
+ * error. Only needed to disambiguate codes 770-772, which mean different
+ * things on the trading contract (ADL errors) and the governance contract
+ * (timelock errors); without a hint those three resolve to UnknownError.
+ */
 export function parseError(
     errorResponse:
         | rpc.Api.GetFailedTransactionResponse
         | rpc.Api.SendTransactionResponse
-        | rpc.Api.SimulateTransactionErrorResponse
+        | rpc.Api.SimulateTransactionErrorResponse,
+    contractType?: ContractErrorSource
 ): ContractError {
+    const resolve = (code: number): ContractError | undefined => {
+        const resolved = contractErrorFromCode(code, contractType);
+        return resolved.type === ContractErrorType.UnknownError ? undefined : resolved;
+    };
+
     // Simulation Error
     if ('id' in errorResponse) {
         const match = errorResponse.error.match(/Error\(Contract, #(\d+)\)/);
         if (match) {
-            const errorValue = parseInt(match[1], 10);
-            if (errorValue in ContractErrorType)
-                return new ContractError(errorValue as ContractErrorType);
+            const resolved = resolve(parseInt(match[1], 10));
+            if (resolved) return resolved;
         }
         return new ContractError(ContractErrorType.UnknownError);
     }
@@ -31,14 +50,13 @@ export function parseError(
                     .tr()
                     .invokeHostFunctionResult()
                     .switch().value;
-                if (hostFunctionError in ContractErrorType)
-                    return new ContractError(hostFunctionError as ContractErrorType);
+                const resolved = resolve(hostFunctionError);
+                if (resolved) return resolved;
             }
         } else {
             const txErrorValue = errorResponse.errorResult.result().switch().value - 7;
-            if (txErrorValue in ContractErrorType) {
-                return new ContractError(txErrorValue as ContractErrorType);
-            }
+            const resolved = resolve(txErrorValue);
+            if (resolved) return resolved;
         }
     }
 
@@ -54,14 +72,13 @@ export function parseError(
                     .tr()
                     .invokeHostFunctionResult()
                     .switch().value;
-                if (hostFunctionError in ContractErrorType)
-                    return new ContractError(hostFunctionError as ContractErrorType);
+                const resolved = resolve(hostFunctionError);
+                if (resolved) return resolved;
             }
         } else {
             const txErrorValue = txResult.switch().value - 7;
-            if (txErrorValue in ContractErrorType) {
-                return new ContractError(txErrorValue as ContractErrorType);
-            }
+            const resolved = resolve(txErrorValue);
+            if (resolved) return resolved;
         }
     }
 
