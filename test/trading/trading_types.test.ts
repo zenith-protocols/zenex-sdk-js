@@ -3,7 +3,7 @@ import { scValToNative } from '@stellar/stellar-sdk';
 import {
     OrderKind, VaultOrderKind, Status, FULL_CLOSE,
     orderKindToScVal, vaultOrderKindToScVal, tradingConfigToScVal,
-    parsePosition, parseMarketData,
+    parseOrder, parseVaultOrder, parsePosition, parseMarketData,
     TradingConfig,
 } from '../../src/trading/trading_types.js';
 
@@ -75,6 +75,49 @@ describe('trading_types', () => {
         expect(keys).toEqual([...keys].sort());
         expect(keys).toContain('keeper_rate');
         expect(keys).toHaveLength(35);
+    });
+
+    it('parseOrder decodes the scValToNative shape (kind as one-element array)', () => {
+        // scValToNative decodes a nested unit-variant enum field to ['Increase'].
+        const order = parseOrder({
+            is_long: true, kind: ['Increase'], notional: 1000n, collateral: 100n,
+            trigger_price: 0n, trigger_above: false, price_bound: 0n,
+            created_at: 500n, expiration: 1234,
+        });
+        expect(order.kind).toBe(OrderKind.Increase);
+        expect(order.isLong).toBe(true);
+        expect(order.triggerPrice).toBe(0n);
+        expect(order.priceBound).toBe(0n);
+        expect(order.createdAt).toBe(500n);
+        expect(order.expiration).toBe(1234);
+    });
+
+    it('parseOrder also tolerates a bare string kind', () => {
+        const order = parseOrder({
+            is_long: false, kind: 'Decrease', notional: 1n, collateral: 0n,
+            trigger_price: 0n, trigger_above: false, price_bound: 0n,
+            created_at: 0n, expiration: 1,
+        });
+        expect(order.kind).toBe(OrderKind.Decrease);
+    });
+
+    it('parseVaultOrder decodes the scValToNative shape (kind as one-element array)', () => {
+        const vo = parseVaultOrder({
+            kind: ['Redeem'], amount: 42n, max_adverse_pnl: 7n,
+            created_at: 100n, unlocks_at: 160n,
+        });
+        expect(vo.kind).toBe(VaultOrderKind.Redeem);
+        expect(vo.amount).toBe(42n);
+        expect(vo.maxAdversePnl).toBe(7n);
+        expect(vo.unlocksAt).toBe(160n);
+    });
+
+    it('parseVaultOrder also tolerates a bare string kind', () => {
+        const vo = parseVaultOrder({
+            kind: 'Deposit', amount: 1n, max_adverse_pnl: 0n,
+            created_at: 0n, unlocks_at: 0n,
+        });
+        expect(vo.kind).toBe(VaultOrderKind.Deposit);
     });
 
     it('parsePosition camelCases a native decode', () => {

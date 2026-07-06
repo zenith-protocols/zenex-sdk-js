@@ -290,6 +290,23 @@ function big(v: unknown): bigint {
     return typeof v === 'bigint' ? v : BigInt(v as number);
 }
 
+/**
+ * Normalize a decoded unit-variant enum to its variant name.
+ *
+ * `scValToNative` decodes a nested unit-variant enum field to a one-element
+ * array (e.g. `['Increase']`); a bare string is also accepted so a future
+ * stellar-sdk change to string decoding does not break parsing.
+ */
+function unitVariant(v: unknown): string {
+    if (Array.isArray(v) && v.length === 1 && typeof v[0] === 'string') {
+        return v[0];
+    }
+    if (typeof v === 'string') {
+        return v;
+    }
+    throw new Error(`Expected a unit-variant enum value, got: ${JSON.stringify(v)}`);
+}
+
 /** Map a decoded `SidePair` (field names are already `long`/`short`, no case change). */
 function toSidePair(v: Record<string, unknown>): SidePair {
     return { long: big(v.long), short: big(v.short) };
@@ -299,7 +316,7 @@ function toSidePair(v: Record<string, unknown>): SidePair {
 export function parseOrder(raw: Record<string, unknown>): Order {
     return {
         isLong: raw.is_long as boolean,
-        kind: raw.kind as OrderKind,
+        kind: unitVariant(raw.kind) as OrderKind,
         notional: big(raw.notional),
         collateral: big(raw.collateral),
         triggerPrice: big(raw.trigger_price),
@@ -313,7 +330,7 @@ export function parseOrder(raw: Record<string, unknown>): Order {
 /** Parse a `scValToNative`-decoded `VaultOrder` into its camelCase interface. */
 export function parseVaultOrder(raw: Record<string, unknown>): VaultOrder {
     return {
-        kind: raw.kind as VaultOrderKind,
+        kind: unitVariant(raw.kind) as VaultOrderKind,
         amount: big(raw.amount),
         maxAdversePnl: big(raw.max_adverse_pnl),
         createdAt: big(raw.created_at),
