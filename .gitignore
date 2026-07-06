@@ -141,3 +141,6 @@ src/**/*.d.ts
 
 # Test credentials
 test-contract.json
+
+# Scratch: extracted contract bindings/specs used to seed SDK contract classes
+tools/extracted-specs/
