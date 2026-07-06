@@ -82,3 +82,155 @@ export function persistentLedgerKey(contractId: string, keyVec: xdr.ScVal[]): xd
     );
 }
 
+/**
+ * Create a ledger key for temporary contract storage.
+ * Used for data with a fixed TTL that auto-expires (e.g. the trading
+ * contract's keeper `Order` entries, sized to their `expiration` ledger).
+ * @param contractId - The contract address.
+ * @param keyVec - Array of ScVal items that make up the storage key.
+ * @returns The ledger key for the temporary storage entry.
+ */
+export function temporaryLedgerKey(contractId: string, keyVec: xdr.ScVal[]): xdr.LedgerKey {
+    return xdr.LedgerKey.contractData(
+        new xdr.LedgerKeyContractData({
+            contract: Address.fromString(contractId).toScAddress(),
+            key: xdr.ScVal.scvVec(keyVec),
+            durability: xdr.ContractDataDurability.temporary(),
+        })
+    );
+}
+
+// =============================================================================
+// Trading contract `DataKey` mirror (trading/src/storage.rs)
+//
+// `DataKey` carries data on several variants (Position, VaultOrder, etc.), so
+// soroban-sdk encodes every variant - including the zero-field ones - as a Vec
+// whose first element is the variant's Symbol, followed by any fields. This
+// section builds those keys for direct ledger reads, without going through a
+// contract call/simulation.
+// =============================================================================
+
+/** Build the raw `DataKey` ScVal for a zero-field variant, e.g. `Config`. */
+function tradingUnitDataKey(variant: string): xdr.ScVal {
+    return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant)]);
+}
+
+function toAddressScVal(address: string | Address): xdr.ScVal {
+    return (typeof address === 'string' ? Address.fromString(address) : address).toScVal();
+}
+
+// --- instance tier (small read-mostly state, bumped every tx) ---
+// These are not separate ledger entries: read the contract instance itself
+// (`contractInstanceLedgerKey`) and match this ScVal against its storage map.
+
+/** `DataKey::Config` -> Config: global trading parameters; mutable singleton. */
+export function tradingConfigKey(): xdr.ScVal {
+    return tradingUnitDataKey('Config');
+}
+
+/** `DataKey::FeedId` -> u32: price feed id; immutable, constructor-set. */
+export function tradingFeedIdKey(): xdr.ScVal {
+    return tradingUnitDataKey('FeedId');
+}
+
+/** `DataKey::Exponent` -> i32: oracle exponent; immutable, constructor-set. */
+export function tradingExponentKey(): xdr.ScVal {
+    return tradingUnitDataKey('Exponent');
+}
+
+/** `DataKey::Status` -> u32: operational status (Status discriminant). */
+export function tradingStatusKey(): xdr.ScVal {
+    return tradingUnitDataKey('Status');
+}
+
+/** `DataKey::Vault` -> Address: strategy-vault contract. */
+export function tradingVaultKey(): xdr.ScVal {
+    return tradingUnitDataKey('Vault');
+}
+
+/** `DataKey::Token` -> Address: settlement token (collateral asset). */
+export function tradingTokenKey(): xdr.ScVal {
+    return tradingUnitDataKey('Token');
+}
+
+/** `DataKey::PriceVerifier` -> Address: price-verifier contract. */
+export function tradingPriceVerifierKey(): xdr.ScVal {
+    return tradingUnitDataKey('PriceVerifier');
+}
+
+/** `DataKey::Treasury` -> Address: treasury contract (protocol fee sink). */
+export function tradingTreasuryKey(): xdr.ScVal {
+    return tradingUnitDataKey('Treasury');
+}
+
+/** `DataKey::DelistedAt` -> u64: first-delist timestamp; lazy (absent unless delisted). */
+export function tradingDelistedAtKey(): xdr.ScVal {
+    return tradingUnitDataKey('DelistedAt');
+}
+
+/** `DataKey::TerminalPrice` -> i128: flat settlement price; lazy (absent until set). */
+export function tradingTerminalPriceKey(): xdr.ScVal {
+    return tradingUnitDataKey('TerminalPrice');
+}
+
+/** `DataKey::Adl` -> AdlState: ADL flags + freshness anchor; zeroed default until first written. */
+export function tradingAdlKey(): xdr.ScVal {
+    return tradingUnitDataKey('Adl');
+}
+
+// --- persistent, shared tier ---
+
+/** `DataKey::MarketData` -> MarketData: hot per-market state; singleton, own entry. */
+export function tradingMarketDataLedgerKey(contractId: string): xdr.LedgerKey {
+    return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('MarketData')]);
+}
+
+// --- persistent, user tier ---
+
+/** `DataKey::Position(user, is_long)` -> Position: netted position (hedge mode). */
+export function tradingPositionLedgerKey(
+    contractId: string,
+    user: string | Address,
+    isLong: boolean
+): xdr.LedgerKey {
+    return persistentLedgerKey(contractId, [
+        xdr.ScVal.scvSymbol('Position'),
+        toAddressScVal(user),
+        xdr.ScVal.scvBool(isLong),
+    ]);
+}
+
+/** `DataKey::VaultOrder(user, id)` -> VaultOrder: pending vault deposit or redemption. */
+export function tradingVaultOrderLedgerKey(
+    contractId: string,
+    user: string | Address,
+    id: number
+): xdr.LedgerKey {
+    return persistentLedgerKey(contractId, [
+        xdr.ScVal.scvSymbol('VaultOrder'),
+        toAddressScVal(user),
+        xdr.ScVal.scvU32(id),
+    ]);
+}
+
+/** `DataKey::OrderCounter(user)` -> u32: next order id (trade + vault), allocated from 1. */
+export function tradingOrderCounterLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
+    return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('OrderCounter'), toAddressScVal(user)]);
+}
+
+/** `DataKey::ClaimableFunding(user)` -> i128: funding owed to the user (token-dec). */
+export function tradingClaimableFundingLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
+    return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('ClaimableFunding'), toAddressScVal(user)]);
+}
+
+// --- temporary (auto-GC around expiry) ---
+
+/** `DataKey::Order(user, id)` -> Order: keeper order; TTL sized to expiry. */
+export function tradingOrderLedgerKey(contractId: string, user: string | Address, id: number): xdr.LedgerKey {
+    return temporaryLedgerKey(contractId, [
+        xdr.ScVal.scvSymbol('Order'),
+        toAddressScVal(user),
+        xdr.ScVal.scvU32(id),
+    ]);
+}
+

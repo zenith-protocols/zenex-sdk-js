@@ -1,7 +1,7 @@
 import { rpc } from '@stellar/stellar-sdk';
 import { ContractError, ContractErrorType } from './errors.js';
 
-export { ContractError, ContractErrorType } from './errors.js';
+export { ContractError, ContractErrorType, TradingError } from './errors.js';
 
 export function parseError(
     errorResponse:

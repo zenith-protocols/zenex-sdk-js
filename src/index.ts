@@ -143,6 +143,7 @@ export type { PriceData } from './oracle.js';
 export {
     ContractError,
     ContractErrorType,
+    TradingError,
     parseError,
     parseResult,
 } from './response_parser.js';

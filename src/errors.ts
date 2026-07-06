@@ -71,33 +71,11 @@ export enum ContractErrorType {
     VaultMaxDecimalsOffsetExceeded = 409,
     VaultMathOverflow = 410,
 
-    // Trading Errors (700-752)
-    InvalidConfig = 700,
-    MarketNotFound = 701,
-    MarketDisabled = 702,
-    MaxMarketsReached = 703,
-    InvalidPrice = 710,
-    StalePrice = 711,
-    PriceSlippage = 712,
-    PositionNotFound = 720,
-    PositionNotPending = 721,
-    NegativeValueNotAllowed = 723,
-    NotionalBelowMinimum = 724,
-    NotionalAboveMaximum = 725,
-    LeverageAboveMaximum = 726,
-    CollateralUnchanged = 727,
-    WithdrawalBreaksMargin = 728,
-    NotActionable = 731,
-    PositionTooNew = 732,
-    ActionNotAllowedForStatus = 733,
-    InvalidInput = 734,
-    InvalidStatus = 740,
-    ContractOnIce = 741,
-    ContractFrozen = 742,
-    ThresholdNotMet = 750,
-    UtilizationExceeded = 751,
-    FundingTooEarly = 752,
-    Expired = 760,
+    // Trading Errors (v1, 700-760): removed. The v2 trading contract's error
+    // range (700-772) overlaps with GovernanceError (770-772) below, so trading
+    // errors can no longer be safely merged into this flat cross-contract enum.
+    // Decode trading errors with the dedicated `TradingError` enum instead (it
+    // mirrors trading/src/errors.rs exactly; see below).
 
     // Governance Errors (770-772)
     GovNotQueued = 770,
@@ -193,33 +171,9 @@ const errorMessages: Record<number, string> = {
     [409]: 'Decimals offset exceeds maximum (10)',
     [410]: 'Vault math overflow',
 
-    // Trading
-    [700]: 'Trading config parameter out of valid range',
-    [701]: 'No market registered for this market ID',
-    [702]: 'Market is disabled — new positions cannot be opened',
-    [703]: 'Maximum number of markets reached',
-    [710]: 'Price verification failed or feed ID mismatch',
-    [711]: 'Price data is stale, predates position open time',
-    [712]: 'Fill price outside the user-supplied price_bound (slippage)',
-    [720]: 'Position not found',
-    [721]: 'Position is already filled — expected pending',
-    [723]: 'Parameter must be positive',
-    [724]: 'Notional size is below the minimum',
-    [725]: 'Notional size exceeds the maximum',
-    [726]: 'Leverage exceeds maximum (notional × margin > collateral)',
-    [727]: 'Collateral amount is unchanged',
-    [728]: 'Collateral withdrawal would breach margin requirement',
-    [731]: 'Position has no actionable trigger (fill, liquidation, SL, or TP)',
-    [732]: 'Position is too new to close — wait at least 30 seconds',
-    [733]: 'Action not allowed for current position status',
-    [734]: 'Malformed input (e.g. mismatched parallel vec lengths)',
-    [740]: 'Invalid or disallowed contract status value',
-    [741]: 'Contract is on ice — new positions are blocked',
-    [742]: 'Contract is frozen — all position operations are blocked',
-    [750]: 'PnL threshold not met for status change',
-    [751]: 'Position would exceed utilization cap',
-    [752]: 'Funding can only be applied once per hour',
-    [760]: 'Transaction expired (current ledger past expiration_ledger)',
+    // Trading (v1 messages removed; v2 trading errors are decoded via the
+    // dedicated `TradingError` enum below, not this table — see the comment
+    // on the removed Trading section of ContractErrorType above).
 
     // Governance
     [770]: 'Queued call not found or has expired',
@@ -230,7 +184,7 @@ const errorMessages: Record<number, string> = {
     [780]: 'Price update signature or format is invalid',
     [781]: 'Price confidence exceeds bounds or required fields missing',
     [782]: 'Price update is stale (exceeds max staleness threshold)',
-    [783]: 'max_staleness exceeds MAX_STALENESS_SECONDS cap (30)',
+    [783]: 'max_staleness exceeds MAX_STALENESS_SECONDS cap (15)',
 
     // Strategy Vault
     [790]: 'Invalid amount for strategy operation',
@@ -249,4 +203,92 @@ export class ContractError extends Error {
         super(errorMessages[type] ?? `Contract error ${type}`);
         this.type = type;
     }
+}
+
+/**
+ * TradingError - exact v2 `trading/src/errors.rs` `TradingError` enum.
+ *
+ * Kept as its own enum rather than merged into `ContractErrorType`: v2 trading
+ * error codes (700-772) overlap with `GovernanceError` (770-772), so a single
+ * flat cross-contract code space can no longer represent both unambiguously.
+ * Decode a trading-contract error against this enum specifically (the caller
+ * already knows which contract raised the error).
+ */
+export enum TradingError {
+    // --- config / construction ---
+    /** A config value is out of bounds, or a range/ordering invariant is violated. */
+    InvalidConfig = 700,
+    /** Flat settlement price is not strictly positive. */
+    InvalidPrice = 701,
+    /** Illegal status transition, or the action requires a different operational status. */
+    InvalidStatus = 702,
+    /** A borrowing rate changed without a same-ledger `accrue`. */
+    BorrowingNotAccrued = 703,
+    /** Action halted by the operational status: `Frozen`, or `Retired` on trading paths. */
+    MarketFrozen = 704,
+    /** An `Increase` was executed while the market does not accept opens. */
+    IncreaseHalted = 705,
+    /** Retirement attempted while positions remain open. */
+    MarketNotCleared = 706,
+
+    // --- general ---
+    /** A number that must be non-negative is negative. */
+    NegativeValueNotAllowed = 710,
+
+    // --- position sizing / margin ---
+    /** Resulting position notional is below `min_position_notional`. */
+    NotionalBelowMinimum = 711,
+    /** Position notional (or an increase delta) exceeds `max_position_notional`. */
+    NotionalAboveMaximum = 712,
+    /** Equity below the initial-margin floor (open, increase, or withdraw). */
+    InsufficientMargin = 713,
+    /** Open interest would exceed the utilization cap. */
+    UtilizationExceeded = 714,
+    /** A side's open interest would exceed the `max_open_interest` ceiling. */
+    OpenInterestExceeded = 715,
+
+    // --- position lifecycle ---
+    /** No position exists for `(user, is_long)`. */
+    PositionNotFound = 720,
+    /** Requested close exceeds the position's unlocked notional. */
+    NotionalLocked = 721,
+    /** Liquidation attempted while equity is still above maintenance margin. */
+    NotLiquidatable = 722,
+
+    // --- orders / price ---
+    /** No keeper order exists for `(user, id)`. */
+    OrderNotFound = 730,
+    /** Order `expiration` is behind the current ledger sequence. */
+    OrderExpired = 731,
+    /** Delta pair is not an allowed combination, a moved value is below its dust
+     * floor, or the expiration lies beyond the storage horizon. */
+    InvalidOrder = 732,
+    /** Verified price predates the position or order (anti-replay). */
+    StalePrice = 740,
+    /** Fill price is worse than the order's `price_bound`. */
+    PriceBoundExceeded = 741,
+    /** Order `trigger_price` has not been crossed at the verified price. */
+    TriggerNotMet = 742,
+
+    // --- vault orders ---
+    /** No vault order exists for `(user, id)`. */
+    VaultOrderNotFound = 750,
+    /** Redeem order filled before its `redeem_lock` cooldown elapsed. */
+    VaultOrderLocked = 751,
+    /** Vault order filled while pending trader PnL exceeds the gate factor. */
+    PendingPnlExceeded = 752,
+    /** Deposit fill would push the vault balance above `max_vault_balance`. */
+    VaultBalanceExceeded = 753,
+
+    // --- funding ---
+    /** Claim attempted with no claimable funding balance. */
+    NothingToClaim = 760,
+
+    // --- ADL ---
+    /** ADL execution attempted while the PnL ratio is at or below the trigger. */
+    AdlNotTriggered = 770,
+    /** ADL close left the side's pending PnL under the clear target. */
+    AdlOvershoot = 771,
+    /** ADL close did not reduce the side's pending PnL. */
+    AdlNotEligible = 772,
 }

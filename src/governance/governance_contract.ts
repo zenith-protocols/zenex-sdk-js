@@ -57,7 +57,6 @@ export class GovernanceContract extends Contract {
         setStatus: () => {},
         setDelay: () => {},
         applyDelay: () => {},
-        upgrade: () => {},
         // Getters
         getDelay: (result: string): u64 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
@@ -170,22 +169,6 @@ export class GovernanceContract extends Contract {
      */
     applyDelay(): string {
         return this.call('apply_delay').toXDR('base64');
-    }
-
-    // ============================================================
-    // Upgradeable
-    // ============================================================
-
-    /**
-     * Upgrade contract WASM (owner only)
-     */
-    upgrade(wasmHash: Buffer | Uint8Array, operator: string): string {
-        const hashBuffer = wasmHash instanceof Buffer ? wasmHash : Buffer.from(wasmHash);
-        return this.call(
-            'upgrade',
-            xdr.ScVal.scvBytes(hashBuffer),
-            Address.fromString(operator).toScVal(),
-        ).toXDR('base64');
     }
 
     // ============================================================
