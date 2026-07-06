@@ -30,33 +30,110 @@ export { getAssetKey, getAssetName, assetsEqual, assetToScVal, assetFromScVal, a
 export { ZenexContractType, normalizeRpc, normalizeMercury, normalizeGoldsky, decodeEvent } from './base_event.js';
 export type { BaseZenexEvent, NormalizedEvent, MercuryWebhookEvent, MercuryScVal, GoldskyWebhookEvent, ZenexEvent } from './base_event.js';
 
-// Trading Module
+// =============================================================================
+// Trading Module (v2 order -> keeper-execute contract)
+// =============================================================================
+
 export {
+    // Contract binding
     TradingContract,
-    Position,
-    TradingConfig,
-    ContractStatus,
+    // Core enums, sentinels, converters, and parsers
+    Status,
+    OrderKind,
+    VaultOrderKind,
+    FULL_CLOSE,
+    orderKindToScVal,
+    vaultOrderKindToScVal,
+    tradingConfigToScVal,
+    parseOrder,
+    parseVaultOrder,
+    parsePosition,
+    parseMarketData,
+    parseAdlState,
+    parseTradingConfig,
+    // Position math + loader
+    PositionView,
+    positionPnl,
+    positionEquity,
+    pendingFunding,
+    pendingBorrowing,
+    liquidationPrice,
+    unlockedNotional,
+    // Market math + loader
+    MarketView,
+    sidePnl,
+    netPnl,
+    utilization,
+    skewSplitFees,
+    // Config validation
+    validateTradingConfig,
+    // Events
     TradingEventType,
     decodeTradingEvent,
 } from './trading/index.js';
 
 export type {
-    MarketData,
-    PlaceLimitArgs,
-    OpenMarketArgs,
-    ClosePositionArgs,
-    SetTriggersArgs,
-    ModifyCollateralArgs,
-    ExecuteArgs,
+    // Argument interfaces
     DeployArgs,
+    OpenMarketArgs,
+    OpenLimitArgs,
+    ClosePositionArgs,
+    DecreasePositionArgs,
+    ModifyCollateralArgs,
+    TriggerOrderArgs,
+    VaultDepositArgs,
+    VaultRedeemArgs,
+    // Core types
+    Order,
+    VaultOrder,
+    Position,
+    SidePair,
+    MarketData,
+    AdlState,
+    TradingConfig,
+    SkewSplitFees,
+    // Events
     BaseTradingEvent,
+    TradingCreateOrderEvent,
+    TradingCancelOrderEvent,
+    TradingCreateVaultOrderEvent,
+    TradingCancelVaultOrderEvent,
+    TradingExecuteVaultOrderEvent,
+    TradingClaimFundingEvent,
+    TradingAdlUpdateEvent,
+    TradingStatusUpdateEvent,
+    TradingConfigUpdateEvent,
+    TradingTerminalPriceUpdateEvent,
+    TradingIncreaseFillEvent,
+    TradingDecreaseFillEvent,
     TradingLiquidationEvent,
+    TradingPositionUpdateEvent,
     TradingEvent,
-    TradingConfigArgs,
-    MarketConfigArgs,
 } from './trading/index.js';
 
+// =============================================================================
+// Trading Router Module (stateless batching + create-and-fill flows)
+// =============================================================================
+
+export {
+    TradingRouterContract,
+    callToScVal,
+    adlTargetToScVal,
+    parseCallOutcome,
+    parseFillAttempt,
+} from './trading-router/index.js';
+
+export type {
+    Call,
+    CallOutcome,
+    FillAttempt,
+    AdlTarget,
+} from './trading-router/index.js';
+
+// =============================================================================
 // Factory Module
+// =============================================================================
+
 export {
     FactoryContract,
 } from './factory/index.js';
@@ -66,7 +143,10 @@ export type {
     FactoryConstructorArgs,
 } from './factory/index.js';
 
+// =============================================================================
 // Governance Module (generic timelock)
+// =============================================================================
+
 export {
     GovernanceContract,
     GovernanceEventType,
@@ -85,7 +165,10 @@ export type {
     GovernanceEvent,
 } from './governance/index.js';
 
+// =============================================================================
 // Price Verifier Module
+// =============================================================================
+
 export {
     PriceVerifierContract,
 } from './price-verifier/index.js';
@@ -95,7 +178,10 @@ export type {
     PriceVerifierConstructorArgs,
 } from './price-verifier/index.js';
 
+// =============================================================================
 // Treasury Module
+// =============================================================================
+
 export {
     TreasuryContract,
 } from './treasury/index.js';
@@ -104,7 +190,10 @@ export type {
     TreasuryConstructorArgs,
 } from './treasury/index.js';
 
+// =============================================================================
 // Smart Account Module
+// =============================================================================
+
 export {
     SmartAccountContract,
     signerToScVal,
@@ -119,7 +208,10 @@ export type {
     AddContextRuleArgs,
 } from './smart-account/index.js';
 
+// =============================================================================
 // Vault Module
+// =============================================================================
+
 export {
     VaultContract,
     VaultState,
@@ -135,11 +227,10 @@ export type {
     VaultEvent,
 } from './vault/index.js';
 
-// Oracle
-export { getOraclePrice, getOracleDecimals } from './oracle.js';
-export type { PriceData } from './oracle.js';
+// =============================================================================
+// Errors / Response Parsing
+// =============================================================================
 
-// Response Parser / Errors
 export {
     ContractError,
     ContractErrorType,
@@ -149,6 +240,40 @@ export {
     parseResult,
 } from './response_parser.js';
 export type { ContractErrorSource } from './response_parser.js';
+export { tradingErrorMessages } from './errors.js';
+
+// =============================================================================
+// Ledger Keys (direct storage reads)
+// =============================================================================
+
+export {
+    // Generic key builders
+    enumStorageKeyWithAddress,
+    tokenBalanceLedgerKey,
+    decodeEntryKey,
+    contractInstanceLedgerKey,
+    persistentLedgerKey,
+    temporaryLedgerKey,
+    // Trading DataKey mirrors - instance tier
+    tradingConfigKey,
+    tradingFeedIdKey,
+    tradingExponentKey,
+    tradingStatusKey,
+    tradingVaultKey,
+    tradingTokenKey,
+    tradingPriceVerifierKey,
+    tradingTreasuryKey,
+    tradingDelistedAtKey,
+    tradingTerminalPriceKey,
+    tradingAdlKey,
+    // Trading DataKey mirrors - persistent / temporary entries
+    tradingMarketDataLedgerKey,
+    tradingPositionLedgerKey,
+    tradingVaultOrderLedgerKey,
+    tradingOrderCounterLedgerKey,
+    tradingClaimableFundingLedgerKey,
+    tradingOrderLedgerKey,
+} from './ledger-keys.js';
 
 // Fixed-Point Math
 export * as FixedMath from './math.js';

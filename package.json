@@ -1,6 +1,6 @@
 {
     "name": "@zenith-protocols/zenex-sdk",
-    "version": "2.3.0",
+    "version": "2.0.0",
     "description": "Javascript SDK for Zenex",
     "author": "Robeart",
     "keywords": [
@@ -21,7 +21,9 @@
         "build:types": "npx tsc -p ./scripts/tsconfig.types.json",
         "build:pkg": "node -e \"fs=require('fs');fs.writeFileSync('dist/esm/package.json','{\\\"type\\\":\\\"module\\\"}');fs.writeFileSync('dist/cjs/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
         "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types && npm run build:pkg",
-        "prepare": "npm run build"
+        "prepare": "npm run build",
+        "test": "vitest run",
+        "test:coverage": "vitest run --coverage"
     },
     "exports": {
         ".": {
@@ -48,16 +50,19 @@
     },
     "homepage": "https://github.com/zenith-protocols/zenex-sdk-js#readme",
     "devDependencies": {
+        "@stellar/stellar-sdk": "^15.1.0",
         "@types/node": "^25.0.9",
         "@typescript-eslint/eslint-plugin": "^8.53.0",
         "@typescript-eslint/parser": "^8.53.0",
+        "@vitest/coverage-v8": "^4.1.10",
         "eslint": "^9.39.0",
         "eslint-config-prettier": "^10.1.8",
         "eslint-plugin-prettier": "^5.5.5",
         "prettier": "^3.8.0",
         "rimraf": "^6.1.2",
         "tsx": "^4.21.0",
-        "typescript": "^5.1.6"
+        "typescript": "^5.1.6",
+        "vitest": "^4.1.10"
     },
     "peerDependencies": {
         "@stellar/stellar-sdk": ">=15.0.0"
