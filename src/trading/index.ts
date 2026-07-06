@@ -1,10 +1,9 @@
-// Classes
-export { TradingContract } from './trading_contract.js';
-export { Position } from './trading_position.js';
-export { Market } from './trading_market.js';
-export { TradingConfig } from './trading_config.js';
+// =============================================================================
+// Trading module public surface (v2).
+// =============================================================================
 
-// Contract argument interfaces
+// Contract binding + argument interfaces
+export { TradingContract } from './trading_contract.js';
 export type {
     DeployArgs,
     OpenMarketArgs,
@@ -17,33 +16,59 @@ export type {
     VaultRedeemArgs,
 } from './trading_contract.js';
 
-// Position types
+// Core types, enums, converters, and parsers
+export {
+    Status,
+    OrderKind,
+    VaultOrderKind,
+    FULL_CLOSE,
+    orderKindToScVal,
+    vaultOrderKindToScVal,
+    tradingConfigToScVal,
+    parseOrder,
+    parseVaultOrder,
+    parsePosition,
+    parseMarketData,
+    parseAdlState,
+    parseTradingConfig,
+} from './trading_types.js';
+
 export type {
-    FeeBreakdown,
-    PositionPnL,
-    PositionBreakdown,
-    PositionData,
-    PositionRaw,
-    ValidateOrderParams,
-    GrossCollateralParams,
-    GrossCollateralResult,
+    Order,
+    VaultOrder,
+    Position,
+    SidePair,
+    MarketData,
+    AdlState,
+    TradingConfig,
+} from './trading_types.js';
+
+// Position math + loader
+export {
+    PositionView,
+    positionPnl,
+    positionEquity,
+    pendingFunding,
+    pendingBorrowing,
+    liquidationPrice,
+    unlockedNotional,
 } from './trading_position.js';
 
-export { OrderValidationError } from './trading_position.js';
-
-// Market types
-export type {
-    MarketConfig,
-    MarketData,
+// Market math + loader
+export {
+    MarketView,
+    sidePnl,
+    netPnl,
+    utilization,
+    skewSplitFees,
 } from './trading_market.js';
 
-// Config types
-export type {
-    TradingConfigData,
-    TradingInstanceData,
-} from './trading_config.js';
+export type { SkewSplitFees } from './trading_market.js';
 
-// Events
+// Config validation
+export { validateTradingConfig } from './trading_config.js';
+
+// Events (v1 event layer; rewritten in a later task)
 export {
     TradingEventType,
     decodeTradingEvent,

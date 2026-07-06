@@ -1,765 +1,228 @@
-import { rpc, xdr, scValToBigInt, Address } from '@stellar/stellar-sdk';
+import { Address, rpc, xdr, scValToNative } from '@stellar/stellar-sdk';
 import { Network } from '../index.js';
-import { toFloat, toFixed, SCALAR_7, SCALAR_18, mulFloor, mulCeil, divFloor, divCeil } from '../math.js';
+import { SCALAR_18, mulFloor, mulCeil } from '../math.js';
 import { persistentLedgerKey } from '../ledger-keys.js';
-import { Market, type MarketConfig } from './trading_market.js';
-import { TradingConfigData } from './trading_config.js';
+import { Position, MarketData, TradingConfig, parsePosition } from './trading_types.js';
 
-// Error codes matching Rust TradingError
-// Client-side order validation errors.
-// Codes 702-726 mirror contract TradingError. Codes 729-730 are SDK-only
-// (the contract does not emit dedicated trigger validation error codes).
-export enum OrderValidationError {
-    MarketDisabled = 702,
-    NegativeValueNotAllowed = 723,
-    NotionalBelowMinimum = 724,
-    NotionalAboveMaximum = 725,
-    LeverageAboveMaximum = 726,
-    InvalidTakeProfitPrice = 729,  // SDK-only, not a contract error code
-    InvalidStopLossPrice = 730,    // SDK-only, not a contract error code
-}
+// =============================================================================
+// v2 position math and loader.
+//
+// Every formula is ported from `zenex-contracts/trading/src/trading/position.rs`
+// and `.../math.rs` (branch v2/dev). A v2 position is netted per `(user,
+// is_long)` and stores `tokens` (base-dec size) with the implied entry price
+// `notional / tokens`; PnL is `tokens * price - notional` for a long, inverse
+// for a short.
+//
+// Truncation semantics: the contract's fixed-point helpers use true floor
+// (toward -inf) and true ceil (toward +inf). The SDK's `mulCeil` matches true
+// ceil for every sign; `mulFloor` (BigInt `/`, which truncates toward zero)
+// matches true floor only for non-negative products. Every `mulFloor` below
+// operates on non-negative products (token/price magnitudes), so plain
+// truncation reproduces the Rust exactly; the one exception is
+// `liquidationPrice`, whose signed intermediate is clamped to zero.
+//
+// The `priceScalar` argument on the PnL functions is the fixed-point scalar
+// baked into `Position.tokens` by the contract's `math::to_tokens`
+// (`tokens = notional * SCALAR_18 / price`), so for the v2 contract callers pass
+// `SCALAR_18`. The oracle's own price scalar (`10^-exponent`) cancels between
+// `tokens` and `price` and is not this argument. See the Task 3 report for the
+// naming note.
+// =============================================================================
 
-// Input for fee-adjusted collateral calculation
-export interface GrossCollateralParams {
-    collateral: number;     // desired post-fee collateral
-    notional: number;       // position size
-    isLong: boolean;
-    marketConfig: MarketConfig;
-    tradingConfig: TradingConfigData;
-    lNotional: number;      // current long notional on market
-    sNotional: number;      // current short notional on market
-}
-
-export interface GrossCollateralResult {
-    collateral: number;     // collateral to send to the contract
-    fee: number;            // estimated opening fee
-}
-
-// Input for client-side order validation
-export interface ValidateOrderParams {
-    collateral: number;
-    notional: number;
-    entryPrice: number;
-    isLong: boolean;
-    tp: number;
-    sl: number;
-    marketConfig: MarketConfig;
-    tradingConfig: TradingConfigData;
-}
-
-// Fee breakdown for a position
-export interface FeeBreakdown {
-    baseFee: number;
-    priceImpact: number;
-    funding: number;
-    borrowingFee: number;
-    total: number;
-}
-
-// PnL calculation result
-export interface PositionPnL {
-    pnl: number;
-    fee: FeeBreakdown;
-    netPnl: number;
-}
-
-// Full position breakdown for display
-export interface PositionBreakdown {
-    pnl: number;              // raw price pnl
-    baseFee: number;
-    impactFee: number;
-    funding: number;
-    borrowingFee: number;
-    totalFee: number;
-    equity: number;           // collateral + pnl - totalFee (clamped >= 0)
-    netPnl: number;           // pnl - totalFee (clamped >= -collateral)
-    returnPct: number;        // netPnl / collateral * 100
-}
-
-// Position data for SDK consumers (descaled)
-export interface PositionData {
-    id: number;
-    user: string;        // position owner (from storage key, not in on-chain struct)
-    filled: boolean;
-    marketId: number;
-    long: boolean;
-    sl: number;
-    tp: number;
-    entryPrice: number;
-    col: number;
-    notional: number;
-    fundIdx: bigint;     // SCALAR_18
-    borrIdx: bigint;     // SCALAR_18
-    adlIdx: bigint;      // SCALAR_18
-    createdAt: number;
-    priceDecimals: number; // feed exponent magnitude (e.g. 8 for Pyth -8)
+/**
+ * Signed PnL of `position` marked at `price`, token-dec.
+ *
+ * Ports `math::pnl`: a long is `floor(tokens * price / priceScalar) - notional`,
+ * a short is `notional - ceil(tokens * price / priceScalar)`. The token->notional
+ * mark rounds against the trader (floor for a long, ceil for a short), matching
+ * the contract's conservative-for-the-vault rounding. `price` is the exit price
+ * (`price.exit(is_long)` on-chain); `priceScalar` is `SCALAR_18` for v2.
+ */
+export function positionPnl(position: Position, price: bigint, priceScalar: bigint, isLong: boolean): bigint {
+    if (isLong) {
+        return mulFloor(position.tokens, price, priceScalar) - position.notional;
+    }
+    return position.notional - mulCeil(position.tokens, price, priceScalar);
 }
 
 /**
- * Raw on-chain position state — no descaling.
+ * Pending funding accrual on `position`, token-dec; positive is owed by the
+ * trader, negative is earned.
  *
- * Use this when you need byte-exact fidelity with the contract's
- * i128 storage (indexing, reconciliation, accounting, auditing).
- * `col`, `notional`, `sl`, `tp`, `entryPrice` are the raw scaled
- * integers the contract stores.
- *
- * `priceDecimals` is preserved so a consumer can descale on demand
- * without needing a separate market lookup.
+ * Ports `Position::calculate_fees` / `math::accrued_amount`:
+ * `ceil(notional * (marketFundingIdx[side] - position.fundingIdx) / SCALAR_18)`.
+ * The ceil rounds toward +inf for both signs so a payer never underpays and a
+ * receiver (negative delta) never over-claims.
  */
-export interface PositionRaw {
-    id: number;
-    user: string;
-    filled: boolean;
-    marketId: number;
-    long: boolean;
-    sl: bigint;          // scaled by 10^priceDecimals
-    tp: bigint;          // scaled by 10^priceDecimals
-    entryPrice: bigint;  // scaled by 10^priceDecimals
-    col: bigint;         // scaled by 10^7 (USDC)
-    notional: bigint;    // scaled by 10^7 (USDC)
-    fundIdx: bigint;     // SCALAR_18
-    borrIdx: bigint;     // SCALAR_18
-    adlIdx: bigint;      // SCALAR_18
-    createdAt: number;
-    priceDecimals: number;
+export function pendingFunding(position: Position, marketData: MarketData, isLong: boolean): bigint {
+    const marketIdx = isLong ? marketData.fundingIdx.long : marketData.fundingIdx.short;
+    return mulCeil(position.notional, marketIdx - position.fundingIdx, SCALAR_18);
 }
 
 /**
- * Position - Trading position class with loaders and computed properties
+ * Pending borrowing accrual on `position`, token-dec (non-negative; indices
+ * only ever grow).
+ *
+ * Ports `Position::calculate_fees` / `math::accrued_amount`:
+ * `ceil(notional * (marketBorrowingIdx[side] - position.borrowingIdx) / SCALAR_18)`.
  */
-export class Position implements PositionData {
-    id: number;
-    user: string;
-    filled: boolean;
-    marketId: number;
-    long: boolean;
-    sl: number;
-    tp: number;
-    entryPrice: number;
-    col: number;
-    notional: number;
-    fundIdx: bigint;
-    borrIdx: bigint;
-    adlIdx: bigint;
-    createdAt: number;
-    priceDecimals: number;
+export function pendingBorrowing(position: Position, marketData: MarketData, isLong: boolean): bigint {
+    const marketIdx = isLong ? marketData.borrowingIdx.long : marketData.borrowingIdx.short;
+    return mulCeil(position.notional, marketIdx - position.borrowingIdx, SCALAR_18);
+}
 
-    constructor(data: PositionData) {
-        this.id = data.id;
-        this.user = data.user;
-        this.filled = data.filled;
-        this.marketId = data.marketId;
-        this.long = data.long;
-        this.sl = data.sl;
-        this.tp = data.tp;
-        this.entryPrice = data.entryPrice;
-        this.col = data.col;
-        this.notional = data.notional;
-        this.fundIdx = data.fundIdx;
-        this.borrIdx = data.borrIdx;
-        this.adlIdx = data.adlIdx;
-        this.createdAt = data.createdAt;
-        this.priceDecimals = data.priceDecimals;
+/**
+ * Position equity, token-dec: `collateral + pnl - pendingFunding -
+ * pendingBorrowing`.
+ *
+ * The contract's `Position::equity` is `collateral + pnl` because
+ * `calculate_fees` has already debited the accruals into `collateral`; a stored
+ * position read by the SDK has not been settled, so this subtracts the pending
+ * accruals via their index deltas. `pendingFunding` is signed, so earned funding
+ * (a negative accrual) raises equity, reflecting the total economic value to the
+ * trader. On-chain, only paid funding debits the margin (earned funding routes
+ * to a separate claimable balance).
+ */
+export function positionEquity(
+    position: Position,
+    marketData: MarketData,
+    price: bigint,
+    priceScalar: bigint,
+    isLong: boolean,
+): bigint {
+    return (
+        position.collateral +
+        positionPnl(position, price, priceScalar, isLong) -
+        pendingFunding(position, marketData, isLong) -
+        pendingBorrowing(position, marketData, isLong)
+    );
+}
+
+/**
+ * The notional still open and unlocked at `nowSecs`, token-dec.
+ *
+ * Ports `Position::locked`: `locked_notional` counts only while
+ * `now < unlocks_at`, so `unlockedNotional = notional - locked`. At the exact
+ * boundary `now == unlocks_at` the lock has expired and the whole notional is
+ * unlocked.
+ */
+export function unlockedNotional(position: Position, nowSecs: bigint): bigint {
+    const locked = nowSecs < position.unlocksAt ? position.lockedNotional : 0n;
+    return position.notional - locked;
+}
+
+/**
+ * Estimated liquidation price for `position`, in price_scalar units; `0` when
+ * there is no open size.
+ *
+ * The contract has no liquidation-price function: it checks
+ * `equity < ceil(maintenance_margin * notional)` directly (`Position::require_valid`
+ * / `liquidate`). This inverts that maintenance line against the same equity
+ * model as `positionEquity` (collateral, PnL, and the funding/borrowing index
+ * accruals) to solve for the marking price where equity meets the maintenance
+ * margin. It excludes the incremental base/impact close fee, which is
+ * second-order for the threshold estimate. Funding is taken at
+ * `max(0, pending)` since earned funding does not shore up the position's
+ * liquidation equity (`Fees::debit` only debits paid funding).
+ */
+export function liquidationPrice(
+    position: Position,
+    config: TradingConfig,
+    marketData: MarketData,
+    isLong: boolean,
+): bigint {
+    if (position.tokens === 0n) {
+        return 0n;
     }
+    // maintenance margin = ceil(notional * maintenance_margin / SCALAR_18) (apply_factor_ceil).
+    const mm = mulCeil(position.notional, config.maintenanceMargin, SCALAR_18);
+    const funding = pendingFunding(position, marketData, isLong);
+    const paidFunding = funding > 0n ? funding : 0n;
+    const borrowing = pendingBorrowing(position, marketData, isLong);
 
-    // === Static Loaders ===
+    // Solve equity(price) == mm, where equity = collateral + pnl - paidFunding
+    // - borrowing and pnl = tokens * price / SCALAR_18 signed by side.
+    let target: bigint;
+    if (isLong) {
+        // floor(tokens*price/SCALAR_18) = mm + notional - collateral + paidFunding + borrowing
+        target = mm + position.notional - position.collateral + paidFunding + borrowing;
+    } else {
+        // ceil(tokens*price/SCALAR_18) = notional + collateral - paidFunding - borrowing - mm
+        target = position.notional + position.collateral - paidFunding - borrowing - mm;
+    }
+    const price = mulFloor(target, SCALAR_18, position.tokens);
+    return price < 0n ? 0n : price;
+}
+
+/**
+ * PositionView - loader for a netted v2 position, keyed `(user, is_long)`.
+ *
+ * Wraps the `Position` persistent entry (equivalent to the `get_position` view)
+ * and exposes the pure math above as instance methods bound to the loaded state.
+ * Mirrors the v1 loader role, adapted to the single-market, per-side v2 storage.
+ */
+export class PositionView {
+    constructor(
+        public readonly position: Position,
+        public readonly user: string,
+        public readonly isLong: boolean,
+    ) {}
 
     /**
-     * Load the user's position counter (number of positions ever created).
-     * Position IDs for this user are 0..counter-1 (not all may still exist).
-     */
-    public static async loadUserCounter(
-        network: Network,
-        contractId: string,
-        userId: string
-    ): Promise<number> {
-        const stellarRpc = new rpc.Server(network.rpc, network.opts);
-
-        const key = persistentLedgerKey(contractId, [
-            xdr.ScVal.scvSymbol('UserCounter'),
-            Address.fromString(userId).toScVal()
-        ]);
-
-        try {
-            const response = await stellarRpc.getLedgerEntries(key);
-            if (response.entries.length === 0) return 0;
-
-            const scVal = response.entries[0].val.contractData().val();
-            return scVal.u32();
-        } catch {
-            return 0;
-        }
-    }
-
-    /**
-     * Load a single trading position from the blockchain
-     * @param userId - Position owner address
-     * @param positionId - Per-user position ID
-     * @param priceDecimals - Feed exponent magnitude for descaling price fields (e.g. 8 for Pyth -8)
+     * Load the netted position for `(user, isLong)` from the contract's
+     * persistent storage (`DataKey::Position(user, is_long)`). Returns `null`
+     * when the entry is absent (a never-opened side).
      */
     public static async load(
         network: Network,
         contractId: string,
-        userId: string,
-        positionId: number,
-        priceDecimals: number,
-    ): Promise<Position | null> {
+        user: string,
+        isLong: boolean,
+    ): Promise<PositionView | null> {
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
-
         const key = persistentLedgerKey(contractId, [
             xdr.ScVal.scvSymbol('Position'),
-            Address.fromString(userId).toScVal(),
-            xdr.ScVal.scvU32(positionId)
+            Address.fromString(user).toScVal(),
+            xdr.ScVal.scvBool(isLong),
         ]);
 
         try {
             const response = await stellarRpc.getLedgerEntries(key);
             if (response.entries.length === 0) return null;
-
-            return Position.fromScVal(response.entries[0].val.contractData().val(), positionId, userId, priceDecimals);
+            const native = scValToNative(response.entries[0].val.contractData().val());
+            return new PositionView(parsePosition(native), user, isLong);
         } catch {
             return null;
         }
     }
 
-    /**
-     * Load a single position without descaling — returns raw bigints
-     * for money/price fields so callers preserve byte-exact on-chain
-     * state. Intended for indexers, reconcilers, and accounting paths.
-     */
-    public static async loadRaw(
-        network: Network,
-        contractId: string,
-        userId: string,
-        positionId: number,
-        priceDecimals: number,
-    ): Promise<PositionRaw | null> {
-        const stellarRpc = new rpc.Server(network.rpc, network.opts);
-
-        const key = persistentLedgerKey(contractId, [
-            xdr.ScVal.scvSymbol('Position'),
-            Address.fromString(userId).toScVal(),
-            xdr.ScVal.scvU32(positionId)
-        ]);
-
-        try {
-            const response = await stellarRpc.getLedgerEntries(key);
-            if (response.entries.length === 0) return null;
-
-            return Position.fromScValRaw(
-                response.entries[0].val.contractData().val(),
-                positionId, userId, priceDecimals,
-            );
-        } catch {
-            return null;
-        }
+    /** Signed PnL marked at `price` (`priceScalar` = SCALAR_18 for v2). */
+    pnl(price: bigint, priceScalar: bigint = SCALAR_18): bigint {
+        return positionPnl(this.position, price, priceScalar, this.isLong);
     }
 
-    /**
-     * Load multiple positions for a single user in a single RPC call
-     * @param userId - Position owner address
-     * @param positionIds - Per-user position IDs to load
-     * @param getFeedDecimals - Callback to resolve feed exponent magnitude by marketId
-     */
-    public static async loadMultiple(
-        network: Network,
-        contractId: string,
-        userId: string,
-        positionIds: number[],
-        getFeedDecimals: (marketId: number) => number,
-    ): Promise<Position[]> {
-        if (positionIds.length === 0) return [];
-
-        const stellarRpc = new rpc.Server(network.rpc, network.opts);
-        const positions: Position[] = [];
-
-        const keys = positionIds.map(id =>
-            persistentLedgerKey(contractId, [
-                xdr.ScVal.scvSymbol('Position'),
-                Address.fromString(userId).toScVal(),
-                xdr.ScVal.scvU32(id)
-            ])
-        );
-
-        const response = await stellarRpc.getLedgerEntries(...keys);
-
-        // Build map from XDR key → entry value
-        const entryMap = new Map<string, xdr.LedgerEntryData>();
-        for (const entry of response.entries) {
-            entryMap.set(entry.key.toXDR('base64'), entry.val);
-        }
-
-        for (let i = 0; i < positionIds.length; i++) {
-            const entryVal = entryMap.get(keys[i].toXDR('base64'));
-            if (!entryVal) continue;
-
-            try {
-                const position = Position.fromScVal(entryVal.contractData().val(), positionIds[i], userId, getFeedDecimals);
-                positions.push(position);
-            } catch {
-                // skip unparseable entry
-            }
-        }
-
-        return positions;
+    /** Pending funding accrual (signed) against `marketData`. */
+    pendingFunding(marketData: MarketData): bigint {
+        return pendingFunding(this.position, marketData, this.isLong);
     }
 
-    /**
-     * Load multiple positions for a single user in one RPC call,
-     * returning raw (non-descaled) on-chain state. Parallels
-     * `loadMultiple` but preserves bigint fidelity — use in indexers,
-     * reconcilers, and anywhere rounding cannot be tolerated.
-     */
-    public static async loadMultipleRaw(
-        network: Network,
-        contractId: string,
-        userId: string,
-        positionIds: number[],
-        getFeedDecimals: (marketId: number) => number,
-    ): Promise<PositionRaw[]> {
-        if (positionIds.length === 0) return [];
-
-        const stellarRpc = new rpc.Server(network.rpc, network.opts);
-        const out: PositionRaw[] = [];
-
-        const keys = positionIds.map(id =>
-            persistentLedgerKey(contractId, [
-                xdr.ScVal.scvSymbol('Position'),
-                Address.fromString(userId).toScVal(),
-                xdr.ScVal.scvU32(id)
-            ])
-        );
-
-        const response = await stellarRpc.getLedgerEntries(...keys);
-
-        const entryMap = new Map<string, xdr.LedgerEntryData>();
-        for (const entry of response.entries) {
-            entryMap.set(entry.key.toXDR('base64'), entry.val);
-        }
-
-        for (let i = 0; i < positionIds.length; i++) {
-            const entryVal = entryMap.get(keys[i].toXDR('base64'));
-            if (!entryVal) continue;
-
-            try {
-                const raw = Position.fromScValRaw(
-                    entryVal.contractData().val(),
-                    positionIds[i], userId, getFeedDecimals,
-                );
-                out.push(raw);
-            } catch {
-                // skip unparseable entry
-            }
-        }
-
-        return out;
+    /** Pending borrowing accrual against `marketData`. */
+    pendingBorrowing(marketData: MarketData): bigint {
+        return pendingBorrowing(this.position, marketData, this.isLong);
     }
 
-    /**
-     * Parse raw Position state from ScVal — no descaling.
-     *
-     * Consumers that need byte-exact on-chain state (indexers,
-     * reconcilers, accounting) should prefer this over `fromScVal`
-     * which descales money/price fields to `number`.
-     *
-     * @internal
-     */
-    static fromScValRaw(
-        val: xdr.ScVal,
-        id: number = 0,
-        user: string = '',
-        priceDecimalsOrLookup: number | ((marketId: number) => number),
-    ): PositionRaw {
-        const map = val.map();
-        if (!map) {
-            throw new Error('Invalid position data: expected map');
-        }
-
-        let filled: boolean | undefined;
-        let marketId: number | undefined;
-        let long: boolean | undefined;
-        let sl: bigint | undefined;
-        let tp: bigint | undefined;
-        let entryPrice: bigint | undefined;
-        let col: bigint | undefined;
-        let notional: bigint | undefined;
-        let fundIdx: bigint | undefined;
-        let borrIdx: bigint | undefined;
-        let adlIdx: bigint | undefined;
-        let createdAt: bigint | undefined;
-
-        map.forEach((entry) => {
-            const key = entry.key().sym().toString();
-
-            switch (key) {
-                case 'filled':
-                    filled = entry.val().b();
-                    break;
-                case 'market_id':
-                    marketId = entry.val().u32();
-                    break;
-                case 'long':
-                    long = entry.val().b();
-                    break;
-                case 'sl':
-                    sl = scValToBigInt(entry.val());
-                    break;
-                case 'tp':
-                    tp = scValToBigInt(entry.val());
-                    break;
-                case 'entry_price':
-                    entryPrice = scValToBigInt(entry.val());
-                    break;
-                case 'col':
-                    col = scValToBigInt(entry.val());
-                    break;
-                case 'notional':
-                    notional = scValToBigInt(entry.val());
-                    break;
-                case 'fund_idx':
-                    fundIdx = scValToBigInt(entry.val());
-                    break;
-                case 'borr_idx':
-                    borrIdx = scValToBigInt(entry.val());
-                    break;
-                case 'adl_idx':
-                    adlIdx = scValToBigInt(entry.val());
-                    break;
-                case 'created_at':
-                    createdAt = scValToBigInt(entry.val());
-                    break;
-            }
-        });
-
-        if (
-            filled === undefined ||
-            marketId === undefined ||
-            long === undefined ||
-            sl === undefined ||
-            tp === undefined ||
-            entryPrice === undefined ||
-            col === undefined ||
-            notional === undefined ||
-            fundIdx === undefined ||
-            borrIdx === undefined ||
-            adlIdx === undefined ||
-            createdAt === undefined
-        ) {
-            throw new Error('Missing required position fields');
-        }
-
-        const priceDecimals = typeof priceDecimalsOrLookup === 'function'
-            ? priceDecimalsOrLookup(marketId)
-            : priceDecimalsOrLookup;
-
-        return {
-            id, user, filled, marketId, long,
-            sl, tp, entryPrice, col, notional,
-            fundIdx, borrIdx, adlIdx,
-            createdAt: Number(createdAt),
-            priceDecimals,
-        };
+    /** Equity: collateral + PnL less pending funding/borrowing. */
+    equity(marketData: MarketData, price: bigint, priceScalar: bigint = SCALAR_18): bigint {
+        return positionEquity(this.position, marketData, price, priceScalar, this.isLong);
     }
 
-    /**
-     * Parse Position from ScVal (matches Rust Position struct), descaling
-     * money/price fields to `number` for typical SDK consumers.
-     *
-     * For byte-exact on-chain state, use `fromScValRaw` instead.
-     *
-     * @internal
-     */
-    static fromScVal(
-        val: xdr.ScVal,
-        id: number = 0,
-        user: string = '',
-        priceDecimalsOrLookup: number | ((marketId: number) => number),
-    ): Position {
-        const raw = Position.fromScValRaw(val, id, user, priceDecimalsOrLookup);
-        return new Position({
-            ...raw,
-            sl: toFloat(raw.sl, raw.priceDecimals),
-            tp: toFloat(raw.tp, raw.priceDecimals),
-            entryPrice: toFloat(raw.entryPrice, raw.priceDecimals),
-            col: toFloat(raw.col, 7),
-            notional: toFloat(raw.notional, 7),
-        });
+    /** Estimated liquidation price in price_scalar units. */
+    liquidationPrice(config: TradingConfig, marketData: MarketData): bigint {
+        return liquidationPrice(this.position, config, marketData, this.isLong);
     }
 
-    // === Client-Side Validation ===
-
-    /**
-     * Validate order parameters client-side, mirroring contract checks.
-     * Returns null if valid, or the error code if invalid.
-     */
-    static validateOrder(params: ValidateOrderParams): OrderValidationError | null {
-        const { collateral, notional, entryPrice, isLong, tp, sl, marketConfig, tradingConfig } = params;
-
-        // Position.validate() checks
-        if (notional <= 0 || entryPrice <= 0 || collateral <= 0 || tp < 0 || sl < 0) {
-            return OrderValidationError.NegativeValueNotAllowed;
-        }
-        if (!marketConfig.enabled) {
-            return OrderValidationError.MarketDisabled;
-        }
-        if (notional < tradingConfig.minNotional) {
-            return OrderValidationError.NotionalBelowMinimum;
-        }
-        if (notional > tradingConfig.maxNotional) {
-            return OrderValidationError.NotionalAboveMaximum;
-        }
-        // leverage check: fixed_mul_ceil(notional, margin, SCALAR_7) > collateral
-        // Matches contract: self.notional.fixed_mul_ceil(e, &margin, &SCALAR_7) > self.col
-        const notionalBig = toFixed(notional, 7);
-        const marginBig = toFixed(marketConfig.margin, 7);
-        const collateralBig = toFixed(collateral, 7);
-        if (mulCeil(notionalBig, marginBig, SCALAR_7) > collateralBig) {
-            return OrderValidationError.LeverageAboveMaximum;
-        }
-
-        // validate_triggers() checks — not enforced by contract on create, but useful for UX
-        if (tp > 0) {
-            if (isLong && tp <= entryPrice) {
-                return OrderValidationError.InvalidTakeProfitPrice;
-            }
-            if (!isLong && tp >= entryPrice) {
-                return OrderValidationError.InvalidTakeProfitPrice;
-            }
-        }
-        if (sl > 0) {
-            if (isLong && sl >= entryPrice) {
-                return OrderValidationError.InvalidStopLossPrice;
-            }
-            if (!isLong && sl <= entryPrice) {
-                return OrderValidationError.InvalidStopLossPrice;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Calculate the collateral to send to the contract so that the post-fee
-     * collateral equals the desired amount.
-     *
-     * Mirrors the contract's market.open() fee logic in fixed-point:
-     *   base_fee = fixed_mul_ceil(notional, fee_rate, SCALAR_7)
-     *   impact_fee = fixed_div_ceil(notional, impact, SCALAR_7)
-     *   position.col -= base_fee + impact_fee
-     */
-    static grossCollateral(params: GrossCollateralParams): GrossCollateralResult {
-        const { collateral, notional, isLong, marketConfig, tradingConfig, lNotional, sNotional } = params;
-
-        const notionalBig = toFixed(notional, 7);
-        const longNotionalBig = toFixed(lNotional, 7);
-        const shortNotionalBig = toFixed(sNotional, 7);
-
-        // Determine if this position would be on the dominant side
-        const isDominant = isLong
-            ? (longNotionalBig + notionalBig) > shortNotionalBig
-            : (shortNotionalBig + notionalBig) > longNotionalBig;
-
-        const feeRate = toFixed(isDominant ? tradingConfig.feeDom : tradingConfig.feeNonDom, 7);
-        const impactBig = toFixed(marketConfig.impact, 7);
-
-        const baseFee = mulCeil(notionalBig, feeRate, SCALAR_7);
-        const impactFee = impactBig > 0n ? divFloor(notionalBig, impactBig, SCALAR_7) : 0n;
-        const fee = toFloat(baseFee + impactFee, 7);
-
-        return {
-            collateral: collateral + fee,
-            fee,
-        };
-    }
-
-    // === Computed Properties ===
-
-    /**
-     * Get leverage (notional / collateral)
-     */
-    get leverage(): number {
-        if (this.col === 0) return 0;
-        return this.notional / this.col;
-    }
-
-    /**
-     * Check if position is an open filled position
-     */
-    isOpen(): boolean {
-        return this.filled;
-    }
-
-    /**
-     * Get human-readable direction
-     */
-    getDirection(): string {
-        return this.long ? 'Long' : 'Short';
-    }
-
-    /**
-     * Compute raw fee components in bigint (token_decimals = SCALAR_7).
-     * Shared by getFeeBreakdown() and getLiquidationPrice() to avoid float round-trips.
-     * @internal
-     */
-    private _computeRawFees(
-        market: Market,
-        tradingConfig: TradingConfigData,
-    ): { baseFee: bigint; priceImpact: bigint; funding: bigint; borrowingFee: bigint } {
-        const notionalBig = toFixed(this.notional, 7);
-        const impactScalar = toFixed(market.impact, 7);
-
-        const longNotional = toFixed(market.lNotional, 7);
-        const shortNotional = toFixed(market.sNotional, 7);
-        const isDominantAfterClose = this.long
-            ? (longNotional - notionalBig) > shortNotional
-            : (shortNotional - notionalBig) > longNotional;
-
-        const baseFeeRate = isDominantAfterClose
-            ? toFixed(tradingConfig.feeNonDom, 7)
-            : toFixed(tradingConfig.feeDom, 7);
-
-        const baseFee = mulCeil(notionalBig, baseFeeRate, SCALAR_7);
-        const priceImpact = divFloor(notionalBig, impactScalar, SCALAR_7);
-
-        const currentFundingIndex = this.long ? market.lFundIdx : market.sFundIdx;
-        const fundingDiff = currentFundingIndex - this.fundIdx;
-        const funding = fundingDiff >= 0n
-            ? mulCeil(notionalBig, fundingDiff, SCALAR_18)
-            : mulFloor(notionalBig, fundingDiff, SCALAR_18);
-
-        const currentBorrowingIndex = this.long ? market.lBorrIdx : market.sBorrIdx;
-        const borrowingFee = mulCeil(notionalBig, currentBorrowingIndex - this.borrIdx, SCALAR_18);
-
-        return { baseFee, priceImpact, funding, borrowingFee };
-    }
-
-    /**
-     * Get the fee breakdown for closing this position.
-     *
-     * @param market - The market data for price impact, funding, and borrowing calculation
-     * @param tradingConfig - The trading config for base fee rates
-     */
-    getFeeBreakdown(market: Market, tradingConfig: TradingConfigData): FeeBreakdown {
-        const { baseFee, priceImpact, funding, borrowingFee } = this._computeRawFees(market, tradingConfig);
-
-        return {
-            baseFee: toFloat(baseFee, 7),
-            priceImpact: toFloat(priceImpact, 7),
-            funding: toFloat(funding, 7),
-            borrowingFee: toFloat(borrowingFee, 7),
-            total: toFloat(baseFee + priceImpact + funding + borrowingFee, 7),
-        };
-    }
-
-    /**
-     * Calculate the position's profit and loss using fixed-point arithmetic.
-     *
-     * Mirrors contract (position.rs settle()):
-     *   ratio = price_diff.fixed_div_floor(entry_price, price_scalar)
-     *   pnl = notional.fixed_mul_floor(ratio, price_scalar)
-     *
-     * @param currentPrice - The current market price
-     * @param market - Market for fee calculation
-     * @param tradingConfig - Trading config for fee rates
-     */
-    calculatePnL(currentPrice: number, market?: Market, tradingConfig?: TradingConfigData): PositionPnL {
-        const emptyFee: FeeBreakdown = { baseFee: 0, priceImpact: 0, funding: 0, borrowingFee: 0, total: 0 };
-        if (!this.filled) {
-            return { pnl: 0, fee: emptyFee, netPnl: 0 };
-        }
-
-        const priceScalar = BigInt(10 ** this.priceDecimals);
-        const priceDiffBig = this.long
-            ? toFixed(currentPrice, this.priceDecimals) - toFixed(this.entryPrice, this.priceDecimals)
-            : toFixed(this.entryPrice, this.priceDecimals) - toFixed(currentPrice, this.priceDecimals);
-        const ratio = divFloor(priceDiffBig, toFixed(this.entryPrice, this.priceDecimals), priceScalar);
-        const pnlBig = mulFloor(toFixed(this.notional, 7), ratio, priceScalar);
-        const pnl = toFloat(pnlBig, 7);
-
-        const fee = (market && tradingConfig)
-            ? this.getFeeBreakdown(market, tradingConfig)
-            : emptyFee;
-
-        return {
-            pnl,
-            fee,
-            netPnl: pnl - fee.total,
-        };
-    }
-
-    /**
-     * Full position breakdown: PnL, fee components, equity, and return.
-     * Uses fixed-point arithmetic matching contract settle().
-     */
-    getBreakdown(currentPrice: number, market: Market, tradingConfig: TradingConfigData): PositionBreakdown {
-        if (!this.filled) {
-            return { pnl: 0, baseFee: 0, impactFee: 0, funding: 0, borrowingFee: 0, totalFee: 0, equity: this.col, netPnl: 0, returnPct: 0 };
-        }
-
-        const priceScalar = BigInt(10 ** this.priceDecimals);
-        const priceDiffBig = this.long
-            ? toFixed(currentPrice, this.priceDecimals) - toFixed(this.entryPrice, this.priceDecimals)
-            : toFixed(this.entryPrice, this.priceDecimals) - toFixed(currentPrice, this.priceDecimals);
-        const ratio = divFloor(priceDiffBig, toFixed(this.entryPrice, this.priceDecimals), priceScalar);
-        const pnlBig = mulFloor(toFixed(this.notional, 7), ratio, priceScalar);
-        const pnl = toFloat(pnlBig, 7);
-
-        const fee = this.getFeeBreakdown(market, tradingConfig);
-        const netPnl = Math.max(-this.col, pnl - fee.total);
-        const equity = Math.max(0, this.col + pnl - fee.total);
-        const returnPct = this.col > 0 ? (netPnl / this.col) * 100 : 0;
-
-        return {
-            pnl,
-            baseFee: fee.baseFee,
-            impactFee: fee.priceImpact,
-            funding: fee.funding,
-            borrowingFee: fee.borrowingFee,
-            totalFee: fee.total,
-            equity,
-            netPnl,
-            returnPct,
-        };
-    }
-
-    /**
-     * Get the liquidation price for the position.
-     * Uses the per-market liq_fee as the liquidation threshold.
-     * Computes fees entirely in bigint to avoid float round-trip precision loss.
-     *
-     * @param market - The market containing funding/borrowing indices and liq_fee
-     * @param tradingConfig - The trading config for fee rates
-     */
-    getLiquidationPrice(market: Market, tradingConfig: TradingConfigData): number {
-        if (!this.filled) return 0;
-
-        // ADL adjustment: scale notional by current_adl_idx / position.adl_idx
-        // (matches contract position.rs settle() lines 181-184)
-        const adlIndex = this.long ? market.lAdlIdx : market.sAdlIdx;
-        let notionalBig = toFixed(this.notional, 7);
-        if (this.adlIdx !== adlIndex && this.adlIdx !== 0n) {
-            notionalBig = mulFloor(notionalBig, adlIndex, this.adlIdx);
-        }
-
-        const collateral = toFixed(this.col, 7);
-        const entryPrice = toFixed(this.entryPrice, this.priceDecimals);
-        const liqFee = toFixed(market.liqFee, 7);
-
-        // Compute total fee in bigint — no float round-trip
-        const { baseFee, priceImpact, funding, borrowingFee } = this._computeRawFees(market, tradingConfig);
-        const totalFee = baseFee + priceImpact + funding + borrowingFee;
-
-        // Liquidation threshold: equity <= liq_fee * notional
-        const requiredMargin = mulFloor(notionalBig, liqFee, SCALAR_7);
-        const requiredPnl = requiredMargin - collateral + totalFee;
-
-        const priceChangeRatio = mulFloor(requiredPnl, SCALAR_7, notionalBig);
-        const priceDelta = mulFloor(entryPrice, priceChangeRatio, SCALAR_7);
-
-        const liquidationPrice = this.long
-            ? entryPrice + priceDelta
-            : entryPrice - priceDelta;
-
-        return Math.max(0, Number(liquidationPrice) / 10 ** this.priceDecimals);
+    /** Open notional still unlocked at `nowSecs`. */
+    unlockedNotional(nowSecs: bigint): bigint {
+        return unlockedNotional(this.position, nowSecs);
     }
 }

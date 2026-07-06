@@ -34,27 +34,14 @@ export type { BaseZenexEvent, NormalizedEvent, MercuryWebhookEvent, MercuryScVal
 export {
     TradingContract,
     Position,
-    Market,
     TradingConfig,
     ContractStatus,
     TradingEventType,
-    OrderValidationError,
     decodeTradingEvent,
 } from './trading/index.js';
 
 export type {
-    FeeBreakdown,
-    PositionPnL,
-    PositionBreakdown,
-    PositionData,
-    PositionRaw,
-    ValidateOrderParams,
-    GrossCollateralParams,
-    GrossCollateralResult,
-    MarketConfig,
     MarketData,
-    TradingConfigData,
-    TradingInstanceData,
     PlaceLimitArgs,
     OpenMarketArgs,
     ClosePositionArgs,
