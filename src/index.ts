@@ -63,7 +63,6 @@ export {
 
 export type {
     FactoryInitMeta,
-    FactoryDeployArgs,
     FactoryConstructorArgs,
 } from './factory/index.js';
 

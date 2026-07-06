@@ -5,15 +5,17 @@ import {
     contractInstanceLedgerKey,
     decodeEntryKey,
     tokenBalanceLedgerKey,
-    persistentLedgerKey,
 } from '../ledger-keys.js';
 
 // Vault state data (ERC-4626 style)
+//
+// Deposit/redeem locking is no longer tracked on the vault: `lock_time` moved
+// to trading `Config.depositLock`/`Config.redeemLock` and per-order unlock
+// timestamps live on trading `VaultOrder.unlocksAt` (see trading_types.ts).
+// The vault contract itself has no `LockTime` or `LastDepositTime` storage.
 export interface VaultStateData {
     /** Underlying asset token address */
     asset: string;
-    /** Lock time in seconds for withdrawals */
-    lockTime: number;
     /** Total shares in circulation */
     totalShares: number;
     /** Total assets in the vault */
@@ -58,8 +60,6 @@ function extractBalanceAmount(val: xdr.ScVal): bigint {
 export class VaultState implements VaultStateData {
     /** Underlying asset token address */
     asset: string;
-    /** Lock time in seconds for withdrawals */
-    lockTime: number;
     /** Total shares in circulation */
     totalShares: number;
     /** Total assets in the vault */
@@ -73,7 +73,6 @@ export class VaultState implements VaultStateData {
 
     constructor(data: VaultStateData, network: Network, contractId: string) {
         this.asset = data.asset;
-        this.lockTime = data.lockTime;
         this.totalShares = data.totalShares;
         this.totalAssets = data.totalAssets;
         this.decimalsOffset = data.decimalsOffset;
@@ -110,7 +109,6 @@ export class VaultState implements VaultStateData {
 
         // Parse instance storage
         let asset: string | undefined;
-        let lockTime: number = 0;
         let totalShares: bigint = 0n;
         let decimalsOffset: number = 0;
 
@@ -120,10 +118,6 @@ export class VaultState implements VaultStateData {
             switch (entryKey) {
                 case 'AssetAddress':
                     asset = Address.fromScVal(storageEntry.val()).toString();
-                    break;
-
-                case 'LockTime':
-                    lockTime = Number(scValToBigInt(storageEntry.val()));
                     break;
 
                 case 'TotalSupply':
@@ -163,7 +157,6 @@ export class VaultState implements VaultStateData {
         return new VaultState(
             {
                 asset,
-                lockTime,
                 totalShares: toFloat(totalShares, shareDecimals),
                 totalAssets: toFloat(totalAssets, 7),
                 decimalsOffset,
@@ -171,73 +164,6 @@ export class VaultState implements VaultStateData {
             network,
             contractId
         );
-    }
-
-    /**
-     * Get seconds remaining until user's shares unlock, or 0 if not locked
-     * @param userId - The user address to check
-     * @returns Seconds remaining until unlock (0 = not locked)
-     */
-    public async lockDuration(userId: string): Promise<number> {
-        const stellarRpc = new rpc.Server(this.network.rpc, this.network.opts);
-
-        // Read both the vault instance (for LockTime) and user's LastDepositTime
-        const instanceKey = contractInstanceLedgerKey(this.contractId);
-        const lastDepositKey = persistentLedgerKey(this.contractId, [
-            xdr.ScVal.scvSymbol('LastDepositTime'),
-            Address.fromString(userId).toScVal(),
-        ]);
-
-        const response = await stellarRpc.getLedgerEntries(instanceKey, lastDepositKey);
-
-        // Parse lock time from instance storage
-        let lockTime: bigint = 0n;
-        if (response.entries.length > 0) {
-            const contractData = response.entries[0].val.contractData();
-            const contractInstance = contractData.val().instance();
-            const storage = contractInstance.storage();
-            if (storage) {
-                storage.forEach((storageEntry) => {
-                    const entryKey = decodeEntryKey(storageEntry.key());
-                    if (entryKey === 'LockTime') {
-                        lockTime = scValToBigInt(storageEntry.val());
-                    }
-                });
-            }
-        }
-
-        // If no lock time set, user is not locked
-        if (lockTime === 0n) return 0;
-
-        // Check if user has a last deposit time
-        let lastDepositTime: bigint = 0n;
-        for (const entry of response.entries) {
-            try {
-                const val = entry.val.contractData().val();
-                // Skip instance entries
-                if (entry.val.contractData().key().switch() === xdr.ScValType.scvLedgerKeyContractInstance()) {
-                    continue;
-                }
-                lastDepositTime = scValToBigInt(val);
-            } catch {
-                continue;
-            }
-        }
-
-        // If no deposit time, user has no shares so not locked
-        if (lastDepositTime === 0n) return 0;
-
-        // Use wall-clock time as approximation of ledger timestamp
-        // The contract uses e.ledger().timestamp() which is Unix epoch seconds
-        const currentTime = BigInt(Math.floor(Date.now() / 1000));
-
-        // Calculate unlock time and remaining duration
-        const unlockTime = lastDepositTime + lockTime;
-        if (currentTime >= unlockTime) {
-            return 0;
-        }
-
-        return Number(unlockTime - currentTime);
     }
 
     // === Computed Properties ===

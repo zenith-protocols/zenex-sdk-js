@@ -1,26 +1,12 @@
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
-import { i128, u32, u64 } from '../index.js';
-import { TradingConfigArgs, TradingContract } from '../trading/trading_contract.js';
+import { u32, i32 } from '../index.js';
+import { TradingConfig, tradingConfigToScVal } from '../trading/trading_types.js';
 
 // FactoryInitMeta - constructor arg for the factory
 export interface FactoryInitMeta {
     trading_hash: Buffer | Uint8Array;
     treasury: string;
     vault_hash: Buffer | Uint8Array;
-}
-
-// Deploy pool arguments
-export interface FactoryDeployArgs {
-    admin: string;
-    salt: Buffer | Uint8Array;
-    token: string;
-    price_verifier: string;
-    config: TradingConfigArgs;
-    vault_name: string;
-    vault_symbol: string;
-    vault_decimals_offset: u32;
-    vault_lock_time: u64;
-    vault_min_deposit: i128;
 }
 
 // Constructor arguments
@@ -31,29 +17,38 @@ export interface FactoryConstructorArgs {
 /**
  * FactoryContract - Operation builder for the Zenex Factory contract
  *
+ * Deploys an isolated trading + strategy-vault pair per market.
+ *
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class FactoryContract extends Contract {
     static spec: contract.Spec = new contract.Spec([
-        "AAAAAQAAADtNaXJyb3JzIHRyYWRpbmc6OlRyYWRpbmdDb25maWcuIFNhbWUgWERSIGVuY29kaW5nIG9uLWNoYWluLgAAAAAAAAAADVRyYWRpbmdDb25maWcAAAAAAAAJAAAAAAAAAAtjYWxsZXJfcmF0ZQAAAAALAAAAAAAAAAdmZWVfZG9tAAAAAAsAAAAAAAAAC2ZlZV9ub25fZG9tAAAAAAsAAAAAAAAADG1heF9ub3Rpb25hbAAAAAsAAAAAAAAACG1heF91dGlsAAAACwAAAAAAAAAMbWluX25vdGlvbmFsAAAACwAAAAAAAAAGcl9iYXNlAAAAAAALAAAAAAAAAAlyX2Z1bmRpbmcAAAAAAAALAAAAAAAAAAVyX3ZhcgAAAAAAAAs=",
-        "AAAAAAAAAAAAAAAGZGVwbG95AAAAAAAKAAAAAAAAAAVhZG1pbgAAAAAAABMAAAAAAAAABHNhbHQAAAPuAAAAIAAAAAAAAAAFdG9rZW4AAAAAAAATAAAAAAAAAA5wcmljZV92ZXJpZmllcgAAAAAAEwAAAAAAAAAGY29uZmlnAAAAAAfQAAAADVRyYWRpbmdDb25maWcAAAAAAAAAAAAACnZhdWx0X25hbWUAAAAAABAAAAAAAAAADHZhdWx0X3N5bWJvbAAAABAAAAAAAAAAFXZhdWx0X2RlY2ltYWxzX29mZnNldAAAAAAAAAQAAAAAAAAAD3ZhdWx0X2xvY2tfdGltZQAAAAAGAAAAAAAAABF2YXVsdF9taW5fZGVwb3NpdAAAAAAAAAsAAAABAAAAEw==",
+        "AAAAAQAAAERNaXJyb3JzIHRoZSB0cmFkaW5nIGNvbnRyYWN0J3MgYENvbmZpZ2AuIFNhbWUgWERSIGVuY29kaW5nIG9uLWNoYWluLgAAAAAAAAAGQ29uZmlnAAAAAAAjAAAAAAAAABBhZGxfY2xlYXJfdGFyZ2V0AAAACwAAAAAAAAALYWRsX21heF9wbmwAAAAACwAAAAAAAAALYm9ycm93X3JhdGUAAAAACwAAAAAAAAAMZGVwb3NpdF9sb2NrAAAABgAAAAAAAAAHZmVlX2RvbQAAAAALAAAAAAAAAAtmZWVfbm9uX2RvbQAAAAALAAAAAAAAABBmdW5kaW5nX2RlY3JlYXNlAAAACwAAAAAAAAAQZnVuZGluZ19pbmNyZWFzZQAAAAsAAAAAAAAAC2Z1bmRpbmdfbWF4AAAAAAsAAAAAAAAAC2Z1bmRpbmdfbWluAAAAAAsAAAAAAAAADmltcGFjdF9kaXZpc29yAAAAAAALAAAAAAAAABVpbmNyZWFzZWRfYm9ycm93X3JhdGUAAAAAAAALAAAAAAAAAAtpbml0X21hcmdpbgAAAAALAAAAAAAAABNpbnN0YW50X2RlcG9zaXRfcG5sAAAAAAsAAAAAAAAAC2tlZXBlcl9yYXRlAAAAAAsAAAAAAAAAB2xpcV9mZWUAAAAACwAAAAAAAAASbWFpbnRlbmFuY2VfbWFyZ2luAAAAAAALAAAAAAAAABFtYXhfb3Blbl9pbnRlcmVzdAAAAAAAAAsAAAAAAAAAD21heF9wbmxfZGVwb3NpdAAAAAALAAAAAAAAAA5tYXhfcG5sX3RyYWRlcgAAAAAACwAAAAAAAAAQbWF4X3BubF93aXRoZHJhdwAAAAsAAAAAAAAAFW1heF9wb3NpdGlvbl9ub3Rpb25hbAAAAAAAAAsAAAAAAAAADW1heF91dGlsX29wZW4AAAAAAAALAAAAAAAAABFtYXhfdXRpbF93aXRoZHJhdwAAAAAAAAsAAAAAAAAAEW1heF92YXVsdF9iYWxhbmNlAAAAAAAACwAAAAAAAAALbWluX2RlcG9zaXQAAAAACwAAAAAAAAAUbWluX29yZGVyX2NvbGxhdGVyYWwAAAALAAAAAAAAABJtaW5fb3JkZXJfbm90aW9uYWwAAAAAAAsAAAAAAAAAFW1pbl9wb3NpdGlvbl9ub3Rpb25hbAAAAAAAAAsAAAAAAAAADW5vdGlvbmFsX2xvY2sAAAAAAAAGAAAAAAAAAAtyZWRlZW1fbG9jawAAAAAGAAAAAAAAAAt0YXJnZXRfdXRpbAAAAAALAAAAAAAAABp0aHJlc2hvbGRfZGVjcmVhc2VfZnVuZGluZwAAAAAACwAAAAAAAAAYdGhyZXNob2xkX3N0YWJsZV9mdW5kaW5nAAAACwAAAAAAAAAJdmF1bHRfZmVlAAAAAAAACw==",
+        "AAAAAAAAAAAAAAAGZGVwbG95AAAAAAAKAAAAAAAAAAVhZG1pbgAAAAAAABMAAAAAAAAABHNhbHQAAAPuAAAAIAAAAAAAAAAFdG9rZW4AAAAAAAATAAAAAAAAAA5wcmljZV92ZXJpZmllcgAAAAAAEwAAAAAAAAAHZmVlZF9pZAAAAAAEAAAAAAAAAAhleHBvbmVudAAAAAUAAAAAAAAABmNvbmZpZwAAAAAH0AAAAAZDb25maWcAAAAAAAAAAAAKdmF1bHRfbmFtZQAAAAAAEAAAAAAAAAAMdmF1bHRfc3ltYm9sAAAAEAAAAAAAAAAVdmF1bHRfZGVjaW1hbHNfb2Zmc2V0AAAAAAAABAAAAAEAAAAT",
         "AAAAAAAAAAAAAAALaXNfZGVwbG95ZWQAAAAAAQAAAAAAAAAHdHJhZGluZwAAAAATAAAAAQAAAAE=",
-        "AAAAAAAAALxJbml0aWFsaXplIHRoZSBmYWN0b3J5IHdpdGggY29tcGlsZWQgV0FTTSBoYXNoZXMgYW5kIHRoZSB0cmVhc3VyeSBhZGRyZXNzLgoKIyBQYXJhbWV0ZXJzCi0gYGluaXRfbWV0YWAgLSBbYEZhY3RvcnlJbml0TWV0YWBdIGNvbnRhaW5pbmcgYHRyYWRpbmdfaGFzaGAsIGB2YXVsdF9oYXNoYCwgYW5kIGB0cmVhc3VyeWAgYWRkcmVzcwAAAA1fX2NvbnN0cnVjdG9yAAAAAAAAAQAAAAAAAAAJaW5pdF9tZXRhAAAAAAAH0AAAAA9GYWN0b3J5SW5pdE1ldGEAAAAAAA==",
+        "AAAAAAAAALtJbml0aWFsaXplIHRoZSBmYWN0b3J5IHdpdGggY29tcGlsZWQgV0FTTSBoYXNoZXMgYW5kIHRoZSB0cmVhc3VyeSBhZGRyZXNzLgoKIyBBcmd1bWVudHMKLSBgaW5pdF9tZXRhYCAtIFtgRmFjdG9yeUluaXRNZXRhYF0gY29udGFpbmluZyBgdHJhZGluZ19oYXNoYCwgYHZhdWx0X2hhc2hgLCBhbmQgYHRyZWFzdXJ5YCBhZGRyZXNzAAAAAA1fX2NvbnN0cnVjdG9yAAAAAAAAAQAAAAAAAAAJaW5pdF9tZXRhAAAAAAAH0AAAAA9GYWN0b3J5SW5pdE1ldGEAAAAAAA==",
         "AAAABQAAAAAAAAAAAAAABkRlcGxveQAAAAAAAQAAAAZkZXBsb3kAAAAAAAIAAAAAAAAAB3RyYWRpbmcAAAAAEwAAAAEAAAAAAAAABXZhdWx0AAAAAAAAEwAAAAEAAAAC",
         "AAAAAgAAAAAAAAAAAAAADkZhY3RvcnlEYXRhS2V5AAAAAAABAAAAAQAAAAAAAAAFUG9vbHMAAAAAAAABAAAAEw==",
-        "AAAAAQAAAAAAAAAAAAAAD0ZhY3RvcnlJbml0TWV0YQAAAAADAAAAAAAAAAx0cmFkaW5nX2hhc2gAAAPuAAAAIAAAAAAAAAAIdHJlYXN1cnkAAAATAAAAAAAAAAp2YXVsdF9oYXNoAAAAAAPuAAAAIA=="
+        "AAAAAQAAAAAAAAAAAAAAD0ZhY3RvcnlJbml0TWV0YQAAAAADAAAAAAAAAAx0cmFkaW5nX2hhc2gAAAPuAAAAIAAAAAAAAAAIdHJlYXN1cnkAAAATAAAAAAAAAAp2YXVsdF9oYXNoAAAAAAPuAAAAIA==",
     ]);
 
     static readonly parsers = {
-        deploy: (result: string): string =>
+        deployMarket: (result: string): string =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         isDeployed: (result: string): boolean =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
     };
 
     /**
-     * Deploy a new instance of the Factory contract
-     * Constructor: __constructor(init_meta)
+     * Deploy a new instance of the Factory contract.
+     *
+     * Initialize the factory with compiled WASM hashes and the treasury address.
+     *
+     * Constructor: `__constructor(init_meta)`.
+     *
+     * # Parameters
+     * - `init_meta` - [`FactoryInitMeta`] containing `trading_hash`, `vault_hash`,
+     *   and `treasury` address
      */
     static deploy(
         deployer: string,
@@ -95,27 +90,65 @@ export class FactoryContract extends Contract {
     }
 
     // ============================================================
-    // Pool Deployment
+    // Market Deployment
     // ============================================================
 
     /**
-     * Deploy a new trading pool (trading contract + strategy vault)
-     * Returns the trading contract address
+     * Deploy a single-market pair (strategy-vault + trading contract) atomically
+     * and return the trading contract address.
+     *
+     * The vault is registered as the trading contract's collateral vault and the
+     * trading contract as the vault's immutable strategy. Both addresses derive
+     * from `admin` and the salts, so a salt alone cannot be front-run by another
+     * deployer.
+     *
+     * # Authorization
+     * - `admin` must authorize the call and both deployments; it becomes the
+     *   owner of the new trading contract.
+     *
+     * # Arguments
+     * - `salt` - Salt for the trading address; the vault salt is derived from it
+     * - `token` - Collateral token address (settlement token for both contracts)
+     * - `priceVerifier` - Pyth Lazer price verifier contract address
+     * - `feedId` - Pyth Lazer feed id of the market (immutable on trading)
+     * - `exponent` - Price exponent of the feed (immutable on trading)
+     * - `config` - Initial trading `TradingConfig`
+     * - `vaultName` / `vaultSymbol` - Vault share token metadata
+     * - `vaultDecimalsOffset` - Extra share decimals (inflation attack mitigation)
+     *
+     * # Errors
+     * - Propagates the trading constructor's validation: `InvalidConfig` if
+     *   `exponent` is out of range or `config` fails its bounds,
+     *   `NegativeValueNotAllowed` if a rate, fee, or margin is negative.
+     *
+     * # Events
+     * - Emits `Deploy` with topics `(trading: Address, vault: Address)`.
      */
-    deployPool(args: FactoryDeployArgs): string {
-        const saltBuffer = args.salt instanceof Buffer ? args.salt : Buffer.from(args.salt);
+    deployMarket(
+        admin: string,
+        salt: Buffer | Uint8Array,
+        token: string,
+        priceVerifier: string,
+        feedId: u32,
+        exponent: i32,
+        config: TradingConfig,
+        vaultName: string,
+        vaultSymbol: string,
+        vaultDecimalsOffset: u32,
+    ): string {
+        const saltBuffer = salt instanceof Buffer ? salt : Buffer.from(salt);
         return this.call(
             'deploy',
-            Address.fromString(args.admin).toScVal(),
+            Address.fromString(admin).toScVal(),
             xdr.ScVal.scvBytes(saltBuffer),
-            Address.fromString(args.token).toScVal(),
-            Address.fromString(args.price_verifier).toScVal(),
-            TradingContract.tradingConfigToScVal(args.config),
-            nativeToScVal(args.vault_name, { type: 'string' }),
-            nativeToScVal(args.vault_symbol, { type: 'string' }),
-            xdr.ScVal.scvU32(args.vault_decimals_offset),
-            nativeToScVal(args.vault_lock_time, { type: 'u64' }),
-            nativeToScVal(args.vault_min_deposit, { type: 'i128' }),
+            Address.fromString(token).toScVal(),
+            Address.fromString(priceVerifier).toScVal(),
+            xdr.ScVal.scvU32(feedId),
+            xdr.ScVal.scvI32(exponent),
+            tradingConfigToScVal(config),
+            nativeToScVal(vaultName, { type: 'string' }),
+            nativeToScVal(vaultSymbol, { type: 'string' }),
+            xdr.ScVal.scvU32(vaultDecimalsOffset),
         ).toXDR('base64');
     }
 
@@ -124,7 +157,7 @@ export class FactoryContract extends Contract {
     // ============================================================
 
     /**
-     * Check if a trading contract was deployed by this factory
+     * Returns `true` if the given trading address was deployed by this factory.
      */
     isDeployed(tradingId: string): string {
         return this.call(
