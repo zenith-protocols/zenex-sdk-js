@@ -4,21 +4,17 @@ export { Position } from './trading_position.js';
 export { Market } from './trading_market.js';
 export { TradingConfig } from './trading_config.js';
 
-// Contract types & enums
-export {
-    ContractStatus,
-} from './trading_contract.js';
-
+// Contract argument interfaces
 export type {
-    PlaceLimitArgs,
-    OpenMarketArgs,
-    ClosePositionArgs,
-    SetTriggersArgs,
-    ModifyCollateralArgs,
-    ExecuteArgs,
     DeployArgs,
-    TradingConfigArgs,
-    MarketConfigArgs,
+    OpenMarketArgs,
+    OpenLimitArgs,
+    ClosePositionArgs,
+    DecreasePositionArgs,
+    ModifyCollateralArgs,
+    TriggerOrderArgs,
+    VaultDepositArgs,
+    VaultRedeemArgs,
 } from './trading_contract.js';
 
 // Position types
