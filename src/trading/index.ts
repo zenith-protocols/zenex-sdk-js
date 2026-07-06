@@ -68,7 +68,7 @@ export type { SkewSplitFees } from './trading_market.js';
 // Config validation
 export { validateTradingConfig } from './trading_config.js';
 
-// Events (v1 event layer; rewritten in a later task)
+// Events (v2 event layer; matches trading/src/events.rs)
 export {
     TradingEventType,
     decodeTradingEvent,
@@ -76,21 +76,19 @@ export {
 
 export type {
     BaseTradingEvent,
-    TradingSetConfigEvent,
-    TradingSetMarketEvent,
-    TradingDelMarketEvent,
-    TradingSetStatusEvent,
-    TradingOpenMarketEvent,
-    TradingPlaceLimitEvent,
-    TradingClosePositionEvent,
-    TradingFillLimitEvent,
+    TradingCreateOrderEvent,
+    TradingCancelOrderEvent,
+    TradingCreateVaultOrderEvent,
+    TradingCancelVaultOrderEvent,
+    TradingExecuteVaultOrderEvent,
+    TradingClaimFundingEvent,
+    TradingAdlUpdateEvent,
+    TradingStatusUpdateEvent,
+    TradingConfigUpdateEvent,
+    TradingTerminalPriceUpdateEvent,
+    TradingIncreaseFillEvent,
+    TradingDecreaseFillEvent,
     TradingLiquidationEvent,
-    TradingTakeProfitEvent,
-    TradingStopLossEvent,
-    TradingModifyCollateralEvent,
-    TradingSetTriggersEvent,
-    TradingRefundPositionEvent,
-    TradingApplyFundingEvent,
-    TradingADLTriggeredEvent,
+    TradingPositionUpdateEvent,
     TradingEvent,
 } from './trading_events.js';

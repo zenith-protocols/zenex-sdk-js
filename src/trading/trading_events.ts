@@ -1,24 +1,35 @@
-import { i128, u32, u64 } from '../index.js';
+import { i128, u32 } from '../index.js';
 import { ZenexContractType, BaseZenexEvent, NormalizedEvent } from '../base_event.js';
+import {
+    Order, VaultOrder, Position, TradingConfig,
+    parseOrder, parseVaultOrder, parsePosition, parseTradingConfig,
+} from './trading_types.js';
 
-// Trading event types (matches Rust events)
+// =============================================================================
+// Trading event types (v2) — mirrors `trading/src/events.rs`.
+//
+// Each `#[contractevent]` struct's topics are `[<snake_case event name>,
+// ...#[topic] fields in declaration order]`; remaining fields land in the
+// data map. Nested structs (`order`, `position`, `config`) are routed
+// through the Task 1 parsers so they decode to the same camelCase
+// interfaces used elsewhere in the SDK.
+// =============================================================================
+
 export enum TradingEventType {
-    SetConfig = 'set_config',
-    SetMarket = 'set_market',
-    DelMarket = 'del_market',
-    SetStatus = 'set_status',
-    OpenMarket = 'open_market',
-    PlaceLimit = 'place_limit',
-    ClosePosition = 'close_position',
-    FillLimit = 'fill_limit',
+    CreateOrder = 'create_order',
+    CancelOrder = 'cancel_order',
+    CreateVaultOrder = 'create_vault_order',
+    CancelVaultOrder = 'cancel_vault_order',
+    ExecuteVaultOrder = 'execute_vault_order',
+    ClaimFunding = 'claim_funding',
+    AdlUpdate = 'adl_update',
+    StatusUpdate = 'status_update',
+    ConfigUpdate = 'config_update',
+    TerminalPriceUpdate = 'terminal_price_update',
+    IncreaseFill = 'increase_fill',
+    DecreaseFill = 'decrease_fill',
     Liquidation = 'liquidation',
-    TakeProfit = 'take_profit',
-    StopLoss = 'stop_loss',
-    ModifyCollateral = 'modify_collateral',
-    SetTriggers = 'set_triggers',
-    ApplyFunding = 'apply_funding',
-    RefundPosition = 'refund_position',
-    ADLTriggered = 'adl_triggered',
+    PositionUpdate = 'position_update',
 }
 
 // Trading Events
@@ -27,185 +38,226 @@ export interface BaseTradingEvent extends BaseZenexEvent {
     eventType: TradingEventType;
 }
 
-export interface TradingSetConfigEvent extends BaseTradingEvent {
-    eventType: TradingEventType.SetConfig;
-    config: Record<string, unknown>;
+/** Order created via `create_order`. */
+export interface TradingCreateOrderEvent extends BaseTradingEvent {
+    eventType: TradingEventType.CreateOrder;
+    user: string;
+    orderId: u32;
+    /** The stored order row, as returned by `get_order`. */
+    order: Order;
 }
 
-export interface TradingSetMarketEvent extends BaseTradingEvent {
-    eventType: TradingEventType.SetMarket;
-    marketId: u32;
+/** Pending order removed via `cancel_order`. */
+export interface TradingCancelOrderEvent extends BaseTradingEvent {
+    eventType: TradingEventType.CancelOrder;
+    user: string;
+    orderId: u32;
 }
 
-export interface TradingDelMarketEvent extends BaseTradingEvent {
-    eventType: TradingEventType.DelMarket;
-    marketId: u32;
+/** Vault deposit or redeem order created via `create_vault_order`. */
+export interface TradingCreateVaultOrderEvent extends BaseTradingEvent {
+    eventType: TradingEventType.CreateVaultOrder;
+    user: string;
+    orderId: u32;
+    /** The stored vault-order row, as returned by `get_vault_order`. */
+    order: VaultOrder;
 }
 
-export interface TradingSetStatusEvent extends BaseTradingEvent {
-    eventType: TradingEventType.SetStatus;
+/** Pending vault order removed via `cancel_vault_order`. */
+export interface TradingCancelVaultOrderEvent extends BaseTradingEvent {
+    eventType: TradingEventType.CancelVaultOrder;
+    user: string;
+    orderId: u32;
+}
+
+/** Vault order filled by the keeper via `execute_vault_order` (panics on failure). */
+export interface TradingExecuteVaultOrderEvent extends BaseTradingEvent {
+    eventType: TradingEventType.ExecuteVaultOrder;
+    user: string;
+    orderId: u32;
+    /** Amount moved this fill: assets (deposit) or shares (redeem), token-dec. */
+    filled: i128;
+    /** Order remainder after the fill; 0 = completed and removed. */
+    remaining: i128;
+}
+
+/** Claimable funding balance paid out via `claim_funding`. */
+export interface TradingClaimFundingEvent extends BaseTradingEvent {
+    eventType: TradingEventType.ClaimFunding;
+    user: string;
+    /** Paid claimable balance, token-dec. */
+    amount: i128;
+}
+
+/** ADL flags recomputed via `update_adl_state` or `execute_adl`. */
+export interface TradingAdlUpdateEvent extends BaseTradingEvent {
+    eventType: TradingEventType.AdlUpdate;
+    /** Long-side ADL enabled (long increases blocked). */
+    long: boolean;
+    /** Short-side ADL enabled (short increases blocked). */
+    short: boolean;
+}
+
+/** Operational status changed via `set_status`. */
+export interface TradingStatusUpdateEvent extends BaseTradingEvent {
+    eventType: TradingEventType.StatusUpdate;
+    /** The new operational status (Status discriminant). */
     status: u32;
 }
 
-export interface TradingOpenMarketEvent extends BaseTradingEvent {
-    eventType: TradingEventType.OpenMarket;
-    marketId: u32;
-    user: string;
-    positionId: u32;
-    // Full post-fill position state (Position has no prior row).
-    long: boolean;
-    col: i128;
-    notional: i128;
-    entryPrice: i128;
-    sl: i128;
-    tp: i128;
-    fundIdx: i128;
-    borrIdx: i128;
-    adlIdx: i128;
-    createdAt: u64;
-    baseFee: i128;
-    impactFee: i128;
+/** Global configuration replaced via `set_config`. */
+export interface TradingConfigUpdateEvent extends BaseTradingEvent {
+    eventType: TradingEventType.ConfigUpdate;
+    /** The new global trading configuration. */
+    config: TradingConfig;
 }
 
-export interface TradingPlaceLimitEvent extends BaseTradingEvent {
-    eventType: TradingEventType.PlaceLimit;
-    marketId: u32;
-    user: string;
-    positionId: u32;
-    // Initial limit-order state. Indices (fund/borr/adl) are snapshotted
-    // at fill, not at placement — use FillLimit event for those.
-    long: boolean;
-    col: i128;
-    notional: i128;
-    entryPrice: i128; // limit trigger price
-    sl: i128;
-    tp: i128;
-    createdAt: u64;
-}
-
-export interface TradingClosePositionEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ClosePosition;
-    marketId: u32;
-    user: string;
-    positionId: u32;
-    notional: i128; // post-ADL notional actually settled (≤ placement notional)
+/** Flat settlement price set or refreshed via `set_terminal_price`. */
+export interface TradingTerminalPriceUpdateEvent extends BaseTradingEvent {
+    eventType: TradingEventType.TerminalPriceUpdate;
+    /** Flat settlement price (price_scalar units). */
     price: i128;
-    pnl: i128;
-    baseFee: i128;
-    impactFee: i128;
-    funding: i128;
-    borrowingFee: i128;
 }
 
-export interface TradingFillLimitEvent extends BaseTradingEvent {
-    eventType: TradingEventType.FillLimit;
-    marketId: u32;
+/**
+ * A keeper fill of an increase order (the user's itemized receipt).
+ *
+ * The fill price is implied, `notional * SCALAR_18 / tokens` (price_scalar
+ * units). The resulting position state is carried by the paired
+ * `PositionUpdate` event.
+ */
+export interface TradingIncreaseFillEvent extends BaseTradingEvent {
+    eventType: TradingEventType.IncreaseFill;
     user: string;
-    positionId: u32;
-    // Fill-time state. long/col/notional/sl/tp inherited from prior
-    // PlaceLimit row; only fill-specific fields emitted here.
-    entryPrice: i128; // actual fill price (may differ from limit trigger)
-    fundIdx: i128;
-    borrIdx: i128;
-    adlIdx: i128;
-    createdAt: u64; // fill time supersedes placement time
+    orderId: u32;
+    isLong: boolean;
+    /** Size added, token-dec. */
+    notional: i128;
+    /** Base size bought, base-dec. */
+    tokens: i128;
+    /** Collateral pulled from the trader, token-dec. */
+    collateral: i128;
+    /** Trade fee charged, token-dec. */
     baseFee: i128;
+    /** Impact fee charged, token-dec. */
     impactFee: i128;
+    /** Settled funding, token-dec; + = paid from collateral, - = credited claimable. */
+    funding: i128;
+    /** Settled borrowing fee, token-dec. */
+    borrowing: i128;
 }
 
+/**
+ * A keeper fill of a decrease order (the user's itemized receipt).
+ *
+ * The fill price is implied, `notional * SCALAR_18 / tokens` (price_scalar
+ * units). `collateral` and `pnl` are gross of the itemized fees; `returned`
+ * is the actual payout: the gross legs less the fees they cover, floored at
+ * zero (a partial close pays only the profit leg, a realized loss debits
+ * the surviving margin; a full close pays out at most the freed margin, any
+ * shortfall emitted as `badDebt`). The resulting position state is carried
+ * by the paired `PositionUpdate` event.
+ *
+ * A `decrease_fill` whose `orderId` is `0` is an ADL slice (there is no
+ * user-submitted order backing it; the keeper force-decreases the position
+ * directly).
+ */
+export interface TradingDecreaseFillEvent extends BaseTradingEvent {
+    eventType: TradingEventType.DecreaseFill;
+    user: string;
+    /** Order id; `0` marks this fill as an ADL slice rather than a user order. */
+    orderId: u32;
+    isLong: boolean;
+    /** Closed size: the order's request clamped to the position, token-dec. */
+    notional: i128;
+    /** Base size closed, base-dec. */
+    tokens: i128;
+    /** Gross collateral leg: requested withdrawal (partial) or freed margin (full), token-dec. */
+    collateral: i128;
+    /** Realized PnL on the closed fraction, gross of settled costs, token-dec. */
+    pnl: i128;
+    /** Trade fee charged, token-dec. */
+    baseFee: i128;
+    /** Impact fee charged, token-dec. */
+    impactFee: i128;
+    /** Settled funding, token-dec; + = paid from collateral, - = credited claimable. */
+    funding: i128;
+    /** Settled borrowing fee, token-dec. */
+    borrowing: i128;
+    /** Fees and losses past the freed margin, absorbed by the vault, token-dec; 0 on partial closes. */
+    badDebt: i128;
+    /** Amount transferred to the trader, token-dec. */
+    returned: i128;
+}
+
+/**
+ * A keeper liquidation receipt (the full size is force-closed).
+ *
+ * `collateral` and `pnl` are gross of the itemized fees; the post-fee
+ * remainder (equity, floored at zero) lands on `returned` (trader) on the
+ * soft tier and `forfeit` (vault) on the hard tier; any shortfall past the
+ * freed margin is emitted as `badDebt` and absorbed by the vault. The
+ * resulting (zeroed) position state is carried by the paired
+ * `PositionUpdate` event.
+ */
 export interface TradingLiquidationEvent extends BaseTradingEvent {
     eventType: TradingEventType.Liquidation;
-    marketId: u32;
     user: string;
-    positionId: u32;
-    notional: i128; // post-ADL notional actually settled
-    price: i128;
+    isLong: boolean;
+    /** Force-closed size, token-dec. */
+    notional: i128;
+    /** Base size closed, base-dec. */
+    tokens: i128;
+    /** Freed margin, gross of the itemized fees, token-dec. */
+    collateral: i128;
+    /** Realized PnL on the closed size, gross of settled costs, token-dec. */
+    pnl: i128;
+    /** Trade fee charged, token-dec. */
     baseFee: i128;
+    /** Impact fee charged, token-dec. */
     impactFee: i128;
+    /** Settled funding, token-dec; + = paid from collateral, - = credited claimable. */
     funding: i128;
-    borrowingFee: i128;
+    /** Settled borrowing fee, token-dec. */
+    borrowing: i128;
+    /** Fees and losses past the freed margin, absorbed by the vault, token-dec. */
+    badDebt: i128;
+    /** Liquidation fee, token-dec; 0 = soft tier, > 0 = hard tier. */
     liqFee: i128;
+    /** Post-fee remainder transferred to the trader (soft tier), token-dec. */
+    returned: i128;
+    /** Post-fee remainder forfeited to the vault (hard tier), token-dec. */
+    forfeit: i128;
 }
 
-export interface TradingTakeProfitEvent extends BaseTradingEvent {
-    eventType: TradingEventType.TakeProfit;
-    marketId: u32;
+/**
+ * The resulting netted position after any change (fill or liquidation).
+ * The cause and its fees live on the paired `IncreaseFill` / `DecreaseFill`
+ * / `Liquidation` event.
+ */
+export interface TradingPositionUpdateEvent extends BaseTradingEvent {
+    eventType: TradingEventType.PositionUpdate;
     user: string;
-    positionId: u32;
-    notional: i128; // post-ADL notional actually settled
-    price: i128;
-    pnl: i128;
-    baseFee: i128;
-    impactFee: i128;
-    funding: i128;
-    borrowingFee: i128;
-}
-
-export interface TradingStopLossEvent extends BaseTradingEvent {
-    eventType: TradingEventType.StopLoss;
-    marketId: u32;
-    user: string;
-    positionId: u32;
-    notional: i128; // post-ADL notional actually settled
-    price: i128;
-    pnl: i128;
-    baseFee: i128;
-    impactFee: i128;
-    funding: i128;
-    borrowingFee: i128;
-}
-
-export interface TradingModifyCollateralEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ModifyCollateral;
-    marketId: u32;
-    user: string;
-    positionId: u32;
-    col: i128; // new collateral; delta = col - prior_col (caller computes)
-}
-
-export interface TradingSetTriggersEvent extends BaseTradingEvent {
-    eventType: TradingEventType.SetTriggers;
-    marketId: u32;
-    user: string;
-    positionId: u32;
-    sl: i128;
-    tp: i128;
-}
-
-export interface TradingApplyFundingEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ApplyFunding;
-}
-
-export interface TradingRefundPositionEvent extends BaseTradingEvent {
-    eventType: TradingEventType.RefundPosition;
-    marketId: u32;
-    user: string;
-    positionId: u32;
-}
-
-export interface TradingADLTriggeredEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ADLTriggered;
-    reductionPct: i128;
-    deficit: i128;
+    isLong: boolean;
+    /** The stored position row, as returned by `get_position`; zeroed = closed. */
+    position: Position;
 }
 
 export type TradingEvent =
-    | TradingSetConfigEvent
-    | TradingSetMarketEvent
-    | TradingDelMarketEvent
-    | TradingSetStatusEvent
-    | TradingOpenMarketEvent
-    | TradingPlaceLimitEvent
-    | TradingClosePositionEvent
-    | TradingFillLimitEvent
+    | TradingCreateOrderEvent
+    | TradingCancelOrderEvent
+    | TradingCreateVaultOrderEvent
+    | TradingCancelVaultOrderEvent
+    | TradingExecuteVaultOrderEvent
+    | TradingClaimFundingEvent
+    | TradingAdlUpdateEvent
+    | TradingStatusUpdateEvent
+    | TradingConfigUpdateEvent
+    | TradingTerminalPriceUpdateEvent
+    | TradingIncreaseFillEvent
+    | TradingDecreaseFillEvent
     | TradingLiquidationEvent
-    | TradingTakeProfitEvent
-    | TradingStopLossEvent
-    | TradingModifyCollateralEvent
-    | TradingSetTriggersEvent
-    | TradingRefundPositionEvent
-    | TradingApplyFundingEvent
-    | TradingADLTriggeredEvent;
+    | TradingPositionUpdateEvent;
 
 /**
  * Decode a normalized event into a typed TradingEvent.
@@ -226,199 +278,151 @@ export function decodeTradingEvent(event: NormalizedEvent): TradingEvent | undef
         txHash: event.txHash,
     };
 
-    const marketId = topicArgs[0] as number ?? 0;
-    const user = topicArgs[1] as string ?? '';
-    const positionId = topicArgs[2] as number ?? 0;
-
     switch (eventType) {
-        case TradingEventType.SetConfig:
+        case TradingEventType.CreateOrder:
             return {
                 ...baseEvent,
-                eventType: TradingEventType.SetConfig,
-                config: data,
-            } as TradingSetConfigEvent;
+                eventType: TradingEventType.CreateOrder,
+                user: topicArgs[0] as string,
+                orderId: topicArgs[1] as number,
+                order: parseOrder(data.order as Record<string, unknown>),
+            } as TradingCreateOrderEvent;
 
-        case TradingEventType.SetMarket:
+        case TradingEventType.CancelOrder:
             return {
                 ...baseEvent,
-                eventType: TradingEventType.SetMarket,
-                marketId,
-            } as TradingSetMarketEvent;
+                eventType: TradingEventType.CancelOrder,
+                user: topicArgs[0] as string,
+                orderId: topicArgs[1] as number,
+            } as TradingCancelOrderEvent;
 
-        case TradingEventType.DelMarket:
+        case TradingEventType.CreateVaultOrder:
             return {
                 ...baseEvent,
-                eventType: TradingEventType.DelMarket,
-                marketId,
-            } as TradingDelMarketEvent;
+                eventType: TradingEventType.CreateVaultOrder,
+                user: topicArgs[0] as string,
+                orderId: topicArgs[1] as number,
+                order: parseVaultOrder(data.order as Record<string, unknown>),
+            } as TradingCreateVaultOrderEvent;
 
-        case TradingEventType.SetStatus:
+        case TradingEventType.CancelVaultOrder:
             return {
                 ...baseEvent,
-                eventType: TradingEventType.SetStatus,
+                eventType: TradingEventType.CancelVaultOrder,
+                user: topicArgs[0] as string,
+                orderId: topicArgs[1] as number,
+            } as TradingCancelVaultOrderEvent;
+
+        case TradingEventType.ExecuteVaultOrder:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.ExecuteVaultOrder,
+                user: topicArgs[0] as string,
+                orderId: topicArgs[1] as number,
+                filled: data.filled as i128,
+                remaining: data.remaining as i128,
+            } as TradingExecuteVaultOrderEvent;
+
+        case TradingEventType.ClaimFunding:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.ClaimFunding,
+                user: topicArgs[0] as string,
+                amount: data.amount as i128,
+            } as TradingClaimFundingEvent;
+
+        case TradingEventType.AdlUpdate:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.AdlUpdate,
+                long: data.long as boolean,
+                short: data.short as boolean,
+            } as TradingAdlUpdateEvent;
+
+        case TradingEventType.StatusUpdate:
+            return {
+                ...baseEvent,
+                eventType: TradingEventType.StatusUpdate,
                 status: data.status as number,
-            } as TradingSetStatusEvent;
+            } as TradingStatusUpdateEvent;
 
-        case TradingEventType.OpenMarket:
+        case TradingEventType.ConfigUpdate:
             return {
                 ...baseEvent,
-                eventType: TradingEventType.OpenMarket,
-                marketId,
-                user,
-                positionId,
-                long: data.long,
-                col: data.col,
-                notional: data.notional,
-                entryPrice: data.entry_price,
-                sl: data.sl,
-                tp: data.tp,
-                fundIdx: data.fund_idx,
-                borrIdx: data.borr_idx,
-                adlIdx: data.adl_idx,
-                createdAt: data.created_at,
-                baseFee: data.base_fee,
-                impactFee: data.impact_fee,
-            } as TradingOpenMarketEvent;
+                eventType: TradingEventType.ConfigUpdate,
+                config: parseTradingConfig(data.config as Record<string, unknown>),
+            } as TradingConfigUpdateEvent;
 
-        case TradingEventType.PlaceLimit:
+        case TradingEventType.TerminalPriceUpdate:
             return {
                 ...baseEvent,
-                eventType: TradingEventType.PlaceLimit,
-                marketId,
-                user,
-                positionId,
-                long: data.long,
-                col: data.col,
-                notional: data.notional,
-                entryPrice: data.entry_price,
-                sl: data.sl,
-                tp: data.tp,
-                createdAt: data.created_at,
-            } as TradingPlaceLimitEvent;
+                eventType: TradingEventType.TerminalPriceUpdate,
+                price: data.price as i128,
+            } as TradingTerminalPriceUpdateEvent;
 
-        case TradingEventType.ClosePosition:
+        case TradingEventType.IncreaseFill:
             return {
                 ...baseEvent,
-                eventType: TradingEventType.ClosePosition,
-                marketId,
-                user,
-                positionId,
-                notional: data.notional,
-                price: data.price,
-                pnl: data.pnl,
-                baseFee: data.base_fee,
-                impactFee: data.impact_fee,
-                funding: data.funding,
-                borrowingFee: data.borrowing_fee,
-            } as TradingClosePositionEvent;
+                eventType: TradingEventType.IncreaseFill,
+                user: topicArgs[0] as string,
+                orderId: topicArgs[1] as number,
+                isLong: topicArgs[2] as boolean,
+                notional: data.notional as i128,
+                tokens: data.tokens as i128,
+                collateral: data.collateral as i128,
+                baseFee: data.base_fee as i128,
+                impactFee: data.impact_fee as i128,
+                funding: data.funding as i128,
+                borrowing: data.borrowing as i128,
+            } as TradingIncreaseFillEvent;
 
-        case TradingEventType.FillLimit:
+        case TradingEventType.DecreaseFill:
             return {
                 ...baseEvent,
-                eventType: TradingEventType.FillLimit,
-                marketId,
-                user,
-                positionId,
-                entryPrice: data.entry_price,
-                fundIdx: data.fund_idx,
-                borrIdx: data.borr_idx,
-                adlIdx: data.adl_idx,
-                createdAt: data.created_at,
-                baseFee: data.base_fee,
-                impactFee: data.impact_fee,
-            } as TradingFillLimitEvent;
+                eventType: TradingEventType.DecreaseFill,
+                user: topicArgs[0] as string,
+                orderId: topicArgs[1] as number,
+                isLong: topicArgs[2] as boolean,
+                notional: data.notional as i128,
+                tokens: data.tokens as i128,
+                collateral: data.collateral as i128,
+                pnl: data.pnl as i128,
+                baseFee: data.base_fee as i128,
+                impactFee: data.impact_fee as i128,
+                funding: data.funding as i128,
+                borrowing: data.borrowing as i128,
+                badDebt: data.bad_debt as i128,
+                returned: data.returned as i128,
+            } as TradingDecreaseFillEvent;
 
         case TradingEventType.Liquidation:
             return {
                 ...baseEvent,
                 eventType: TradingEventType.Liquidation,
-                marketId,
-                user,
-                positionId,
-                notional: data.notional,
-                price: data.price,
-                baseFee: data.base_fee,
-                impactFee: data.impact_fee,
-                funding: data.funding,
-                borrowingFee: data.borrowing_fee,
-                liqFee: data.liq_fee,
+                user: topicArgs[0] as string,
+                isLong: topicArgs[1] as boolean,
+                notional: data.notional as i128,
+                tokens: data.tokens as i128,
+                collateral: data.collateral as i128,
+                pnl: data.pnl as i128,
+                baseFee: data.base_fee as i128,
+                impactFee: data.impact_fee as i128,
+                funding: data.funding as i128,
+                borrowing: data.borrowing as i128,
+                badDebt: data.bad_debt as i128,
+                liqFee: data.liq_fee as i128,
+                returned: data.returned as i128,
+                forfeit: data.forfeit as i128,
             } as TradingLiquidationEvent;
 
-        case TradingEventType.TakeProfit:
+        case TradingEventType.PositionUpdate:
             return {
                 ...baseEvent,
-                eventType: TradingEventType.TakeProfit,
-                marketId,
-                user,
-                positionId,
-                notional: data.notional,
-                price: data.price,
-                pnl: data.pnl,
-                baseFee: data.base_fee,
-                impactFee: data.impact_fee,
-                funding: data.funding,
-                borrowingFee: data.borrowing_fee,
-            } as TradingTakeProfitEvent;
-
-        case TradingEventType.StopLoss:
-            return {
-                ...baseEvent,
-                eventType: TradingEventType.StopLoss,
-                marketId,
-                user,
-                positionId,
-                notional: data.notional,
-                price: data.price,
-                pnl: data.pnl,
-                baseFee: data.base_fee,
-                impactFee: data.impact_fee,
-                funding: data.funding,
-                borrowingFee: data.borrowing_fee,
-            } as TradingStopLossEvent;
-
-        case TradingEventType.ModifyCollateral:
-            return {
-                ...baseEvent,
-                eventType: TradingEventType.ModifyCollateral,
-                marketId,
-                user,
-                positionId,
-                col: data.col,
-            } as TradingModifyCollateralEvent;
-
-        case TradingEventType.SetTriggers:
-            return {
-                ...baseEvent,
-                eventType: TradingEventType.SetTriggers,
-                marketId,
-                user,
-                positionId,
-                sl: data.sl,
-                tp: data.tp,
-            } as TradingSetTriggersEvent;
-
-        case TradingEventType.RefundPosition:
-            return {
-                ...baseEvent,
-                eventType: TradingEventType.RefundPosition,
-                marketId,
-                user,
-                positionId,
-            } as TradingRefundPositionEvent;
-
-        case TradingEventType.ApplyFunding:
-            return {
-                ...baseEvent,
-                eventType: TradingEventType.ApplyFunding,
-            } as TradingApplyFundingEvent;
-
-        case TradingEventType.ADLTriggered:
-            return {
-                ...baseEvent,
-                eventType: TradingEventType.ADLTriggered,
-                reductionPct: data.reduction_pct,
-                deficit: data.deficit,
-            } as TradingADLTriggeredEvent;
+                eventType: TradingEventType.PositionUpdate,
+                user: topicArgs[0] as string,
+                isLong: topicArgs[1] as boolean,
+                position: parsePosition(data.position as Record<string, unknown>),
+            } as TradingPositionUpdateEvent;
 
         default:
             return undefined;
