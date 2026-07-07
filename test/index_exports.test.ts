@@ -72,6 +72,11 @@ describe('package root exports', () => {
         expect(SDK.parseFillAttempt).toBeTypeOf('function');
     });
 
+    it('exports the token approve/bundle helpers', () => {
+        expect(SDK.approveCall).toBeTypeOf('function');
+        expect(SDK.approveAndOrder).toBeTypeOf('function');
+    });
+
     it('exports the errors and response parsing surface', () => {
         expect(SDK.ContractError).toBeTypeOf('function');
         expect(SDK.ContractErrorType.UnknownError).toBe(-1000);
