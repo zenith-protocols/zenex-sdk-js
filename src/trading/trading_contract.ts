@@ -1,5 +1,6 @@
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { i128, u32, i32, u64 } from '../index.js';
+import type { Call } from '../trading-router/router_types.js';
 import {
     OrderKind, VaultOrderKind, TradingConfig,
     Order, VaultOrder, Position, MarketData, AdlState,
@@ -367,18 +368,46 @@ export class TradingContract extends Contract {
         priceBound: i128,
         expiration: u32,
     ): string {
-        return this.call(
-            'create_order',
-            Address.fromString(user).toScVal(),
-            xdr.ScVal.scvBool(isLong),
-            orderKindToScVal(kind),
-            nativeToScVal(notional, { type: 'i128' }),
-            nativeToScVal(collateral, { type: 'i128' }),
-            nativeToScVal(triggerPrice, { type: 'i128' }),
-            xdr.ScVal.scvBool(triggerAbove),
-            nativeToScVal(priceBound, { type: 'i128' }),
-            xdr.ScVal.scvU32(expiration),
-        ).toXDR('base64');
+        const call = this.createOrderCall(
+            user, isLong, kind, notional, collateral, triggerPrice, triggerAbove, priceBound, expiration,
+        );
+        return this.call(call.func, ...call.args).toXDR('base64');
+    }
+
+    /**
+     * Build the `create_order` invocation as a `Call` (contract, func, args),
+     * for batching under the trading-router's `multicall`.
+     *
+     * Shares its argument encoding with `createOrder`, so a bundled order is
+     * byte-identical to a direct one; the only difference is the router
+     * executes it (and the user's auth entry nests under the router call).
+     */
+    createOrderCall(
+        user: string,
+        isLong: boolean,
+        kind: OrderKind,
+        notional: i128,
+        collateral: i128,
+        triggerPrice: i128,
+        triggerAbove: boolean,
+        priceBound: i128,
+        expiration: u32,
+    ): Call {
+        return {
+            contract: this.contractId(),
+            func: 'create_order',
+            args: [
+                Address.fromString(user).toScVal(),
+                xdr.ScVal.scvBool(isLong),
+                orderKindToScVal(kind),
+                nativeToScVal(notional, { type: 'i128' }),
+                nativeToScVal(collateral, { type: 'i128' }),
+                nativeToScVal(triggerPrice, { type: 'i128' }),
+                xdr.ScVal.scvBool(triggerAbove),
+                nativeToScVal(priceBound, { type: 'i128' }),
+                xdr.ScVal.scvU32(expiration),
+            ],
+        };
     }
 
     /**
@@ -413,13 +442,28 @@ export class TradingContract extends Contract {
      *   or a redeem's previewed assets, fall under `minDeposit`.
      */
     createVaultOrder(user: string, kind: VaultOrderKind, amount: i128, maxAdversePnl: i128): string {
-        return this.call(
-            'create_vault_order',
-            Address.fromString(user).toScVal(),
-            vaultOrderKindToScVal(kind),
-            nativeToScVal(amount, { type: 'i128' }),
-            nativeToScVal(maxAdversePnl, { type: 'i128' }),
-        ).toXDR('base64');
+        const call = this.createVaultOrderCall(user, kind, amount, maxAdversePnl);
+        return this.call(call.func, ...call.args).toXDR('base64');
+    }
+
+    /**
+     * Build the `create_vault_order` invocation as a `Call` (contract, func,
+     * args), for batching under the trading-router's `multicall`.
+     *
+     * Shares its argument encoding with `createVaultOrder`, so a bundled
+     * deposit or redeem is byte-identical to a direct one.
+     */
+    createVaultOrderCall(user: string, kind: VaultOrderKind, amount: i128, maxAdversePnl: i128): Call {
+        return {
+            contract: this.contractId(),
+            func: 'create_vault_order',
+            args: [
+                Address.fromString(user).toScVal(),
+                vaultOrderKindToScVal(kind),
+                nativeToScVal(amount, { type: 'i128' }),
+                nativeToScVal(maxAdversePnl, { type: 'i128' }),
+            ],
+        };
     }
 
     /**
