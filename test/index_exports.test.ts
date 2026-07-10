@@ -4,6 +4,11 @@ import * as SDK from '../src/index.js';
 // =============================================================================
 // Consumer-surface test: everything a package consumer should be able to
 // import from the root barrel. A missing name here is a broken public API.
+//
+// Type-only exports (interfaces such as TradingDepositFillEvent or the removed
+// TradingPositionUpdateEvent) have no runtime value, so this file asserts their
+// runtime counterparts instead: the TradingEventType enum members and the
+// decoder functions that produce them.
 // =============================================================================
 
 describe('package root exports', () => {
@@ -20,12 +25,19 @@ describe('package root exports', () => {
 
     it('exports the trading enums, sentinels, converters, and parsers', () => {
         expect(SDK.Status.Active).toBe(0);
-        expect(SDK.OrderKind.Increase).toBe('Increase');
-        expect(SDK.VaultOrderKind.Redeem).toBe('Redeem');
+        expect(SDK.Status.Retired).toBe(4);
+        // v2 order kinds are numeric u32 discriminants (order.rs #[repr(u32)]).
+        expect(SDK.OrderKind.MarketIncrease).toBe(0);
+        expect(SDK.OrderKind.LimitIncrease).toBe(1);
+        expect(SDK.OrderKind.StopIncrease).toBe(2);
+        expect(SDK.OrderKind.MarketDecrease).toBe(3);
+        expect(SDK.OrderKind.LimitDecrease).toBe(4);
+        expect(SDK.OrderKind.StopDecrease).toBe(5);
+        expect(SDK.VaultOrderKind.Deposit).toBe(0);
+        expect(SDK.VaultOrderKind.Redeem).toBe(1);
         expect(SDK.FULL_CLOSE).toBe(2n ** 127n - 1n);
-        expect(SDK.orderKindToScVal).toBeTypeOf('function');
-        expect(SDK.vaultOrderKindToScVal).toBeTypeOf('function');
         expect(SDK.tradingConfigToScVal).toBeTypeOf('function');
+        expect(SDK.parseSidePair).toBeTypeOf('function');
         expect(SDK.parseOrder).toBeTypeOf('function');
         expect(SDK.parseVaultOrder).toBeTypeOf('function');
         expect(SDK.parsePosition).toBeTypeOf('function');
@@ -33,6 +45,12 @@ describe('package root exports', () => {
         expect(SDK.parseAdlState).toBeTypeOf('function');
         expect(SDK.parseTradingConfig).toBeTypeOf('function');
         expect(SDK.validateTradingConfig).toBeTypeOf('function');
+    });
+
+    it('does not export the removed kind-to-ScVal converters', () => {
+        // Kinds now cross the ABI as plain u32; the wrapper converters are gone.
+        expect((SDK as Record<string, unknown>).orderKindToScVal).toBeUndefined();
+        expect((SDK as Record<string, unknown>).vaultOrderKindToScVal).toBeUndefined();
     });
 
     it('exports the trading math helpers and loaders', () => {
@@ -47,12 +65,23 @@ describe('package root exports', () => {
         expect(SDK.sidePnl).toBeTypeOf('function');
         expect(SDK.netPnl).toBeTypeOf('function');
         expect(SDK.utilization).toBeTypeOf('function');
+        expect(SDK.impactFee).toBeTypeOf('function');
         expect(SDK.skewSplitFees).toBeTypeOf('function');
     });
 
     it('exports the event enums and decoders', () => {
         expect(SDK.TradingEventType.CreateOrder).toBe('create_order');
-        expect(SDK.TradingEventType.PositionUpdate).toBe('position_update');
+        expect(SDK.TradingEventType.CancelOrder).toBe('cancel_order');
+        expect(SDK.TradingEventType.CreateVaultOrder).toBe('create_vault_order');
+        expect(SDK.TradingEventType.CancelVaultOrder).toBe('cancel_vault_order');
+        expect(SDK.TradingEventType.DepositFill).toBe('deposit_fill');
+        expect(SDK.TradingEventType.RedeemFill).toBe('redeem_fill');
+        expect(SDK.TradingEventType.CloseFill).toBe('close_fill');
+        expect(SDK.TradingEventType.FundingAccrual).toBe('funding_accrual');
+        expect(SDK.TradingEventType.BorrowingAccrual).toBe('borrowing_accrual');
+        expect(SDK.TradingEventType.IncreaseFill).toBe('increase_fill');
+        expect(SDK.TradingEventType.DecreaseFill).toBe('decrease_fill');
+        expect(SDK.TradingEventType.Liquidation).toBe('liquidation');
         expect(SDK.decodeTradingEvent).toBeTypeOf('function');
         expect(SDK.VaultEventType.StrategyWithdraw).toBe('StrategyWithdraw');
         expect(SDK.decodeVaultEvent).toBeTypeOf('function');
@@ -63,6 +92,16 @@ describe('package root exports', () => {
         expect(SDK.normalizeRpc).toBeTypeOf('function');
         expect(SDK.normalizeMercury).toBeTypeOf('function');
         expect(SDK.normalizeGoldsky).toBeTypeOf('function');
+    });
+
+    it('does not carry the removed trading event kinds', () => {
+        // position_update and execute_vault_order left the contract ABI; the
+        // fill receipts (deposit_fill, redeem_fill, close_fill) replace them.
+        const eventTypes = SDK.TradingEventType as Record<string, unknown>;
+        expect(eventTypes.PositionUpdate).toBeUndefined();
+        expect(eventTypes.ExecuteVaultOrder).toBeUndefined();
+        expect(Object.values(SDK.TradingEventType)).not.toContain('position_update');
+        expect(Object.values(SDK.TradingEventType)).not.toContain('execute_vault_order');
     });
 
     it('exports the trading-router converters and parsers', () => {
@@ -81,7 +120,14 @@ describe('package root exports', () => {
         expect(SDK.ContractError).toBeTypeOf('function');
         expect(SDK.ContractErrorType.UnknownError).toBe(-1000);
         expect(SDK.TradingError.InvalidConfig).toBe(700);
+        expect(SDK.TradingError.TooManyOrders).toBe(733);
+        expect(SDK.TradingError.UnknownKind).toBe(734);
+        expect(SDK.TradingError.MinOutNotMet).toBe(752);
+        expect(SDK.TradingError.PendingPnlExceeded).toBe(754);
         expect(SDK.TradingError.AdlNotEligible).toBe(772);
+        expect(SDK.ContractErrorType.PVFeedNotFound).toBe(790);
+        expect(SDK.ContractErrorType.StrategyInvalidAmount).toBe(800);
+        expect(SDK.ContractErrorType.GovNotQueued).toBe(810);
         expect(SDK.tradingErrorMessages[700]).toBeTypeOf('string');
         expect(SDK.contractErrorFromCode).toBeTypeOf('function');
         expect(SDK.parseError).toBeTypeOf('function');
@@ -122,11 +168,26 @@ describe('package root exports', () => {
         expect(SDK.assetFromScVal).toBeTypeOf('function');
         expect(SDK.assetFromKey).toBeTypeOf('function');
         expect(SDK.FixedMath.SCALAR_18).toBe(10n ** 18n);
+        expect(SDK.FixedMath.toFixed).toBeTypeOf('function');
+        expect(SDK.FixedMath.toFloat).toBeTypeOf('function');
+        expect(SDK.FixedMath.mulFloor).toBeTypeOf('function');
+        expect(SDK.FixedMath.mulCeil).toBeTypeOf('function');
+        expect(SDK.FixedMath.divFloor).toBeTypeOf('function');
+        expect(SDK.FixedMath.divCeil).toBeTypeOf('function');
         expect(SDK.VaultState).toBeTypeOf('function');
         expect(SDK.simulateAndParse).toBeTypeOf('function');
         expect(SDK.signerToScVal).toBeTypeOf('function');
         expect(SDK.contextRuleTypeToScVal).toBeTypeOf('function');
         expect(SDK.sessionConfigToScVal).toBeTypeOf('function');
+    });
+
+    it('does not carry the removed v1 FixedMath constants', () => {
+        const fixedMath = SDK.FixedMath as Record<string, unknown>;
+        expect(fixedMath.SCALAR_7).toBeUndefined();
+        expect(fixedMath.SCALAR_14).toBeUndefined();
+        expect(fixedMath.MAX_MARKETS).toBeUndefined();
+        expect(fixedMath.MAX_POSITIONS).toBeUndefined();
+        expect(fixedMath.MIN_OPEN_TIME).toBeUndefined();
     });
 
     it('does not export the removed v1 oracle helpers', () => {

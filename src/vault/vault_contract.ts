@@ -11,51 +11,44 @@ export interface VaultConstructorArgs {
     asset: string;
     /** Virtual offset for inflation attack protection (0-10) */
     decimals_offset: u32;
-    /** Trading contract address; the only address allowed to call ERC-4626
-     * mutations and `strategy_withdraw` (immutable) */
+    /** Trading contract address; the only address allowed to call the vault
+     * mutations (immutable) */
     strategy: string;
 }
 
 /**
  * VaultContract - Operation builder for the Zenex Strategy Vault contract
  *
- * ERC-4626 collateral vault for a single v2 trading market. Share accounting
- * uses OpenZeppelin `FungibleVault`. All ERC-4626 mutations (`deposit` /
- * `mint` / `withdraw` / `redeem`) require the registered strategy (trading
- * contract) to authorize the call; LPs route through trading vault orders.
- * LP sizing rules (`min_deposit`, redeem lock, fees) live on trading `Config`.
+ * Collateral vault for a single v2 trading market. Shares are an
+ * OpenZeppelin fungible token. Share pricing marks the backing with the
+ * strategy-supplied net pending trader PnL (`net_pnl`), so mints and
+ * redemptions settle at the market's uPnL-inclusive value. All mutations
+ * (`strategy_deposit` / `strategy_redeem` / `strategy_withdraw`) require the
+ * registered strategy (trading contract) to authorize the call; LPs route
+ * through trading vault orders.
  *
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class VaultContract extends Contract {
     static spec: contract.Spec = new contract.Spec([
-        "AAAAAAAAADRNaW50IGBzaGFyZXNgIHRvIGByZWNlaXZlcmAuIFN0cmF0ZWd5IGF1dGggcmVxdWlyZWQuAAAABG1pbnQAAAAEAAAAAAAAAAZzaGFyZXMAAAAAAAsAAAAAAAAACHJlY2VpdmVyAAAAEwAAAAAAAAAEZnJvbQAAABMAAAAAAAAACG9wZXJhdG9yAAAAEwAAAAEAAAAL",
         "AAAAAAAAAFVSZXR1cm5zIHRoZSBuYW1lIGZvciB0aGlzIHRva2VuLgoKIyBBcmd1bWVudHMKCiogYGVgIC0gQWNjZXNzIHRvIFNvcm9iYW4gZW52aXJvbm1lbnQuAAAAAAAABG5hbWUAAAAAAAAAAQAAABA=",
-        "AAAAAAAAADVSZWRlZW0gYHNoYXJlc2AgZnJvbSBgb3duZXJgLiBTdHJhdGVneSBhdXRoIHJlcXVpcmVkLgAAAAAAAAZyZWRlZW0AAAAAAAQAAAAAAAAABnNoYXJlcwAAAAAACwAAAAAAAAAIcmVjZWl2ZXIAAAATAAAAAAAAAAVvd25lcgAAAAAAABMAAAAAAAAACG9wZXJhdG9yAAAAEwAAAAEAAAAL",
         "AAAAAAAAAFdSZXR1cm5zIHRoZSBzeW1ib2wgZm9yIHRoaXMgdG9rZW4uCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gU29yb2JhbiBlbnZpcm9ubWVudC4AAAAABnN5bWJvbAAAAAAAAAAAAAEAAAAQ",
         "AAAAAAAAAyZTZXRzIHRoZSBhbW91bnQgb2YgdG9rZW5zIGEgYHNwZW5kZXJgIGlzIGFsbG93ZWQgdG8gc3BlbmQgb24gYmVoYWxmIG9mCmFuIGBvd25lcmAuIE92ZXJyaWRlcyBhbnkgZXhpc3RpbmcgYWxsb3dhbmNlIHNldCBiZXR3ZWVuIGBzcGVuZGVyYCBhbmQKYG93bmVyYC4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byBTb3JvYmFuIGVudmlyb25tZW50LgoqIGBvd25lcmAgLSBUaGUgYWRkcmVzcyBob2xkaW5nIHRoZSB0b2tlbnMuCiogYHNwZW5kZXJgIC0gVGhlIGFkZHJlc3MgYXV0aG9yaXplZCB0byBzcGVuZCB0aGUgdG9rZW5zLgoqIGBhbW91bnRgIC0gVGhlIGFtb3VudCBvZiB0b2tlbnMgbWFkZSBhdmFpbGFibGUgdG8gYHNwZW5kZXJgLgoqIGBsaXZlX3VudGlsX2xlZGdlcmAgLSBUaGUgbGVkZ2VyIG51bWJlciBhdCB3aGljaCB0aGUgYWxsb3dhbmNlCmV4cGlyZXMuCgojIEVycm9ycwoKKiBbYEZ1bmdpYmxlVG9rZW5FcnJvcjo6SW52YWxpZExpdmVVbnRpbExlZGdlcmBdIC0gT2NjdXJzIHdoZW4KYXR0ZW1wdGluZyB0byBzZXQgYGxpdmVfdW50aWxfbGVkZ2VyYCB0aGF0IGlzIGxlc3MgdGhhbiB0aGUgY3VycmVudApsZWRnZXIgbnVtYmVyIGFuZCBncmVhdGVyIHRoYW4gYDBgLgoqIFtgRnVuZ2libGVUb2tlbkVycm9yOjpMZXNzVGhhblplcm9gXSAtIE9jY3VycyB3aGVuIGBhbW91bnQgPCAwYC4KCiMgRXZlbnRzCgoqIHRvcGljcyAtIGBbImFwcHJvdmUiLCBmcm9tOiBBZGRyZXNzLCBzcGVuZGVyOiBBZGRyZXNzXWAKKiBkYXRhIC0gYFthbW91bnQ6IGkxMjgsIGxpdmVfdW50aWxfbGVkZ2VyOiB1MzJdYAAAAAAAB2FwcHJvdmUAAAAABAAAAAAAAAAFb3duZXIAAAAAAAATAAAAAAAAAAdzcGVuZGVyAAAAABMAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAARbGl2ZV91bnRpbF9sZWRnZXIAAAAAAAAEAAAAAA==",
         "AAAAAAAAAKpSZXR1cm5zIHRoZSBhbW91bnQgb2YgdG9rZW5zIGhlbGQgYnkgYGFjY291bnRgLgoKIyBBcmd1bWVudHMKCiogYGVgIC0gQWNjZXNzIHRvIHRoZSBTb3JvYmFuIGVudmlyb25tZW50LgoqIGBhY2NvdW50YCAtIFRoZSBhZGRyZXNzIGZvciB3aGljaCB0aGUgYmFsYW5jZSBpcyBiZWluZyBxdWVyaWVkLgAAAAAAB2JhbGFuY2UAAAAAAQAAAAAAAAAHYWNjb3VudAAAAAATAAAAAQAAAAs=",
-        "AAAAAAAAAEdEZXBvc2l0IGBhc3NldHNgIGFuZCBtaW50IHNoYXJlcyB0byBgcmVjZWl2ZXJgLiBTdHJhdGVneSBhdXRoIHJlcXVpcmVkLgAAAAAHZGVwb3NpdAAAAAAEAAAAAAAAAAZhc3NldHMAAAAAAAsAAAAAAAAACHJlY2VpdmVyAAAAEwAAAAAAAAAEZnJvbQAAABMAAAAAAAAACG9wZXJhdG9yAAAAEwAAAAEAAAAL",
         "AAAAAAAAAHxSZXR1cm5zIHRoZSBudW1iZXIgb2YgZGVjaW1hbHMgdXNlZCB0byByZXByZXNlbnQgYW1vdW50cyBvZiB0aGlzIHRva2VuLgoKIyBBcmd1bWVudHMKCiogYGVgIC0gQWNjZXNzIHRvIFNvcm9iYW4gZW52aXJvbm1lbnQuAAAACGRlY2ltYWxzAAAAAAAAAAEAAAAE",
-        "AAAAAAAAAO5SZXR1cm5zIHRoZSBtYXhpbXVtIGFtb3VudCBvZiB2YXVsdCBzaGFyZXMgdGhhdCBjYW4gYmUgbWludGVkCmZvciB0aGUgZ2l2ZW4gcmVjZWl2ZXIgYWRkcmVzcyAoY3VycmVudGx5IGBpMTI4OjpNQVhgKS4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4KKiBgcmVjZWl2ZXJgIC0gVGhlIGFkZHJlc3MgdGhhdCB3b3VsZCByZWNlaXZlIHRoZSB2YXVsdCBzaGFyZXMuAAAAAAAIbWF4X21pbnQAAAABAAAAAAAAAAhyZWNlaXZlcgAAABMAAAABAAAACw==",
         "AAAAAAAAAi5UcmFuc2ZlcnMgYGFtb3VudGAgb2YgdG9rZW5zIGZyb20gYGZyb21gIHRvIGB0b2AuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gU29yb2JhbiBlbnZpcm9ubWVudC4KKiBgZnJvbWAgLSBUaGUgYWRkcmVzcyBob2xkaW5nIHRoZSB0b2tlbnMuCiogYHRvYCAtIFRoZSBhZGRyZXNzIHJlY2VpdmluZyB0aGUgdHJhbnNmZXJyZWQgdG9rZW5zLgoqIGBhbW91bnRgIC0gVGhlIGFtb3VudCBvZiB0b2tlbnMgdG8gYmUgdHJhbnNmZXJyZWQuCgojIEVycm9ycwoKKiBbYEZ1bmdpYmxlVG9rZW5FcnJvcjo6SW5zdWZmaWNpZW50QmFsYW5jZWBdIC0gV2hlbiBhdHRlbXB0aW5nIHRvCnRyYW5zZmVyIG1vcmUgdG9rZW5zIHRoYW4gYGZyb21gIGN1cnJlbnQgYmFsYW5jZS4KKiBbYEZ1bmdpYmxlVG9rZW5FcnJvcjo6TGVzc1RoYW5aZXJvYF0gLSBXaGVuIGBhbW91bnQgPCAwYC4KCiMgRXZlbnRzCgoqIHRvcGljcyAtIGBbInRyYW5zZmVyIiwgZnJvbTogQWRkcmVzcywgdG86IEFkZHJlc3NdYAoqIGRhdGEgLSBgW3RvX211eGVkX2lkOiBPcHRpb248dTY0PiwgYW1vdW50OiBpMTI4XWAAAAAAAAh0cmFuc2ZlcgAAAAMAAAAAAAAABGZyb20AAAATAAAAAAAAAAJ0bwAAAAAAFAAAAAAAAAAGYW1vdW50AAAAAAALAAAAAA==",
-        "AAAAAAAAADhXaXRoZHJhdyBgYXNzZXRzYCB0byBgcmVjZWl2ZXJgLiBTdHJhdGVneSBhdXRoIHJlcXVpcmVkLgAAAAh3aXRoZHJhdwAAAAQAAAAAAAAABmFzc2V0cwAAAAAACwAAAAAAAAAIcmVjZWl2ZXIAAAATAAAAAAAAAAVvd25lcgAAAAAAABMAAAAAAAAACG9wZXJhdG9yAAAAEwAAAAEAAAAL",
         "AAAAAAAAAPBSZXR1cm5zIHRoZSBhbW91bnQgb2YgdG9rZW5zIGEgYHNwZW5kZXJgIGlzIGFsbG93ZWQgdG8gc3BlbmQgb24gYmVoYWxmCm9mIGFuIGBvd25lcmAuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gU29yb2JhbiBlbnZpcm9ubWVudC4KKiBgb3duZXJgIC0gVGhlIGFkZHJlc3MgaG9sZGluZyB0aGUgdG9rZW5zLgoqIGBzcGVuZGVyYCAtIFRoZSBhZGRyZXNzIGF1dGhvcml6ZWQgdG8gc3BlbmQgdGhlIHRva2Vucy4AAAAJYWxsb3dhbmNlAAAAAAAAAgAAAAAAAAAFb3duZXIAAAAAAAATAAAAAAAAAAdzcGVuZGVyAAAAABMAAAABAAAACw==",
-        "AAAAAAAAAOVSZXR1cm5zIHRoZSBtYXhpbXVtIGFtb3VudCBvZiB2YXVsdCBzaGFyZXMgdGhhdCBjYW4gYmUgcmVkZWVtZWQKYnkgdGhlIGdpdmVuIG93bmVyIChlcXVhbCB0byB0aGVpciB2YXVsdCBzaGFyZSBiYWxhbmNlKS4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4KKiBgb3duZXJgIC0gVGhlIGFkZHJlc3MgdGhhdCBvd25zIHRoZSB2YXVsdCBzaGFyZXMuAAAAAAAACm1heF9yZWRlZW0AAAAAAAEAAAAAAAAABW93bmVyAAAAAAAAEwAAAAEAAAAL",
-        "AAAAAAAAAPZSZXR1cm5zIHRoZSBtYXhpbXVtIGFtb3VudCBvZiB1bmRlcmx5aW5nIGFzc2V0cyB0aGF0IGNhbiBiZSBkZXBvc2l0ZWQKZm9yIHRoZSBnaXZlbiByZWNlaXZlciBhZGRyZXNzIChjdXJyZW50bHkgYGkxMjg6Ok1BWGApLgoKIyBBcmd1bWVudHMKCiogYGVgIC0gQWNjZXNzIHRvIHRoZSBTb3JvYmFuIGVudmlyb25tZW50LgoqIGByZWNlaXZlcmAgLSBUaGUgYWRkcmVzcyB0aGF0IHdvdWxkIHJlY2VpdmUgdGhlIHZhdWx0IHNoYXJlcy4AAAAAAAttYXhfZGVwb3NpdAAAAAABAAAAAAAAAAhyZWNlaXZlcgAAABMAAAABAAAACw==",
-        "AAAAAAAAAQpSZXR1cm5zIHRoZSBhZGRyZXNzIG9mIHRoZSB1bmRlcmx5aW5nIGFzc2V0IHRoYXQgdGhlIHZhdWx0IG1hbmFnZXMuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gdGhlIFNvcm9iYW4gZW52aXJvbm1lbnQuCgojIEVycm9ycwoKKiBbYGNyYXRlOjp2YXVsdDo6VmF1bHRUb2tlbkVycm9yOjpWYXVsdEFzc2V0QWRkcmVzc05vdFNldGBdIC0gV2hlbiB0aGUKdmF1bHQncyB1bmRlcmx5aW5nIGFzc2V0IGFkZHJlc3MgaGFzIG5vdCBiZWVuIGluaXRpYWxpemVkLgAAAAAAC3F1ZXJ5X2Fzc2V0AAAAAAAAAAABAAAAEw==",
-        "AAAAAAAAAa1SZXR1cm5zIHRoZSBtYXhpbXVtIGFtb3VudCBvZiB1bmRlcmx5aW5nIGFzc2V0cyB0aGF0IGNhbiBiZQp3aXRoZHJhd24gYnkgdGhlIGdpdmVuIG93bmVyLCBsaW1pdGVkIGJ5IHRoZWlyIHZhdWx0IHNoYXJlIGJhbGFuY2UuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gdGhlIFNvcm9iYW4gZW52aXJvbm1lbnQuCiogYG93bmVyYCAtIFRoZSBhZGRyZXNzIHRoYXQgb3ducyB0aGUgdmF1bHQgc2hhcmVzLgoKIyBFcnJvcnMKCiogW2BjcmF0ZTo6dmF1bHQ6OlZhdWx0VG9rZW5FcnJvcjo6VmF1bHRJbnZhbGlkU2hhcmVzQW1vdW50YF0gLSBXaGVuCnNoYXJlcyA8IDAuCiogW2BjcmF0ZTo6dmF1bHQ6OlZhdWx0VG9rZW5FcnJvcjo6TWF0aE92ZXJmbG93YF0gLSBXaGVuIG1hdGhlbWF0aWNhbApvcGVyYXRpb25zIHJlc3VsdCBpbiBvdmVyZmxvdy4AAAAAAAAMbWF4X3dpdGhkcmF3AAAAAQAAAAAAAAAFb3duZXIAAAAAAAATAAAAAQAAAAs=",
-        "AAAAAAAAAapTaW11bGF0ZXMgYW5kIHJldHVybnMgdGhlIGFtb3VudCBvZiB1bmRlcmx5aW5nIGFzc2V0cyByZXF1aXJlZCB0byBtaW50CmEgZ2l2ZW4gYW1vdW50IG9mIHZhdWx0IHNoYXJlcyAocm91bmRlZCB1cCkuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gdGhlIFNvcm9iYW4gZW52aXJvbm1lbnQuCiogYHNoYXJlc2AgLSBUaGUgYW1vdW50IG9mIHZhdWx0IHNoYXJlcyB0byBzaW11bGF0ZSBtaW50aW5nLgoKIyBFcnJvcnMKCiogW2BjcmF0ZTo6dmF1bHQ6OlZhdWx0VG9rZW5FcnJvcjo6VmF1bHRJbnZhbGlkU2hhcmVzQW1vdW50YF0gLSBXaGVuCnNoYXJlcyA8IDAuCiogW2BjcmF0ZTo6dmF1bHQ6OlZhdWx0VG9rZW5FcnJvcjo6TWF0aE92ZXJmbG93YF0gLSBXaGVuIG1hdGhlbWF0aWNhbApvcGVyYXRpb25zIHJlc3VsdCBpbiBvdmVyZmxvdy4AAAAAAAxwcmV2aWV3X21pbnQAAAABAAAAAAAAAAZzaGFyZXMAAAAAAAsAAAABAAAACw==",
-        "AAAAAAAAAYVSZXR1cm5zIHRoZSB0b3RhbCBhbW91bnQgb2YgdW5kZXJseWluZyBhc3NldHMgaGVsZCBieSB0aGUgdmF1bHQuCgpUaGlzIHJlcHJlc2VudHMgdGhlIHZhdWx0J3MgYmFsYW5jZSBvZiB0aGUgdW5kZXJseWluZyBhc3NldCwgd2hpY2gKZGV0ZXJtaW5lcyB0aGUgY29udmVyc2lvbiByYXRlIGJldHdlZW4gc2hhcmVzIGFuZCBhc3NldHMuCgojIEFyZ3VtZW50cwoKKiBgZWAgLSBBY2Nlc3MgdG8gdGhlIFNvcm9iYW4gZW52aXJvbm1lbnQuCgojIEVycm9ycwoKKiBbYGNyYXRlOjp2YXVsdDo6VmF1bHRUb2tlbkVycm9yOjpWYXVsdEFzc2V0QWRkcmVzc05vdFNldGBdIC0gV2hlbiB0aGUKdmF1bHQncyB1bmRlcmx5aW5nIGFzc2V0IGFkZHJlc3MgaGFzIG5vdCBiZWVuIGluaXRpYWxpemVkLgAAAAAAAAx0b3RhbF9hc3NldHMAAAAAAAAAAQAAAAs=",
+        "AAAAAAAAAF9UaGUgYWRkcmVzcyBvZiB0aGUgdW5kZXJseWluZyBhc3NldCB0aGUgdmF1bHQgbWFuYWdlcy4KCiMgUmV0dXJucwotIFRoZSBhc3NldCBjb250cmFjdCBhZGRyZXNzLgAAAAALcXVlcnlfYXNzZXQAAAAAAAAAAAEAAAAT",
+        "AAAAAAAAAGpUaGUgcmVnaXN0ZXJlZCBzdHJhdGVneSAodHJhZGluZyBjb250cmFjdCkgYWRkcmVzcy4KCiMgUmV0dXJucwotIFRoZSBzdHJhdGVneSBhZGRyZXNzIHNldCBhdCBjb25zdHJ1Y3Rpb24uAAAAAAAMZ2V0X3N0cmF0ZWd5AAAAAAAAAAEAAAAT",
+        "AAAAAAAAAItUaGUgdmF1bHQncyByYXcgYmFsYW5jZSBvZiB0aGUgdW5kZXJseWluZyBhc3NldCAodG9rZW4tZGVjKS4KCiMgUmV0dXJucwotIFRoZSBhc3NldCBiYWxhbmNlIGhlbGQgYnkgdGhlIHZhdWx0LCBiZWZvcmUgYW55IHBlbmRpbmctUG5MIG1hcmsuAAAAAAx0b3RhbF9hc3NldHMAAAAAAAAAAQAAAAs=",
         "AAAAAAAAAGtSZXR1cm5zIHRoZSB0b3RhbCBhbW91bnQgb2YgdG9rZW5zIGluIGNpcmN1bGF0aW9uLgoKIyBBcmd1bWVudHMKCiogYGVgIC0gQWNjZXNzIHRvIHRoZSBTb3JvYmFuIGVudmlyb25tZW50LgAAAAAMdG90YWxfc3VwcGx5AAAAAAAAAAEAAAAL",
-        "AAAAAAAAAjRJbml0aWFsaXplIHRoZSB2YXVsdCB3aXRoIGl0cyB1bmRlcmx5aW5nIGFzc2V0LCBzaGFyZSBtZXRhZGF0YSwgYW5kIHN0cmF0ZWd5CmFkZHJlc3MuCgpgc3RyYXRlZ3lgIGlzIHRoZSB0cmFkaW5nIGNvbnRyYWN0OiB0aGUgb25seSBhZGRyZXNzIGFsbG93ZWQgdG8gY2FsbApFUkMtNDYyNiBtdXRhdGlvbnMgYW5kIGBzdHJhdGVneV93aXRoZHJhd2AuIEltbXV0YWJsZSBmb3IgdGhlIHZhdWx0J3MKbGlmZXRpbWUuIGBkZWNpbWFsc19vZmZzZXRgIGFkZHMgZXh0cmEgc2hhcmUgcHJlY2lzaW9uIChFUkMtNDYyNiBpbmZsYXRpb24KYXR0YWNrIG1pdGlnYXRpb24pLgoKIyBQYXJhbWV0ZXJzCi0gYG5hbWVgIC8gYHN5bWJvbGAgLSBFUkMtMjAgbWV0YWRhdGEgZm9yIHRoZSBzaGFyZSB0b2tlbgotIGBhc3NldGAgLSBVbmRlcmx5aW5nIGNvbGxhdGVyYWwgdG9rZW4gYWRkcmVzcwotIGBkZWNpbWFsc19vZmZzZXRgIC0gRXh0cmEgc2hhcmUgZGVjaW1hbHMgb24gdG9wIG9mIGBhc3NldC5kZWNpbWFscygpYAotIGBzdHJhdGVneWAgLSBUcmFkaW5nIGNvbnRyYWN0IGFkZHJlc3MgKGltbXV0YWJsZSkAAAANX19jb25zdHJ1Y3RvcgAAAAAAAAUAAAAAAAAABG5hbWUAAAAQAAAAAAAAAAZzeW1ib2wAAAAAABAAAAAAAAAABWFzc2V0AAAAAAAAEwAAAAAAAAAPZGVjaW1hbHNfb2Zmc2V0AAAAAAQAAAAAAAAACHN0cmF0ZWd5AAAAEwAAAAA=",
+        "AAAAAAAAAhxJbml0aWFsaXplIHRoZSB2YXVsdCB3aXRoIGl0cyB1bmRlcmx5aW5nIGFzc2V0LCBzaGFyZSBtZXRhZGF0YSwgYW5kIHN0cmF0ZWd5CmFkZHJlc3MuCgpgc3RyYXRlZ3lgIGlzIHRoZSB0cmFkaW5nIGNvbnRyYWN0OiB0aGUgb25seSBhZGRyZXNzIGFsbG93ZWQgdG8gY2FsbAp0aGUgdmF1bHQgbXV0YXRpb25zLiBJbW11dGFibGUgZm9yIHRoZSB2YXVsdCdzIGxpZmV0aW1lLgpgZGVjaW1hbHNfb2Zmc2V0YCBhZGRzIGV4dHJhIHNoYXJlIHByZWNpc2lvbiAoRVJDLTQ2MjYgaW5mbGF0aW9uCmF0dGFjayBtaXRpZ2F0aW9uKS4KCiMgQXJndW1lbnRzCi0gYG5hbWVgIC8gYHN5bWJvbGAgLSBFUkMtMjAgbWV0YWRhdGEgZm9yIHRoZSBzaGFyZSB0b2tlbgotIGBhc3NldGAgLSBVbmRlcmx5aW5nIGNvbGxhdGVyYWwgdG9rZW4gYWRkcmVzcwotIGBkZWNpbWFsc19vZmZzZXRgIC0gRXh0cmEgc2hhcmUgZGVjaW1hbHMgb24gdG9wIG9mIGBhc3NldC5kZWNpbWFscygpYAotIGBzdHJhdGVneWAgLSBUcmFkaW5nIGNvbnRyYWN0IGFkZHJlc3MgKGltbXV0YWJsZSkAAAANX19jb25zdHJ1Y3RvcgAAAAAAAAUAAAAAAAAABG5hbWUAAAAQAAAAAAAAAAZzeW1ib2wAAAAAABAAAAAAAAAABWFzc2V0AAAAAAAAEwAAAAAAAAAPZGVjaW1hbHNfb2Zmc2V0AAAAAAQAAAAAAAAACHN0cmF0ZWd5AAAAEwAAAAA=",
         "AAAAAAAAA2dUcmFuc2ZlcnMgYGFtb3VudGAgb2YgdG9rZW5zIGZyb20gYGZyb21gIHRvIGB0b2AgdXNpbmcgdGhlCmFsbG93YW5jZSBtZWNoYW5pc20uIGBhbW91bnRgIGlzIHRoZW4gZGVkdWN0ZWQgZnJvbSBgc3BlbmRlcmAKYWxsb3dhbmNlLgoKIyBBcmd1bWVudHMKCiogYGVgIC0gQWNjZXNzIHRvIFNvcm9iYW4gZW52aXJvbm1lbnQuCiogYHNwZW5kZXJgIC0gVGhlIGFkZHJlc3MgYXV0aG9yaXppbmcgdGhlIHRyYW5zZmVyLCBhbmQgaGF2aW5nIGl0cwphbGxvd2FuY2UgY29uc3VtZWQgZHVyaW5nIHRoZSB0cmFuc2Zlci4KKiBgZnJvbWAgLSBUaGUgYWRkcmVzcyBob2xkaW5nIHRoZSB0b2tlbnMgd2hpY2ggd2lsbCBiZSB0cmFuc2ZlcnJlZC4KKiBgdG9gIC0gVGhlIGFkZHJlc3MgcmVjZWl2aW5nIHRoZSB0cmFuc2ZlcnJlZCB0b2tlbnMuCiogYGFtb3VudGAgLSBUaGUgYW1vdW50IG9mIHRva2VucyB0byBiZSB0cmFuc2ZlcnJlZC4KCiMgRXJyb3JzCgoqIFtgRnVuZ2libGVUb2tlbkVycm9yOjpJbnN1ZmZpY2llbnRCYWxhbmNlYF0gLSBXaGVuIGF0dGVtcHRpbmcgdG8KdHJhbnNmZXIgbW9yZSB0b2tlbnMgdGhhbiBgZnJvbWAgY3VycmVudCBiYWxhbmNlLgoqIFtgRnVuZ2libGVUb2tlbkVycm9yOjpMZXNzVGhhblplcm9gXSAtIFdoZW4gYGFtb3VudCA8IDBgLgoqIFtgRnVuZ2libGVUb2tlbkVycm9yOjpJbnN1ZmZpY2llbnRBbGxvd2FuY2VgXSAtIFdoZW4gYXR0ZW1wdGluZyB0bwp0cmFuc2ZlciBtb3JlIHRva2VucyB0aGFuIGBzcGVuZGVyYCBjdXJyZW50IGFsbG93YW5jZS4KCiMgRXZlbnRzCgoqIHRvcGljcyAtIGBbInRyYW5zZmVyIiwgZnJvbTogQWRkcmVzcywgdG86IEFkZHJlc3NdYAoqIGRhdGEgLSBgW2Ftb3VudDogaTEyOF1gAAAAAA10cmFuc2Zlcl9mcm9tAAAAAAAABAAAAAAAAAAHc3BlbmRlcgAAAAATAAAAAAAAAARmcm9tAAAAEwAAAAAAAAACdG8AAAAAABMAAAAAAAAABmFtb3VudAAAAAAACwAAAAA=",
-        "AAAAAAAAAcJTaW11bGF0ZXMgYW5kIHJldHVybnMgdGhlIGFtb3VudCBvZiB1bmRlcmx5aW5nIGFzc2V0cyB0aGF0IHdvdWxkIGJlCnJlY2VpdmVkIGZvciByZWRlZW1pbmcgYSBnaXZlbiBhbW91bnQgb2YgdmF1bHQgc2hhcmVzIChyb3VuZGVkIGRvd24pLgoKIyBBcmd1bWVudHMKCiogYGVgIC0gQWNjZXNzIHRvIHRoZSBTb3JvYmFuIGVudmlyb25tZW50LgoqIGBzaGFyZXNgIC0gVGhlIGFtb3VudCBvZiB2YXVsdCBzaGFyZXMgdG8gc2ltdWxhdGUgcmVkZWVtaW5nLgoKIyBFcnJvcnMKCiogW2BjcmF0ZTo6dmF1bHQ6OlZhdWx0VG9rZW5FcnJvcjo6VmF1bHRJbnZhbGlkU2hhcmVzQW1vdW50YF0gLSBXaGVuCnNoYXJlcyA8IDAuCiogW2BjcmF0ZTo6dmF1bHQ6OlZhdWx0VG9rZW5FcnJvcjo6TWF0aE92ZXJmbG93YF0gLSBXaGVuIG1hdGhlbWF0aWNhbApvcGVyYXRpb25zIHJlc3VsdCBpbiBvdmVyZmxvdy4AAAAAAA5wcmV2aWV3X3JlZGVlbQAAAAAAAQAAAAAAAAAGc2hhcmVzAAAAAAALAAAAAQAAAAs=",
-        "AAAAAAAAAb1TaW11bGF0ZXMgYW5kIHJldHVybnMgdGhlIGFtb3VudCBvZiB2YXVsdCBzaGFyZXMgdGhhdCB3b3VsZCBiZSBtaW50ZWQKZm9yIGEgZ2l2ZW4gZGVwb3NpdCBvZiB1bmRlcmx5aW5nIGFzc2V0cyAocm91bmRlZCBkb3duKS4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4KKiBgYXNzZXRzYCAtIFRoZSBhbW91bnQgb2YgdW5kZXJseWluZyBhc3NldHMgdG8gc2ltdWxhdGUgZGVwb3NpdGluZy4KCiMgRXJyb3JzCgoqIFtgY3JhdGU6OnZhdWx0OjpWYXVsdFRva2VuRXJyb3I6OlZhdWx0SW52YWxpZEFzc2V0c0Ftb3VudGBdIC0gV2hlbgphc3NldHMgPCAwLgoqIFtgY3JhdGU6OnZhdWx0OjpWYXVsdFRva2VuRXJyb3I6Ok1hdGhPdmVyZmxvd2BdIC0gV2hlbiBtYXRoZW1hdGljYWwKb3BlcmF0aW9ucyByZXN1bHQgaW4gb3ZlcmZsb3cuAAAAAAAAD3ByZXZpZXdfZGVwb3NpdAAAAAABAAAAAAAAAAZhc3NldHMAAAAAAAsAAAABAAAACw==",
-        "AAAAAAAAAcNTaW11bGF0ZXMgYW5kIHJldHVybnMgdGhlIGFtb3VudCBvZiB2YXVsdCBzaGFyZXMgdGhhdCB3b3VsZCBiZSBidXJuZWQKdG8gd2l0aGRyYXcgYSBnaXZlbiBhbW91bnQgb2YgdW5kZXJseWluZyBhc3NldHMgKHJvdW5kZWQgdXApLgoKIyBBcmd1bWVudHMKCiogYGVgIC0gQWNjZXNzIHRvIHRoZSBTb3JvYmFuIGVudmlyb25tZW50LgoqIGBhc3NldHNgIC0gVGhlIGFtb3VudCBvZiB1bmRlcmx5aW5nIGFzc2V0cyB0byBzaW11bGF0ZSB3aXRoZHJhd2luZy4KCiMgRXJyb3JzCgoqIFtgY3JhdGU6OnZhdWx0OjpWYXVsdFRva2VuRXJyb3I6OlZhdWx0SW52YWxpZEFzc2V0c0Ftb3VudGBdIC0gV2hlbgphc3NldHMgPCAwLgoqIFtgY3JhdGU6OnZhdWx0OjpWYXVsdFRva2VuRXJyb3I6Ok1hdGhPdmVyZmxvd2BdIC0gV2hlbiBtYXRoZW1hdGljYWwKb3BlcmF0aW9ucyByZXN1bHQgaW4gb3ZlcmZsb3cuAAAAABBwcmV2aWV3X3dpdGhkcmF3AAAAAQAAAAAAAAAGYXNzZXRzAAAAAAALAAAAAQAAAAs=",
-        "AAAAAAAAAY5Db252ZXJ0cyBhbiBhbW91bnQgb2YgdmF1bHQgc2hhcmVzIHRvIHRoZSBlcXVpdmFsZW50IGFtb3VudCBvZgp1bmRlcmx5aW5nIGFzc2V0cyAocm91bmRlZCBkb3duKS4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4KKiBgc2hhcmVzYCAtIFRoZSBhbW91bnQgb2YgdmF1bHQgc2hhcmVzIHRvIGNvbnZlcnQuCgojIEVycm9ycwoKKiBbYGNyYXRlOjp2YXVsdDo6VmF1bHRUb2tlbkVycm9yOjpWYXVsdEludmFsaWRTaGFyZXNBbW91bnRgXSAtIFdoZW4Kc2hhcmVzIDwgMC4KKiBbYGNyYXRlOjp2YXVsdDo6VmF1bHRUb2tlbkVycm9yOjpNYXRoT3ZlcmZsb3dgXSAtIFdoZW4gbWF0aGVtYXRpY2FsCm9wZXJhdGlvbnMgcmVzdWx0IGluIG92ZXJmbG93LgAAAAAAEWNvbnZlcnRfdG9fYXNzZXRzAAAAAAAAAQAAAAAAAAAGc2hhcmVzAAAAAAALAAAAAQAAAAs=",
-        "AAAAAAAAAZNDb252ZXJ0cyBhbiBhbW91bnQgb2YgdW5kZXJseWluZyBhc3NldHMgdG8gdGhlIGVxdWl2YWxlbnQgYW1vdW50IG9mCnZhdWx0IHNoYXJlcyAocm91bmRlZCBkb3duKS4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4KKiBgYXNzZXRzYCAtIFRoZSBhbW91bnQgb2YgdW5kZXJseWluZyBhc3NldHMgdG8gY29udmVydC4KCiMgRXJyb3JzCgoqIFtgY3JhdGU6OnZhdWx0OjpWYXVsdFRva2VuRXJyb3I6OlZhdWx0SW52YWxpZEFzc2V0c0Ftb3VudGBdIC0gV2hlbgphc3NldHMgPCAwLgoqIFtgY3JhdGU6OnZhdWx0OjpWYXVsdFRva2VuRXJyb3I6Ok1hdGhPdmVyZmxvd2BdIC0gV2hlbiBtYXRoZW1hdGljYWwKb3BlcmF0aW9ucyByZXN1bHQgaW4gb3ZlcmZsb3cuAAAAABFjb252ZXJ0X3RvX3NoYXJlcwAAAAAAAAEAAAAAAAAABmFzc2V0cwAAAAAACwAAAAEAAAAL",
-        "AAAAAAAAAb5TdHJhdGVneSAodHJhZGluZyBjb250cmFjdCkgd2l0aGRyYXdzIHRva2VucyBmcm9tIHRoZSB2YXVsdCB0byBwYXkKd2lubmluZyBwb3NpdGlvbnMuIERlY3JlYXNlcyBgdG90YWxfYXNzZXRzYCBhbmQgdGh1cyBzaGFyZSBwcmljZS4KCk9ubHkgdGhlIGBzdHJhdGVneWAgYWRkcmVzcyByZWdpc3RlcmVkIGF0IGNvbnN0cnVjdGlvbiBjYW4gYXV0aG9yaXplCnRoaXMgY2FsbC4KCiMgUGFyYW1ldGVycwotIGBzdHJhdGVneWAgLSBDYWxsZXIsIG11c3QgbWF0Y2ggdGhlIGltbXV0YWJsZSBzdHJhdGVneSBhZGRyZXNzIChhdXRoIHJlcXVpcmVkKQotIGBhbW91bnRgIC0gVG9rZW4gYW1vdW50IHRvIHdpdGhkcmF3ICh0b2tlbl9kZWNpbWFscykKCiMgUGFuaWNzCi0gT24gYHJlcXVpcmVfYXV0aGAgZmFpbHVyZSBpZiB0aGUgY2FsbGVyIGlzIG5vdCB0aGUgcmVnaXN0ZXJlZCBzdHJhdGVneQAAAAAAEXN0cmF0ZWd5X3dpdGhkcmF3AAAAAAAAAgAAAAAAAAAIc3RyYXRlZ3kAAAATAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAA",
+        "AAAAAAAAAUpBc3NldHMgYSByZWRlbXB0aW9uIG9mIGBzaGFyZXNgIHdvdWxkIHBheSBhdCB0aGUgdVBuTC1tYXJrZWQgc2hhcmUKcHJpY2UuCgojIEFyZ3VtZW50cwotIGBzaGFyZXNgIC0gc2hhcmVzIHRvIHF1b3RlIChzaGFyZSBkZWNpbWFscykKLSBgbmV0X3BubGAgLSBzaWduZWQgcGVuZGluZyB0cmFkZXIgUG5MIG1hcmtlZCBhZ2FpbnN0IHRoZSB2YXVsdAoodG9rZW4tZGVjKQoKIyBSZXR1cm5zCi0gVGhlIGFzc2V0cyBwYWlkICh0b2tlbi1kZWMpLCByb3VuZGVkIGRvd24uCgojIEVycm9ycwotIHJlZmVyIHRvIFtgU3RyYXRlZ3lWYXVsdDo6c2hhcmVzX3RvX2Fzc2V0c2BdIGVycm9ycy4AAAAAAA5wcmV2aWV3X3JlZGVlbQAAAAAAAgAAAAAAAAAGc2hhcmVzAAAAAAALAAAAAAAAAAduZXRfcG5sAAAAAAsAAAABAAAACw==",
+        "AAAAAAAAAUpTaGFyZXMgYSBkZXBvc2l0IG9mIGBhc3NldHNgIHdvdWxkIG1pbnQgYXQgdGhlIHVQbkwtbWFya2VkIHNoYXJlCnByaWNlLgoKIyBBcmd1bWVudHMKLSBgYXNzZXRzYCAtIGFzc2V0cyB0byBxdW90ZSAodG9rZW4tZGVjKQotIGBuZXRfcG5sYCAtIHNpZ25lZCBwZW5kaW5nIHRyYWRlciBQbkwgbWFya2VkIGFnYWluc3QgdGhlIHZhdWx0Cih0b2tlbi1kZWMpCgojIFJldHVybnMKLSBUaGUgc2hhcmVzIG1pbnRlZCAoc2hhcmUgZGVjaW1hbHMpLCByb3VuZGVkIGRvd24uCgojIEVycm9ycwotIHJlZmVyIHRvIFtgU3RyYXRlZ3lWYXVsdDo6YXNzZXRzX3RvX3NoYXJlc2BdIGVycm9ycy4AAAAAAA9wcmV2aWV3X2RlcG9zaXQAAAAAAgAAAAAAAAAGYXNzZXRzAAAAAAALAAAAAAAAAAduZXRfcG5sAAAAAAsAAAABAAAACw==",
+        "AAAAAAAAAphSZWRlZW0gYHNoYXJlc2AgZnJvbSBgb3duZXJgIGFuZCBwYXkgdGhlIHVQbkwtcHJpY2VkIGFzc2V0cyB0bwpgcmVjZWl2ZXJgOyByZXR1cm5zIHRoZSBhc3NldHMgcGFpZC4KCiMgQXV0aG9yaXphdGlvbgotIFRoZSByZWdpc3RlcmVkIHN0cmF0ZWd5IG11c3QgYXV0aG9yaXplIHRoZSBjYWxsLgoKIyBBcmd1bWVudHMKLSBgc2hhcmVzYCAtIHNoYXJlcyB0byBidXJuIChzaGFyZSBkZWNpbWFscykKLSBgcmVjZWl2ZXJgIC0gdGhlIGFkZHJlc3MgcmVjZWl2aW5nIHRoZSByZWRlZW1lZCBhc3NldHMKLSBgb3duZXJgIC0gdGhlIGFkZHJlc3Mgd2hvc2Ugc2hhcmVzIGFyZSBidXJuZWQKLSBgbmV0X3BubGAgLSBzaWduZWQgcGVuZGluZyB0cmFkZXIgUG5MIG1hcmtlZCBhZ2FpbnN0IHRoZSB2YXVsdAoodG9rZW4tZGVjKTsgcG9zaXRpdmUgaXMgcHJvZml0IHRoZSB2YXVsdCBzdGlsbCBvd2VzCgojIFJldHVybnMKLSBUaGUgYXNzZXRzIHBhaWQgb3V0ICh0b2tlbi1kZWMpLgoKIyBFcnJvcnMKLSByZWZlciB0byBbYFN0cmF0ZWd5VmF1bHQ6OnJlZGVlbWBdIGVycm9ycy4KCiMgRXZlbnRzCi0gYFdpdGhkcmF3YDogdGhlIHNoYXJlcyBidXJuZWQgYW5kIHRoZSBhc3NldHMgcGFpZC4KCiMgTm90ZXMKLSBBc3NldHMgcm91bmQgZG93biwgaW4gdGhlIHZhdWx0J3MgZmF2b3IuAAAAD3N0cmF0ZWd5X3JlZGVlbQAAAAAEAAAAAAAAAAZzaGFyZXMAAAAAAAsAAAAAAAAACHJlY2VpdmVyAAAAEwAAAAAAAAAFb3duZXIAAAAAAAATAAAAAAAAAAduZXRfcG5sAAAAAAsAAAABAAAACw==",
+        "AAAAAAAAAotEZXBvc2l0IGBhc3NldHNgIGFuZCBtaW50IHRoZSB1UG5MLXByaWNlZCBzaGFyZXMgdG8gYHJlY2VpdmVyYDsKcmV0dXJucyB0aGUgc2hhcmVzIG1pbnRlZC4KCiMgQXV0aG9yaXphdGlvbgotIFRoZSByZWdpc3RlcmVkIHN0cmF0ZWd5IG11c3QgYXV0aG9yaXplIHRoZSBjYWxsLgoKIyBBcmd1bWVudHMKLSBgYXNzZXRzYCAtIGFzc2V0cyB0byBkZXBvc2l0ICh0b2tlbi1kZWMpCi0gYHJlY2VpdmVyYCAtIHRoZSBhZGRyZXNzIHJlY2VpdmluZyB0aGUgbWludGVkIHNoYXJlcwotIGBmcm9tYCAtIHRoZSBhZGRyZXNzIHByb3ZpZGluZyB0aGUgYXNzZXRzCi0gYG5ldF9wbmxgIC0gc2lnbmVkIHBlbmRpbmcgdHJhZGVyIFBuTCBtYXJrZWQgYWdhaW5zdCB0aGUgdmF1bHQKKHRva2VuLWRlYyk7IHBvc2l0aXZlIGlzIHByb2ZpdCB0aGUgdmF1bHQgc3RpbGwgb3dlcwoKIyBSZXR1cm5zCi0gVGhlIHNoYXJlcyBtaW50ZWQgKHNoYXJlIGRlY2ltYWxzKS4KCiMgRXJyb3JzCi0gcmVmZXIgdG8gW2BTdHJhdGVneVZhdWx0OjpkZXBvc2l0YF0gZXJyb3JzLgoKIyBFdmVudHMKLSBgRGVwb3NpdGA6IHRoZSBhc3NldHMgdGFrZW4gYW5kIHRoZSBzaGFyZXMgbWludGVkLgoKIyBOb3RlcwotIFNoYXJlcyByb3VuZCBkb3duLCBpbiB0aGUgdmF1bHQncyBmYXZvci4AAAAAEHN0cmF0ZWd5X2RlcG9zaXQAAAAEAAAAAAAAAAZhc3NldHMAAAAAAAsAAAAAAAAACHJlY2VpdmVyAAAAEwAAAAAAAAAEZnJvbQAAABMAAAAAAAAAB25ldF9wbmwAAAAACwAAAAEAAAAL",
+        "AAAAAAAAAbNTdHJhdGVneSAodHJhZGluZyBjb250cmFjdCkgd2l0aGRyYXdzIHRva2VucyBmcm9tIHRoZSB2YXVsdCB0byBwYXkKd2lubmluZyBwb3NpdGlvbnMuIERlY3JlYXNlcyBgdG90YWxfYXNzZXRzYCBhbmQgdGh1cyBzaGFyZSBwcmljZS4KCiMgQXV0aG9yaXphdGlvbgotIFRoZSByZWdpc3RlcmVkIHN0cmF0ZWd5IG11c3QgYXV0aG9yaXplIHRoZSBjYWxsLgoKIyBBcmd1bWVudHMKLSBgYW1vdW50YCAtIGFzc2V0cyB0byB3aXRoZHJhdyB0byB0aGUgc3RyYXRlZ3kgKHRva2VuLWRlYykKCiMgRXJyb3JzCi0gW2BjcmF0ZTo6c3RyYXRlZ3k6OlN0cmF0ZWd5VmF1bHRFcnJvcjo6SW52YWxpZEFtb3VudGBdIGlmIGBhbW91bnRgIGlzCm5vdCBwb3NpdGl2ZS4KCiMgRXZlbnRzCi0gYFN0cmF0ZWd5V2l0aGRyYXdgOiB0aGUgYXNzZXRzIHRha2VuIGJ5IHRoZSBzdHJhdGVneS4AAAAAEXN0cmF0ZWd5X3dpdGhkcmF3AAAAAAAAAQAAAAAAAAAGYW1vdW50AAAAAAALAAAAAA==",
         "AAAABQAAAAAAAAAAAAAAEFN0cmF0ZWd5V2l0aGRyYXcAAAABAAAAEXN0cmF0ZWd5X3dpdGhkcmF3AAAAAAAAAgAAAAAAAAAIc3RyYXRlZ3kAAAATAAAAAQAAAAAAAAAGYW1vdW50AAAAAAALAAAAAAAAAAI=",
         "AAAABQAAAEJFdmVudCBlbWl0dGVkIHdoZW4gdW5kZXJseWluZyBhc3NldHMgYXJlIGRlcG9zaXRlZCBpbnRvIHRoZSB2YXVsdC4AAAAAAAAAAAAHRGVwb3NpdAAAAAABAAAAB2RlcG9zaXQAAAAABQAAAAAAAAAIb3BlcmF0b3IAAAATAAAAAQAAAAAAAAAEZnJvbQAAABMAAAABAAAAAAAAAAhyZWNlaXZlcgAAABMAAAABAAAAAAAAAAZhc3NldHMAAAAAAAsAAAAAAAAAAAAAAAZzaGFyZXMAAAAAAAsAAAAAAAAAAg==",
         "AAAABQAAAENFdmVudCBlbWl0dGVkIHdoZW4gc2hhcmVzIGFyZSBleGNoYW5nZWQgYmFjayBmb3IgdW5kZXJseWluZyBhc3NldHMuAAAAAAAAAAAIV2l0aGRyYXcAAAABAAAACHdpdGhkcmF3AAAABQAAAAAAAAAIb3BlcmF0b3IAAAATAAAAAQAAAAAAAAAIcmVjZWl2ZXIAAAATAAAAAQAAAAAAAAAFb3duZXIAAAAAAAATAAAAAQAAAAAAAAAGYXNzZXRzAAAAAAALAAAAAAAAAAAAAAAGc2hhcmVzAAAAAAALAAAAAAAAAAI=",
@@ -80,41 +73,23 @@ export class VaultContract extends Contract {
         symbol: (result: string): string =>
             VaultContract.spec.funcResToNative('symbol', result),
 
-        // FungibleVault parsers
-        queryAsset: (result: string): Address =>
+        // Vault view parsers
+        queryAsset: (result: string): string =>
             VaultContract.spec.funcResToNative('query_asset', result),
+        getStrategy: (result: string): string =>
+            VaultContract.spec.funcResToNative('get_strategy', result),
         totalAssets: (result: string): i128 =>
             VaultContract.spec.funcResToNative('total_assets', result),
-        convertToShares: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('convert_to_shares', result),
-        convertToAssets: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('convert_to_assets', result),
-        maxDeposit: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('max_deposit', result),
         previewDeposit: (result: string): i128 =>
             VaultContract.spec.funcResToNative('preview_deposit', result),
-        deposit: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('deposit', result),
-        maxMint: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('max_mint', result),
-        previewMint: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('preview_mint', result),
-        mint: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('mint', result),
-        maxWithdraw: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('max_withdraw', result),
-        previewWithdraw: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('preview_withdraw', result),
-        withdraw: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('withdraw', result),
-        maxRedeem: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('max_redeem', result),
         previewRedeem: (result: string): i128 =>
             VaultContract.spec.funcResToNative('preview_redeem', result),
-        redeem: (result: string): i128 =>
-            VaultContract.spec.funcResToNative('redeem', result),
 
-        // Custom StrategyVault parser
+        // Strategy mutation parsers
+        strategyDeposit: (result: string): i128 =>
+            VaultContract.spec.funcResToNative('strategy_deposit', result),
+        strategyRedeem: (result: string): i128 =>
+            VaultContract.spec.funcResToNative('strategy_redeem', result),
         strategyWithdraw: () => {},
     };
 
@@ -278,7 +253,7 @@ export class VaultContract extends Contract {
     }
 
     // ============================================================
-    // FungibleVault Methods (ERC-4626, strategy auth required on mutations)
+    // Vault Views
     // ============================================================
 
     /**
@@ -290,7 +265,16 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Get total assets held by the vault
+     * Get the registered strategy (trading contract) address
+     * @returns XDR operation string
+     */
+    getStrategy(): string {
+        return this.call('get_strategy').toXDR('base64');
+    }
+
+    /**
+     * Get the vault's raw balance of the underlying asset (token-dec),
+     * before any pending-PnL mark
      * @returns XDR operation string
      */
     totalAssets(): string {
@@ -298,241 +282,105 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Convert assets to shares (rounded down)
-     * @param assets - Amount of assets to convert
+     * Preview the shares a deposit of `assets` would mint at the
+     * uPnL-marked share price (rounded down)
+     * @param assets - Assets to quote (token-dec)
+     * @param netPnl - Signed pending trader PnL marked against the vault (token-dec)
      * @returns XDR operation string
      */
-    convertToShares(assets: i128): string {
-        return this.call(
-            'convert_to_shares',
-            nativeToScVal(assets, { type: 'i128' }),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Convert shares to assets (rounded down)
-     * @param shares - Amount of shares to convert
-     * @returns XDR operation string
-     */
-    convertToAssets(shares: i128): string {
-        return this.call(
-            'convert_to_assets',
-            nativeToScVal(shares, { type: 'i128' }),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Get max assets that can be deposited for receiver
-     * @param receiver - Receiver address
-     * @returns XDR operation string
-     */
-    maxDeposit(receiver: Address | string): string {
-        const addr = typeof receiver === 'string' ? Address.fromString(receiver) : receiver;
-        return this.call('max_deposit', addr.toScVal()).toXDR('base64');
-    }
-
-    /**
-     * Preview shares to be received for depositing assets
-     * @param assets - Amount of assets
-     * @returns XDR operation string
-     */
-    previewDeposit(assets: i128): string {
+    previewDeposit(assets: i128, netPnl: i128): string {
         return this.call(
             'preview_deposit',
             nativeToScVal(assets, { type: 'i128' }),
+            nativeToScVal(netPnl, { type: 'i128' }),
         ).toXDR('base64');
     }
 
     /**
-     * Deposit `assets` and mint shares to `receiver`. Strategy auth required.
-     * @param assets - Amount of underlying tokens to deposit
-     * @param receiver - Address to receive the shares
-     * @param from - Address providing the assets
-     * @param operator - Address performing the operation (requires auth)
+     * Preview the assets a redemption of `shares` would pay at the
+     * uPnL-marked share price (rounded down)
+     * @param shares - Shares to quote (share decimals)
+     * @param netPnl - Signed pending trader PnL marked against the vault (token-dec)
      * @returns XDR operation string
      */
-    deposit(
-        assets: i128,
-        receiver: Address | string,
-        from: Address | string,
-        operator: Address | string
-    ): string {
-        const receiverAddr = typeof receiver === 'string' ? Address.fromString(receiver) : receiver;
-        const fromAddr = typeof from === 'string' ? Address.fromString(from) : from;
-        const operatorAddr = typeof operator === 'string' ? Address.fromString(operator) : operator;
-        return this.call(
-            'deposit',
-            nativeToScVal(assets, { type: 'i128' }),
-            receiverAddr.toScVal(),
-            fromAddr.toScVal(),
-            operatorAddr.toScVal(),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Get max shares that can be minted for receiver
-     * @param receiver - Receiver address
-     * @returns XDR operation string
-     */
-    maxMint(receiver: Address | string): string {
-        const addr = typeof receiver === 'string' ? Address.fromString(receiver) : receiver;
-        return this.call('max_mint', addr.toScVal()).toXDR('base64');
-    }
-
-    /**
-     * Preview assets required to mint shares
-     * @param shares - Amount of shares
-     * @returns XDR operation string
-     */
-    previewMint(shares: i128): string {
-        return this.call(
-            'preview_mint',
-            nativeToScVal(shares, { type: 'i128' }),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Mint `shares` to `receiver`. Strategy auth required.
-     * @param shares - Amount of shares to mint
-     * @param receiver - Address to receive the shares
-     * @param from - Address providing the assets
-     * @param operator - Address performing the operation (requires auth)
-     * @returns XDR operation string
-     */
-    mint(
-        shares: i128,
-        receiver: Address | string,
-        from: Address | string,
-        operator: Address | string
-    ): string {
-        const receiverAddr = typeof receiver === 'string' ? Address.fromString(receiver) : receiver;
-        const fromAddr = typeof from === 'string' ? Address.fromString(from) : from;
-        const operatorAddr = typeof operator === 'string' ? Address.fromString(operator) : operator;
-        return this.call(
-            'mint',
-            nativeToScVal(shares, { type: 'i128' }),
-            receiverAddr.toScVal(),
-            fromAddr.toScVal(),
-            operatorAddr.toScVal(),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Get max assets owner can withdraw
-     * @param owner - Owner address
-     * @returns XDR operation string
-     */
-    maxWithdraw(owner: Address | string): string {
-        const addr = typeof owner === 'string' ? Address.fromString(owner) : owner;
-        return this.call('max_withdraw', addr.toScVal()).toXDR('base64');
-    }
-
-    /**
-     * Preview shares to be burned for withdrawing assets
-     * @param assets - Amount of assets
-     * @returns XDR operation string
-     */
-    previewWithdraw(assets: i128): string {
-        return this.call(
-            'preview_withdraw',
-            nativeToScVal(assets, { type: 'i128' }),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Withdraw `assets` to `receiver`. Strategy auth required.
-     * @param assets - Amount of underlying tokens to withdraw
-     * @param receiver - Address to receive the assets
-     * @param owner - Address that owns the shares
-     * @param operator - Address performing the operation (requires auth)
-     * @returns XDR operation string
-     */
-    withdraw(
-        assets: i128,
-        receiver: Address | string,
-        owner: Address | string,
-        operator: Address | string
-    ): string {
-        const receiverAddr = typeof receiver === 'string' ? Address.fromString(receiver) : receiver;
-        const ownerAddr = typeof owner === 'string' ? Address.fromString(owner) : owner;
-        const operatorAddr = typeof operator === 'string' ? Address.fromString(operator) : operator;
-        return this.call(
-            'withdraw',
-            nativeToScVal(assets, { type: 'i128' }),
-            receiverAddr.toScVal(),
-            ownerAddr.toScVal(),
-            operatorAddr.toScVal(),
-        ).toXDR('base64');
-    }
-
-    /**
-     * Get max shares owner can redeem
-     * @param owner - Owner address
-     * @returns XDR operation string
-     */
-    maxRedeem(owner: Address | string): string {
-        const addr = typeof owner === 'string' ? Address.fromString(owner) : owner;
-        return this.call('max_redeem', addr.toScVal()).toXDR('base64');
-    }
-
-    /**
-     * Preview assets to be received for redeeming shares
-     * @param shares - Amount of shares
-     * @returns XDR operation string
-     */
-    previewRedeem(shares: i128): string {
+    previewRedeem(shares: i128, netPnl: i128): string {
         return this.call(
             'preview_redeem',
             nativeToScVal(shares, { type: 'i128' }),
+            nativeToScVal(netPnl, { type: 'i128' }),
+        ).toXDR('base64');
+    }
+
+    // ============================================================
+    // Strategy Methods (strategy auth required)
+    // ============================================================
+
+    /**
+     * Deposit `assets` and mint the uPnL-priced shares to `receiver`;
+     * returns the shares minted (share decimals, rounded down in the
+     * vault's favor). Strategy auth required.
+     * @param assets - Assets to deposit (token-dec)
+     * @param receiver - Address receiving the minted shares
+     * @param from - Address providing the assets
+     * @param netPnl - Signed pending trader PnL marked against the vault
+     *   (token-dec); positive is profit the vault still owes
+     * @returns XDR operation string
+     */
+    strategyDeposit(
+        assets: i128,
+        receiver: Address | string,
+        from: Address | string,
+        netPnl: i128
+    ): string {
+        const receiverAddr = typeof receiver === 'string' ? Address.fromString(receiver) : receiver;
+        const fromAddr = typeof from === 'string' ? Address.fromString(from) : from;
+        return this.call(
+            'strategy_deposit',
+            nativeToScVal(assets, { type: 'i128' }),
+            receiverAddr.toScVal(),
+            fromAddr.toScVal(),
+            nativeToScVal(netPnl, { type: 'i128' }),
         ).toXDR('base64');
     }
 
     /**
-     * Redeem `shares` from `owner`. Strategy auth required.
-     * @param shares - Amount of shares to redeem
-     * @param receiver - Address to receive the assets
-     * @param owner - Address that owns the shares
-     * @param operator - Address performing the operation (requires auth)
+     * Redeem `shares` from `owner` and pay the uPnL-priced assets to
+     * `receiver`; returns the assets paid (token-dec, rounded down in the
+     * vault's favor). Strategy auth required.
+     * @param shares - Shares to burn (share decimals)
+     * @param receiver - Address receiving the redeemed assets
+     * @param owner - Address whose shares are burned
+     * @param netPnl - Signed pending trader PnL marked against the vault
+     *   (token-dec); positive is profit the vault still owes
      * @returns XDR operation string
      */
-    redeem(
+    strategyRedeem(
         shares: i128,
         receiver: Address | string,
         owner: Address | string,
-        operator: Address | string
+        netPnl: i128
     ): string {
         const receiverAddr = typeof receiver === 'string' ? Address.fromString(receiver) : receiver;
         const ownerAddr = typeof owner === 'string' ? Address.fromString(owner) : owner;
-        const operatorAddr = typeof operator === 'string' ? Address.fromString(operator) : operator;
         return this.call(
-            'redeem',
+            'strategy_redeem',
             nativeToScVal(shares, { type: 'i128' }),
             receiverAddr.toScVal(),
             ownerAddr.toScVal(),
-            operatorAddr.toScVal(),
+            nativeToScVal(netPnl, { type: 'i128' }),
         ).toXDR('base64');
     }
-
-    // ============================================================
-    // Custom StrategyVault Methods
-    // ============================================================
 
     /**
      * Strategy (trading contract) withdraws tokens from the vault to pay
      * winning positions. Decreases `total_assets` and thus share price.
-     *
-     * Only the `strategy` address registered at construction can authorize
-     * this call.
-     *
-     * @param strategy - Caller, must match the immutable strategy address (requires auth)
-     * @param amount - Token amount to withdraw
+     * Strategy auth required.
+     * @param amount - Assets to withdraw to the strategy (token-dec)
      * @returns XDR operation string
      */
-    strategyWithdraw(strategy: Address | string, amount: i128): string {
-        const addr = typeof strategy === 'string' ? Address.fromString(strategy) : strategy;
+    strategyWithdraw(amount: i128): string {
         return this.call(
             'strategy_withdraw',
-            addr.toScVal(),
             nativeToScVal(amount, { type: 'i128' }),
         ).toXDR('base64');
     }

@@ -2,30 +2,25 @@ import { rpc } from '@stellar/stellar-sdk';
 import {
     ContractError,
     ContractErrorType,
-    ContractErrorSource,
     contractErrorFromCode,
 } from './errors.js';
 
 export { ContractError, ContractErrorType, TradingError, contractErrorFromCode } from './errors.js';
-export type { ContractErrorSource } from './errors.js';
 
 /**
  * Parse an RPC error response into a ContractError.
  *
- * @param contractType - Optional hint naming the contract that raised the
- * error. Only needed to disambiguate codes 770-772, which mean different
- * things on the trading contract (ADL errors) and the governance contract
- * (timelock errors); without a hint those three resolve to UnknownError.
+ * The per-contract error-code namespaces are disjoint, so every code
+ * resolves directly through `contractErrorFromCode`.
  */
 export function parseError(
     errorResponse:
         | rpc.Api.GetFailedTransactionResponse
         | rpc.Api.SendTransactionResponse
-        | rpc.Api.SimulateTransactionErrorResponse,
-    contractType?: ContractErrorSource
+        | rpc.Api.SimulateTransactionErrorResponse
 ): ContractError {
     const resolve = (code: number): ContractError | undefined => {
-        const resolved = contractErrorFromCode(code, contractType);
+        const resolved = contractErrorFromCode(code);
         return resolved.type === ContractErrorType.UnknownError ? undefined : resolved;
     };
 

@@ -60,7 +60,7 @@ describe('PriceVerifierContract', () => {
         expect(args).toEqual([]);
     });
 
-    it('parsers.verifyPrice decodes ask/bid/exponent/feed_id/price/publish_time', () => {
+    it('parsers.verifyPrice decodes ask/bid/exponent/feed_id/publish_time', () => {
         const entry = (key: string, val: xdr.ScVal) =>
             new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
         const priceData = xdr.ScVal.scvMap([
@@ -68,7 +68,6 @@ describe('PriceVerifierContract', () => {
             entry('bid', nativeToScVal(100n, { type: 'i128' })),
             entry('exponent', xdr.ScVal.scvI32(-8)),
             entry('feed_id', xdr.ScVal.scvU32(7)),
-            entry('price', nativeToScVal(150n, { type: 'i128' })),
             entry('publish_time', nativeToScVal(1234n, { type: 'u64' })),
         ]);
         const result = PriceVerifierContract.parsers.verifyPrice(priceData.toXDR('base64'));
@@ -77,7 +76,6 @@ describe('PriceVerifierContract', () => {
             bid: 100n,
             exponent: -8,
             feed_id: 7,
-            price: 150n,
             publish_time: 1234n,
         });
     });
@@ -94,6 +92,6 @@ describe('PriceVerifierContract', () => {
         );
         expect(structEntry).toBeDefined();
         const fields = structEntry!.udtStructV0().fields().map((f) => f.name().toString());
-        expect(fields).toEqual(['ask', 'bid', 'exponent', 'feed_id', 'price', 'publish_time']);
+        expect(fields).toEqual(['ask', 'bid', 'exponent', 'feed_id', 'publish_time']);
     });
 });

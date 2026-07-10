@@ -18,14 +18,14 @@ function simulationError(message: string) {
 }
 
 function txFailedResult() {
-    const opTrapped = xdr.OperationResult.opInner(
+    const operationTrapped = xdr.OperationResult.opInner(
         xdr.OperationResultTr.invokeHostFunction(
             xdr.InvokeHostFunctionResult.invokeHostFunctionTrapped(),
         ),
     );
     return new xdr.TransactionResult({
         feeCharged: new xdr.Int64(100),
-        result: xdr.TransactionResultResult.txFailed([opTrapped]),
+        result: xdr.TransactionResultResult.txFailed([operationTrapped]),
         ext: new xdr.TransactionResultExt(0),
     });
 }
@@ -39,21 +39,15 @@ function txBadSeqResult() {
 }
 
 describe('parseError: simulation responses', () => {
-    it('resolves an unambiguous trading code without a hint', () => {
-        const err = parseError(simulationError('HostError: Error(Contract, #720)'));
-        expect(err.type).toBe(TradingError.PositionNotFound);
+    it('resolves a trading code without any hint', () => {
+        const error = parseError(simulationError('HostError: Error(Contract, #720)'));
+        expect(error.type).toBe(TradingError.PositionNotFound);
     });
 
-    it('resolves an ambiguous code (770) only with a contract hint', () => {
-        const noHint = parseError(simulationError('Error(Contract, #770)'));
-        expect(noHint.type).toBe(ContractErrorType.UnknownError);
-
-        const trading = parseError(simulationError('Error(Contract, #770)'), 'trading');
-        expect(trading.type).toBe(TradingError.AdlNotTriggered);
-        expect(trading.message).toMatch(/ADL/);
-
-        const governance = parseError(simulationError('Error(Contract, #770)'), 'governance');
-        expect(governance.type).toBe(ContractErrorType.GovNotQueued);
+    it('resolves 770 unhinted now that governance vacated the ADL range', () => {
+        const error = parseError(simulationError('Error(Contract, #770)'));
+        expect(error.type).toBe(TradingError.AdlNotTriggered);
+        expect(error.message).toMatch(/ADL/);
     });
 
     it('resolves merged-enum codes and falls back to UnknownError', () => {
@@ -68,40 +62,42 @@ describe('parseError: simulation responses', () => {
 
 describe('parseError: send-transaction responses', () => {
     it('maps a trapped host function through errorResult', () => {
-        const err = parseError({ status: 'ERROR', errorResult: txFailedResult() } as never);
-        expect(err.type).toBe(ContractErrorType.InvokeHostFunctionTrapped);
+        // InvokeHostFunctionResultCode: trapped = -2 = InvokeHostFunctionTrapped
+        const error = parseError({ status: 'ERROR', errorResult: txFailedResult() } as never);
+        expect(error.type).toBe(ContractErrorType.InvokeHostFunctionTrapped);
     });
 
     it('maps a tx-level error code through the switch-value offset', () => {
-        const err = parseError({ status: 'ERROR', errorResult: txBadSeqResult() } as never);
-        expect(err.type).toBe(ContractErrorType.txBadSeq);
+        // TransactionResultCode txBadSeq = -5; parser offset -7 lands on -12 = txBadSeq
+        const error = parseError({ status: 'ERROR', errorResult: txBadSeqResult() } as never);
+        expect(error.type).toBe(ContractErrorType.txBadSeq);
     });
 });
 
 describe('parseError: get-transaction responses', () => {
     it('maps a trapped host function through resultXdr', () => {
-        const err = parseError({ resultXdr: txFailedResult() } as never);
-        expect(err.type).toBe(ContractErrorType.InvokeHostFunctionTrapped);
+        const error = parseError({ resultXdr: txFailedResult() } as never);
+        expect(error.type).toBe(ContractErrorType.InvokeHostFunctionTrapped);
     });
 
     it('maps a tx-level error code through resultXdr', () => {
-        const err = parseError({ resultXdr: txBadSeqResult() } as never);
-        expect(err.type).toBe(ContractErrorType.txBadSeq);
+        const error = parseError({ resultXdr: txBadSeqResult() } as never);
+        expect(error.type).toBe(ContractErrorType.txBadSeq);
     });
 });
 
 describe('parseResult', () => {
-    const retval = nativeToScVal(42n, { type: 'i128' });
-    const parser = (b64: string) => xdr.ScVal.fromXDR(b64, 'base64');
+    const returnValue = nativeToScVal(42n, { type: 'i128' });
+    const parser = (base64Xdr: string) => xdr.ScVal.fromXDR(base64Xdr, 'base64');
 
     it('reads a simulation result', () => {
-        const out = parseResult({ result: { retval } } as never, parser);
-        expect(out).toBeDefined();
+        const parsed = parseResult({ result: { retval: returnValue } } as never, parser);
+        expect(parsed).toBeDefined();
     });
 
     it('reads a transaction returnValue', () => {
-        const out = parseResult({ returnValue: retval } as never, parser);
-        expect(out).toBeDefined();
+        const parsed = parseResult({ returnValue } as never, parser);
+        expect(parsed).toBeDefined();
     });
 
     it('returns undefined when neither is present', () => {

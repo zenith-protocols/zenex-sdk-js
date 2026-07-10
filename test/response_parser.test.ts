@@ -1,9 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { rpc } from '@stellar/stellar-sdk';
 import { parseError } from '../src/response_parser.js';
-import { ContractErrorType, TradingError } from '../src/errors.js';
+import { ContractError, ContractErrorType, TradingError } from '../src/errors.js';
 
-function simError(code: number): rpc.Api.SimulateTransactionErrorResponse {
+// =============================================================================
+// parseError code resolution against the disjoint v2 namespaces:
+// trading 700-772, price-verifier 780-791, strategy-vault 800-801,
+// governance 810-812, treasury 900. No contract-type hint exists anymore.
+// =============================================================================
+
+function simulationError(code: number): rpc.Api.SimulateTransactionErrorResponse {
     return {
         id: '1',
         latestLedger: 1,
@@ -12,59 +18,110 @@ function simError(code: number): rpc.Api.SimulateTransactionErrorResponse {
     } as unknown as rpc.Api.SimulateTransactionErrorResponse;
 }
 
-describe('parseError code resolution (v2)', () => {
-    it('resolves a non-colliding trading code without a hint (704 -> MarketFrozen)', () => {
-        const err = parseError(simError(704));
-        expect(err.type).toBe(TradingError.MarketFrozen);
-        expect(err.type).toBe(704);
-        expect(err.message).not.toContain('Unknown');
+describe('parseError: collision-hint machinery is gone', () => {
+    it('parseError takes a single parameter (no contractType hint)', () => {
+        expect(parseError.length).toBe(1);
     });
 
-    it('resolves new price-verifier payload parser codes (784 -> PVTruncatedData)', () => {
-        const err = parseError(simError(784));
-        expect(err.type).toBe(ContractErrorType.PVTruncatedData);
-        expect(err.type).toBe(784);
+    it('a stray second argument is inert (same resolution with and without it)', () => {
+        const parseWithExtraArgument = parseError as unknown as (
+            response: unknown,
+            legacyHint?: string
+        ) => ContractError;
+        expect(parseWithExtraArgument(simulationError(770), 'governance').type).toBe(
+            TradingError.AdlNotTriggered
+        );
+        expect(parseWithExtraArgument(simulationError(810), 'trading').type).toBe(
+            ContractErrorType.GovNotQueued
+        );
+    });
+});
+
+describe('parseError: new trading codes resolve unhinted', () => {
+    it('733 -> TooManyOrders', () => {
+        expect(parseError(simulationError(733)).type).toBe(TradingError.TooManyOrders);
     });
 
-    it('covers the full 784-789 PV payload parser range', () => {
-        expect(ContractErrorType.PVTruncatedData).toBe(784);
-        expect(ContractErrorType.PVInvalidPayloadLength).toBe(785);
-        expect(ContractErrorType.PVInvalidPayloadMagic).toBe(786);
-        expect(ContractErrorType.PVInvalidChannel).toBe(787);
-        expect(ContractErrorType.PVInvalidProperty).toBe(788);
-        expect(ContractErrorType.PVInvalidMarketSession).toBe(789);
+    it('734 -> UnknownKind', () => {
+        expect(parseError(simulationError(734)).type).toBe(TradingError.UnknownKind);
     });
 
-    it('770 without a contract hint stays ambiguous (UnknownError)', () => {
-        const err = parseError(simError(770));
-        expect(err.type).toBe(ContractErrorType.UnknownError);
+    it('742 -> TriggerNotMet', () => {
+        expect(parseError(simulationError(742)).type).toBe(TradingError.TriggerNotMet);
     });
 
-    it('770 with a trading hint resolves to AdlNotTriggered (ADL message, not the governance one)', () => {
-        const err = parseError(simError(770), 'trading');
-        expect(err.type).toBe(TradingError.AdlNotTriggered);
-        expect(err.message).toMatch(/ADL/);
-        expect(err.message).not.toMatch(/[Qq]ueued/);
+    it('752 -> MinOutNotMet (the min_out slippage gate, not the old pending-PnL meaning)', () => {
+        const error = parseError(simulationError(752));
+        expect(error.type).toBe(TradingError.MinOutNotMet);
+        expect(error.message).toMatch(/min_out/);
     });
 
-    it('770 with a governance hint resolves to GovNotQueued (queue message, not the ADL one)', () => {
-        const err = parseError(simError(770), 'governance');
-        expect(err.type).toBe(ContractErrorType.GovNotQueued);
-        expect(err.message).toMatch(/[Qq]ueued/);
-        expect(err.message).not.toMatch(/ADL/);
+    it('754 -> PendingPnlExceeded', () => {
+        const error = parseError(simulationError(754));
+        expect(error.type).toBe(TradingError.PendingPnlExceeded);
+        expect(error.message).toMatch(/PnL/i);
     });
 
-    it('a trading hint does not block non-trading codes surfaced by a trading tx (780 -> PVInvalidData)', () => {
-        const err = parseError(simError(780), 'trading');
-        expect(err.type).toBe(ContractErrorType.PVInvalidData);
+    it('760 -> NothingToClaim', () => {
+        expect(parseError(simulationError(760)).type).toBe(TradingError.NothingToClaim);
     });
 
-    it('790/791 keep their strategy-vault meaning (collision resolved in favor of the merged enum)', () => {
-        expect(parseError(simError(790)).type).toBe(ContractErrorType.StrategyInvalidAmount);
-        expect(parseError(simError(791)).type).toBe(ContractErrorType.SharesLocked);
+    it('770-772 resolve unhinted to the trading ADL errors', () => {
+        const adlNotTriggered = parseError(simulationError(770));
+        expect(adlNotTriggered.type).toBe(TradingError.AdlNotTriggered);
+        expect(adlNotTriggered.message).toMatch(/ADL/);
+        expect(adlNotTriggered.message).not.toMatch(/queued/i);
+
+        expect(parseError(simulationError(771)).type).toBe(TradingError.AdlOvershoot);
+        expect(parseError(simulationError(772)).type).toBe(TradingError.AdlNotEligible);
+    });
+});
+
+describe('parseError: periphery namespaces resolve unhinted', () => {
+    it('governance 810-812', () => {
+        const notQueued = parseError(simulationError(810));
+        expect(notQueued.type).toBe(ContractErrorType.GovNotQueued);
+        expect(notQueued.message).toMatch(/queued/i);
+        expect(notQueued.message).not.toMatch(/ADL/);
+
+        expect(parseError(simulationError(811)).type).toBe(ContractErrorType.GovNotUnlocked);
+        expect(parseError(simulationError(812)).type).toBe(ContractErrorType.GovInvalidDelay);
     });
 
-    it('unknown codes still fall back to UnknownError', () => {
-        expect(parseError(simError(999)).type).toBe(ContractErrorType.UnknownError);
+    it('strategy-vault 800-801', () => {
+        expect(parseError(simulationError(800)).type).toBe(ContractErrorType.StrategyInvalidAmount);
+        expect(parseError(simulationError(801)).type).toBe(ContractErrorType.StrategyPnlExceedsAssets);
+    });
+
+    it('price-verifier 790-791 (feed-anchor pair, no longer strategy-vault codes)', () => {
+        expect(parseError(simulationError(790)).type).toBe(ContractErrorType.PVFeedNotFound);
+        expect(parseError(simulationError(791)).type).toBe(ContractErrorType.PVWrongExponent);
+    });
+
+    it('price-verifier payload parser range 784-789', () => {
+        expect(parseError(simulationError(784)).type).toBe(ContractErrorType.PVTruncatedData);
+        expect(parseError(simulationError(785)).type).toBe(ContractErrorType.PVInvalidPayloadLength);
+        expect(parseError(simulationError(786)).type).toBe(ContractErrorType.PVInvalidPayloadMagic);
+        expect(parseError(simulationError(787)).type).toBe(ContractErrorType.PVInvalidChannel);
+        expect(parseError(simulationError(788)).type).toBe(ContractErrorType.PVInvalidProperty);
+        expect(parseError(simulationError(789)).type).toBe(ContractErrorType.PVInvalidMarketSession);
+    });
+
+    it('treasury 900', () => {
+        expect(parseError(simulationError(900)).type).toBe(ContractErrorType.TreasuryInvalidRate);
+    });
+});
+
+describe('parseError: fallbacks', () => {
+    it('a non-colliding trading code resolves with its message (704 -> MarketFrozen)', () => {
+        const error = parseError(simulationError(704));
+        expect(error.type).toBe(TradingError.MarketFrozen);
+        expect(error.type).toBe(704);
+        expect(error.message).not.toContain('Unknown');
+    });
+
+    it('unknown codes fall back to UnknownError', () => {
+        expect(parseError(simulationError(999)).type).toBe(ContractErrorType.UnknownError);
+        expect(parseError(simulationError(707)).type).toBe(ContractErrorType.UnknownError);
     });
 });

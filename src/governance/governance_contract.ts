@@ -64,7 +64,7 @@ export class GovernanceContract extends Contract {
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // Ownable
         getOwner: (result: string): string | undefined =>
-            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')) ?? undefined,
         transferOwnership: () => {},
         acceptOwnership: () => {},
         renounceOwnership: () => {},

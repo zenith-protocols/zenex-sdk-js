@@ -7,12 +7,11 @@ import {
     tokenBalanceLedgerKey,
 } from '../ledger-keys.js';
 
-// Vault state data (ERC-4626 style)
+// Vault state data
 //
-// Deposit/redeem locking is no longer tracked on the vault: `lock_time` moved
-// to trading `Config.depositLock`/`Config.redeemLock` and per-order unlock
-// timestamps live on trading `VaultOrder.unlocksAt` (see trading_types.ts).
-// The vault contract itself has no `LockTime` or `LastDepositTime` storage.
+// The vault stores no lock state: the redeem cooldown lives on trading
+// (`Config.redeemLock`, measured from `VaultOrder.createdAt`), and LP sizing
+// rules (`min_deposit`, fees) live on trading `Config` as well.
 export interface VaultStateData {
     /** Underlying asset token address */
     asset: string;
@@ -22,6 +21,10 @@ export interface VaultStateData {
     totalAssets: number;
     /** Decimals offset for virtual shares (inflation attack protection) */
     decimalsOffset: number;
+    /** Share token decimals (asset decimals + decimalsOffset) */
+    shareDecimals: number;
+    /** Underlying asset token decimals */
+    assetDecimals: number;
 }
 
 /**
@@ -52,10 +55,35 @@ function extractBalanceAmount(val: xdr.ScVal): bigint {
 }
 
 /**
+ * Extract the share token decimals from the OpenZeppelin `Meta` storage value
+ * (a `Metadata { decimals, name, symbol }` map).
+ * @param val - The ScVal of the `Meta` instance storage entry
+ * @returns The decimals field, or undefined if absent
+ */
+function extractMetaDecimals(val: xdr.ScVal): number | undefined {
+    if (val.switch() !== xdr.ScValType.scvMap()) return undefined;
+    const map = val.map();
+    if (!map) return undefined;
+    for (const entry of map) {
+        const key = entry.key();
+        if (key.switch() === xdr.ScValType.scvSymbol() && key.sym().toString() === 'decimals') {
+            return Number(scValToBigInt(entry.val()));
+        }
+    }
+    return undefined;
+}
+
+/**
  * VaultState - Loader class for vault state data
  *
- * ERC-4626 compliant vault state with computed properties for share price calculations.
- * Reads directly from contract instance storage.
+ * Strategy-vault state with computed properties for share price estimates.
+ * Reads directly from contract instance storage (OpenZeppelin stellar-tokens
+ * keys: `Meta`, `TotalSupply`, `AssetAddress`, `VirtualDecimalsOffset`).
+ *
+ * Note: the on-chain share price marks the backing with the trading market's
+ * pending trader PnL (`net_pnl`); the raw ratios here ignore that mark. For
+ * accurate quotes, simulate `preview_deposit(assets, net_pnl)` /
+ * `preview_redeem(shares, net_pnl)`.
  */
 export class VaultState implements VaultStateData {
     /** Underlying asset token address */
@@ -66,6 +94,10 @@ export class VaultState implements VaultStateData {
     totalAssets: number;
     /** Decimals offset for virtual shares (inflation attack protection) */
     decimalsOffset: number;
+    /** Share token decimals (asset decimals + decimalsOffset) */
+    shareDecimals: number;
+    /** Underlying asset token decimals */
+    assetDecimals: number;
     /** Network configuration (stored for instance methods) */
     private network: Network;
     /** Vault contract address (stored for instance methods) */
@@ -76,6 +108,8 @@ export class VaultState implements VaultStateData {
         this.totalShares = data.totalShares;
         this.totalAssets = data.totalAssets;
         this.decimalsOffset = data.decimalsOffset;
+        this.shareDecimals = data.shareDecimals;
+        this.assetDecimals = data.assetDecimals;
         this.network = network;
         this.contractId = contractId;
     }
@@ -111,6 +145,7 @@ export class VaultState implements VaultStateData {
         let asset: string | undefined;
         let totalShares: bigint = 0n;
         let decimalsOffset: number = 0;
+        let shareDecimals: number | undefined;
 
         storage.forEach((storageEntry) => {
             const entryKey = decodeEntryKey(storageEntry.key());
@@ -127,6 +162,10 @@ export class VaultState implements VaultStateData {
                 case 'VirtualDecimalsOffset':
                     decimalsOffset = Number(scValToBigInt(storageEntry.val()));
                     break;
+
+                case 'Meta':
+                    shareDecimals = extractMetaDecimals(storageEntry.val());
+                    break;
             }
         });
 
@@ -134,6 +173,14 @@ export class VaultState implements VaultStateData {
         if (!asset) {
             throw new Error('Vault asset address not found in instance storage');
         }
+        if (shareDecimals === undefined) {
+            throw new Error('Vault share metadata not found in instance storage');
+        }
+
+        // The constructor sets the share token's metadata decimals to
+        // asset.decimals() + decimals_offset, so the asset decimals derive
+        // from the same instance read.
+        const assetDecimals = shareDecimals - decimalsOffset;
 
         // Read the vault's token balance from the underlying token contract
         // This is how total_assets() is calculated in the vault contract
@@ -150,16 +197,14 @@ export class VaultState implements VaultStateData {
             // Balance entry doesn't exist, vault has 0 assets
         }
 
-        // Shares have extra precision: 7 (asset decimals) + decimalsOffset
-        // Assets are always descaled by 7 (standard Stellar token decimals)
-        const shareDecimals = 7 + decimalsOffset;
-
         return new VaultState(
             {
                 asset,
                 totalShares: toFloat(totalShares, shareDecimals),
-                totalAssets: toFloat(totalAssets, 7),
+                totalAssets: toFloat(totalAssets, assetDecimals),
                 decimalsOffset,
+                shareDecimals,
+                assetDecimals,
             },
             network,
             contractId
@@ -170,8 +215,9 @@ export class VaultState implements VaultStateData {
 
     /**
      * Calculate the current share price (assets per share)
-     * This returns the simple ratio for display purposes.
-     * The contract's preview functions handle virtual offset internally.
+     * This returns the simple ratio for display purposes; it ignores the
+     * pending-PnL mark and the virtual offset the contract's preview
+     * functions apply.
      * @returns Share price as a number
      */
     sharePrice(): number {
@@ -181,7 +227,7 @@ export class VaultState implements VaultStateData {
 
     /**
      * Convert asset amount to shares (simple ratio for estimates)
-     * For accurate values, use the contract's preview_deposit simulation
+     * For accurate values, simulate the contract's preview_deposit(assets, net_pnl)
      * @param assets - Amount of assets
      * @returns Equivalent shares
      */
@@ -192,7 +238,7 @@ export class VaultState implements VaultStateData {
 
     /**
      * Convert shares to asset amount (simple ratio for estimates)
-     * For accurate values, use the contract's preview_redeem simulation
+     * For accurate values, simulate the contract's preview_redeem(shares, net_pnl)
      * @param shares - Amount of shares
      * @returns Equivalent assets
      */

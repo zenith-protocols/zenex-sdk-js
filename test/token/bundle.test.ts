@@ -27,8 +27,9 @@ describe('createOrderCall / createVaultOrderCall no-drift', () => {
     const trading = new TradingContract(TRADING);
 
     it('createOrderCall args are byte-identical to the direct createOrder op args', () => {
-        const params: [string, boolean, OrderKind, bigint, bigint, bigint, boolean, bigint, number] =
-            [USER, true, OrderKind.Increase, 100n, 10n, 5n, false, 200n, 12345];
+        // (user, isLong, kind, notional, collateral, triggerPrice, priceBound, expiration)
+        const params: [string, boolean, OrderKind, bigint, bigint, bigint, bigint, number] =
+            [USER, true, OrderKind.MarketIncrease, 100n, 10n, 5n, 200n, 12345];
 
         const direct = decodeInvoke(trading.createOrder(...params));
         const call = trading.createOrderCall(...params);
@@ -40,10 +41,14 @@ describe('createOrderCall / createVaultOrderCall no-drift', () => {
         call.args.forEach((arg, i) => {
             expect(arg.toXDR('base64')).toBe(direct.rawArgs[i].toXDR('base64'));
         });
+        // kind crosses the ABI as a plain u32 discriminant.
+        expect(direct.rawArgs[2].switch().name).toBe('scvU32');
+        expect(direct.args[2]).toBe(0);
     });
 
     it('createVaultOrderCall args are byte-identical to the direct createVaultOrder op args', () => {
-        const params: [string, VaultOrderKind, bigint, bigint] = [USER, VaultOrderKind.Deposit, 500n, 0n];
+        // (user, kind, amount, minOut)
+        const params: [string, VaultOrderKind, bigint, bigint] = [USER, VaultOrderKind.Deposit, 500n, 480n];
 
         const direct = decodeInvoke(trading.createVaultOrder(...params));
         const call = trading.createVaultOrderCall(...params);
@@ -54,6 +59,8 @@ describe('createOrderCall / createVaultOrderCall no-drift', () => {
         call.args.forEach((arg, i) => {
             expect(arg.toXDR('base64')).toBe(direct.rawArgs[i].toXDR('base64'));
         });
+        expect(direct.rawArgs[1].switch().name).toBe('scvU32');
+        expect(direct.args[3]).toBe(480n);
     });
 });
 
@@ -75,7 +82,10 @@ describe('approveCall (SEP-41)', () => {
 describe('approveAndOrder', () => {
     const router = new TradingRouterContract(ROUTER);
     const trading = new TradingContract(TRADING);
-    const order: Call = trading.createOrderCall(USER, true, OrderKind.Increase, 100n, 10n, 0n, false, 200n, 12345);
+    // v2 escrows the collateral and execFee inside create_order itself; the
+    // approve leg here only pre-authorizes the settlement transfer_from that
+    // covers a losing fill's trader-owed shortfall beyond the escrow.
+    const order: Call = trading.createOrderCall(USER, true, OrderKind.MarketIncrease, 100n, 10n, 0n, 200n, 12345);
 
     /** Decode a multicall op into its nested call list (native). */
     function decodeCalls(op: string): Record<string, unknown>[] {

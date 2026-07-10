@@ -2,7 +2,7 @@ import { Address, xdr } from '@stellar/stellar-sdk';
 
 /**
  * Create a storage key for an enum variant with an Address.
- * E.g., StorageKey::Balance(Address) or StrategyStorageKey::LastDepositTime(Address)
+ * E.g., StorageKey::Balance(Address) or DataKey::ClaimableFunding(Address)
  * @param variant - The enum variant name
  * @param address - The address value
  * @returns ScVal representing the enum key with address
@@ -84,8 +84,7 @@ export function persistentLedgerKey(contractId: string, keyVec: xdr.ScVal[]): xd
 
 /**
  * Create a ledger key for temporary contract storage.
- * Used for data with a fixed TTL that auto-expires (e.g. the trading
- * contract's keeper `Order` entries, sized to their `expiration` ledger).
+ * Used for data with a fixed TTL that auto-expires.
  * @param contractId - The contract address.
  * @param keyVec - Array of ScVal items that make up the storage key.
  * @returns The ledger key for the temporary storage entry.
@@ -223,11 +222,9 @@ export function tradingClaimableFundingLedgerKey(contractId: string, user: strin
     return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('ClaimableFunding'), toAddressScVal(user)]);
 }
 
-// --- temporary (auto-GC around expiry) ---
-
-/** `DataKey::Order(user, id)` -> Order: keeper order; TTL sized to expiry. */
+/** `DataKey::Order(user, id)` -> Order: pending keeper order (persistent user tier, 100/120-day TTL). */
 export function tradingOrderLedgerKey(contractId: string, user: string | Address, id: number): xdr.LedgerKey {
-    return temporaryLedgerKey(contractId, [
+    return persistentLedgerKey(contractId, [
         xdr.ScVal.scvSymbol('Order'),
         toAddressScVal(user),
         xdr.ScVal.scvU32(id),

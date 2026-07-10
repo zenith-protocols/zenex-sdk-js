@@ -3,9 +3,10 @@ import { xdr, scValToNative, StrKey } from '@stellar/stellar-sdk';
 import { VaultContract, VaultConstructorArgs } from '../../src/vault/vault_contract.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
-const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
+const DEPLOYER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
 const RECEIVER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
-const OPERATOR = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 4));
+const DEPOSITOR = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 4));
+const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7));
 const ASSET = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 5));
 const STRATEGY = StrKey.encodeContract(Buffer.alloc(32, 6));
 
@@ -18,45 +19,51 @@ function decodeInvoke(op: string) {
     };
 }
 
-describe('VaultContract', () => {
+describe('VaultContract strategy surface', () => {
     const contract = new VaultContract(CONTRACT_ID);
 
-    it('deposit includes the operator arg', () => {
-        const op = contract.deposit(1000n, RECEIVER, USER, OPERATOR);
+    it('strategyDeposit builds strategy_deposit(assets, receiver, from, net_pnl)', () => {
+        const op = contract.strategyDeposit(1000n, RECEIVER, DEPOSITOR, -25n);
         const { fn, args } = decodeInvoke(op);
-        expect(fn).toBe('deposit');
-        expect(args).toEqual([1000n, RECEIVER, USER, OPERATOR]);
+        expect(fn).toBe('strategy_deposit');
+        expect(args).toEqual([1000n, RECEIVER, DEPOSITOR, -25n]);
     });
 
-    it('mint includes the operator arg', () => {
-        const op = contract.mint(1000n, RECEIVER, USER, OPERATOR);
+    it('strategyRedeem builds strategy_redeem(shares, receiver, owner, net_pnl)', () => {
+        const op = contract.strategyRedeem(400n, RECEIVER, OWNER, 75n);
         const { fn, args } = decodeInvoke(op);
-        expect(fn).toBe('mint');
-        expect(args).toEqual([1000n, RECEIVER, USER, OPERATOR]);
+        expect(fn).toBe('strategy_redeem');
+        expect(args).toEqual([400n, RECEIVER, OWNER, 75n]);
     });
 
-    it('withdraw includes the operator arg', () => {
-        const op = contract.withdraw(400n, RECEIVER, USER, OPERATOR);
-        const { fn, args } = decodeInvoke(op);
-        expect(fn).toBe('withdraw');
-        expect(args).toEqual([400n, RECEIVER, USER, OPERATOR]);
-    });
-
-    it('redeem includes the operator arg', () => {
-        const op = contract.redeem(400n, RECEIVER, USER, OPERATOR);
-        const { fn, args } = decodeInvoke(op);
-        expect(fn).toBe('redeem');
-        expect(args).toEqual([400n, RECEIVER, USER, OPERATOR]);
-    });
-
-    it('strategyWithdraw calls fn strategy_withdraw with strategy + amount', () => {
-        const op = contract.strategyWithdraw(STRATEGY, 2000n);
+    it('strategyWithdraw builds strategy_withdraw with the amount alone', () => {
+        const op = contract.strategyWithdraw(2000n);
         const { fn, args } = decodeInvoke(op);
         expect(fn).toBe('strategy_withdraw');
-        expect(args).toEqual([STRATEGY, 2000n]);
+        expect(args).toEqual([2000n]);
     });
 
-    it('static deploy builds __constructor with 5 args, no lock_time or min_deposit', () => {
+    it('previewDeposit builds preview_deposit(assets, net_pnl)', () => {
+        const op = contract.previewDeposit(500n, 40n);
+        const { fn, args } = decodeInvoke(op);
+        expect(fn).toBe('preview_deposit');
+        expect(args).toEqual([500n, 40n]);
+    });
+
+    it('previewRedeem builds preview_redeem(shares, net_pnl)', () => {
+        const op = contract.previewRedeem(300n, -10n);
+        const { fn, args } = decodeInvoke(op);
+        expect(fn).toBe('preview_redeem');
+        expect(args).toEqual([300n, -10n]);
+    });
+
+    it('getStrategy builds get_strategy with no args', () => {
+        const { fn, args } = decodeInvoke(contract.getStrategy());
+        expect(fn).toBe('get_strategy');
+        expect(args).toEqual([]);
+    });
+
+    it('static deploy builds __constructor with 5 args', () => {
         const args: VaultConstructorArgs = {
             name: 'Vault Shares',
             symbol: 'vTKN',
@@ -64,7 +71,7 @@ describe('VaultContract', () => {
             decimals_offset: 0,
             strategy: STRATEGY,
         };
-        const op = VaultContract.deploy(USER, Buffer.alloc(32, 9), args, undefined, 'hex');
+        const op = VaultContract.deploy(DEPLOYER, Buffer.alloc(32, 9), args, undefined, 'hex');
         const decoded = xdr.Operation.fromXDR(op, 'base64');
         const createContract = decoded.body().invokeHostFunctionOp().hostFunction().createContractV2();
         const ctorArgs = createContract.constructorArgs();
@@ -73,8 +80,27 @@ describe('VaultContract', () => {
         expect(native).toEqual(['Vault Shares', 'vTKN', ASSET, 0, STRATEGY]);
     });
 
-    it('has no lockTime or availableShares methods (removed; locking now lives on trading Config)', () => {
-        expect((contract as unknown as Record<string, unknown>).lockTime).toBeUndefined();
-        expect((contract as unknown as Record<string, unknown>).availableShares).toBeUndefined();
+    it('has none of the removed ERC-4626 methods; LP flows route through trading vault orders', () => {
+        const surface = contract as unknown as Record<string, unknown>;
+        const removedMethods = [
+            'deposit', 'mint', 'withdraw', 'redeem',
+            'maxDeposit', 'maxMint', 'maxWithdraw', 'maxRedeem',
+            'previewMint', 'previewWithdraw',
+            'convertToShares', 'convertToAssets',
+            'lockTime', 'availableShares',
+        ];
+        for (const method of removedMethods) {
+            expect(surface[method], `method ${method} should be removed`).toBeUndefined();
+        }
+        const removedParsers = [
+            'deposit', 'mint', 'withdraw', 'redeem',
+            'maxDeposit', 'maxMint', 'maxWithdraw', 'maxRedeem',
+            'previewMint', 'previewWithdraw',
+            'convertToShares', 'convertToAssets',
+        ];
+        const parsers = VaultContract.parsers as unknown as Record<string, unknown>;
+        for (const parser of removedParsers) {
+            expect(parsers[parser], `parser ${parser} should be removed`).toBeUndefined();
+        }
     });
 });

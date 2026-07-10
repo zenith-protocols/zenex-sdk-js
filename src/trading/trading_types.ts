@@ -6,8 +6,9 @@ import { i128, u32, u64 } from '../index.js';
 //
 // Mirrors `zenex-contracts/trading/src/trading/{order,vault_order,position,
 // config,market_data,adl,status}.rs`. Field order in the ScVal maps below
-// matches `#[contracttype]`'s alphabetical snake_case serialization; unit
-// enums without discriminants encode as `scvVec([scvSymbol('<Variant>')])`.
+// matches `#[contracttype]`'s alphabetical snake_case serialization. The
+// `OrderKind` and `VaultOrderKind` enums are `#[repr(u32)]` in the contract
+// and cross the ABI as plain `u32` discriminants.
 // =============================================================================
 
 /**
@@ -28,63 +29,79 @@ export enum Status {
 }
 
 /**
- * Whether an order grows or shrinks the position; sets the direction of an
- * order's `notional`/`collateral` magnitudes. Encodes as a unit-variant vec.
+ * The intent of a keeper order: increase or decrease, and how it becomes
+ * eligible (immediately, or on a price crossing). Crosses the ABI as its
+ * `u32` discriminant.
  */
 export enum OrderKind {
-    /** Size up; collateral added. */
-    Increase = 'Increase',
-    /** Size down and/or collateral withdrawn. */
-    Decrease = 'Decrease',
+    /** Grow the position now; `triggerPrice` is unused. */
+    MarketIncrease = 0,
+    /** Grow the position when the price crosses `triggerPrice` favorably. */
+    LimitIncrease = 1,
+    /** Grow the position when the price crosses `triggerPrice` adversely. */
+    StopIncrease = 2,
+    /** Shrink the position now; `triggerPrice` is unused. */
+    MarketDecrease = 3,
+    /** Take profit: shrink the position when the price crosses `triggerPrice` favorably. */
+    LimitDecrease = 4,
+    /** Stop loss: shrink the position when the price crosses `triggerPrice` adversely. */
+    StopDecrease = 5,
 }
 
 /**
- * Vault liquidity action requested by the user. Encodes as a unit-variant vec.
+ * Vault liquidity action requested by the user. Crosses the ABI as its
+ * `u32` discriminant.
  */
 export enum VaultOrderKind {
     /** Escrow `amount` assets at creation; mint shares at fill. */
-    Deposit = 'Deposit',
+    Deposit = 0,
     /** Escrow `amount` shares at creation; burn and pay assets at fill. */
-    Redeem = 'Redeem',
+    Redeem = 1,
 }
 
-/** i128::MAX; the conventional full-close sentinel for a Decrease order's notional. */
+/** i128::MAX; the conventional full-close sentinel for a decrease order's notional. */
 export const FULL_CLOSE: i128 = 2n ** 127n - 1n;
 
-/** A keeper-executed order (temporary storage, keyed `(user, id)`). */
+/**
+ * A keeper-executed order (persistent user-tier storage, keyed `(user, id)`).
+ *
+ * `kind` sets both the size direction and the eligibility rule;
+ * `notional`/`collateral` are non-negative magnitudes. The `collateral` (for
+ * an increase) and the `execFee` are escrowed in the contract at creation.
+ */
 export interface Order {
     /** Side this order targets. */
     isLong: boolean;
-    /** Increase or Decrease; sets the delta directions. */
+    /** OrderKind discriminant (0 = MarketIncrease .. 5 = StopDecrease). */
     kind: OrderKind;
     /** Size change magnitude (>= 0), token-dec. */
     notional: i128;
     /** Margin change magnitude (>= 0), token-dec. */
     collateral: i128;
-    /** Eligibility on crossing; 0 = none/market (price_scalar). */
+    /** Crossing level for a trigger kind (price_scalar); unread for a market kind. */
     triggerPrice: i128;
-    /** Eligible when price >= triggerPrice (true) or <= (false); ignored when triggerPrice == 0. */
-    triggerAbove: boolean;
     /** Fill slippage limit (price_scalar); 0 = unbounded. */
     priceBound: i128;
+    /** Keeper execution fee escrowed at creation, token-dec. */
+    execFee: i128;
     /** Submission timestamp; per-fill anti-replay anchor. */
     createdAt: u64;
-    /** Ledger sequence; eligible while e.ledger().sequence() <= expiration. */
+    /** Ledger sequence; eligible while the current sequence <= expiration. */
     expiration: u32;
 }
 
 /** A pending vault deposit or redeem (persistent storage, keyed `(user, id)`). */
 export interface VaultOrder {
-    /** Deposit or redeem. */
+    /** VaultOrderKind discriminant (0 = Deposit, 1 = Redeem). */
     kind: VaultOrderKind;
-    /** Escrowed assets (deposit) or shares (redeem), token-dec. */
+    /** Escrowed assets (deposit, token-dec) or shares (redeem, share decimals). */
     amount: i128;
-    /** Fill bound: max tolerated adverse share mispricing, net pending PnL / vault (SCALAR_18); 0 = unbounded. */
-    maxAdversePnl: i128;
-    /** Creation timestamp; per-fill anti-replay anchor. */
+    /** Minimum received at fill net of the vault fee: shares (deposit) or assets (redeem); 0 = unset. */
+    minOut: i128;
+    /** Keeper execution fee escrowed at creation (settlement token), token-dec. */
+    execFee: i128;
+    /** Creation timestamp; fills need a strictly later publish_time, redeems also the redeem_lock cooldown. */
     createdAt: u64;
-    /** Cooldown deadline stamped at creation from the kind's lock. */
-    unlocksAt: u64;
 }
 
 /** A netted trader position, one per `(user, is_long)` (the storage key). */
@@ -103,8 +120,10 @@ export interface Position {
     lockedNotional: i128;
     /** Lock deadline ts; lockedNotional counts while now < unlocksAt. */
     unlocksAt: u64;
-    /** Last fill timestamp; force-close price anti-replay anchor. */
-    updatedAt: u64;
+    /** publish_time of the last fill's price; force-close anti-replay floor. */
+    pricedAt: u64;
+    /** Pending decrease order ids on the side (max 16); cleared when the position closes. */
+    decreaseOrders: u32[];
 }
 
 /** A long/short pair of `i128` values, used for per-side open interest, posted collateral, and base size. */
@@ -135,6 +154,8 @@ export interface MarketData {
     fundingPool: i128;
     /** Total funding owed to traders, token-dec. */
     fundingOwed: i128;
+    /** publish_time of the newest consumed price (monotonic). */
+    lastPriceTime: u64;
 }
 
 /** ADL state (instance storage singleton): the per-side enable flags driving the open-stop. */
@@ -162,13 +183,15 @@ export interface TradingConfig {
     minOrderNotional: i128;
     /** Minimum |collateral| per order, token-dec (dust floor). */
     minOrderCollateral: i128;
+    /** Flat keeper execution fee charged per order at creation, token-dec. */
+    execFee: i128;
     /** Dominant-side trade fee (SCALAR_18). */
     feeDom: i128;
     /** Non-dominant trade fee (SCALAR_18). */
     feeNonDom: i128;
-    /** Impact fee = notional / impactDivisor (SCALAR_18); worsening leg only. */
-    impactDivisor: i128;
-    /** Opens blocked above this; also the borrow-reserve denominator (SCALAR_18; util = open interest / vault). */
+    /** Impact fee = notional * min(notional / impactScalar, MAX_IMPACT_RATE); every fill (token-dec). */
+    impactScalar: i128;
+    /** Opens blocked above this; also each side's borrow-reserve denominator (SCALAR_18; util = open interest / vault). */
     maxUtilOpen: i128;
     /** Withdrawals blocked above this; retains min vault liquidity, >= maxUtilOpen (SCALAR_18). */
     maxUtilWithdraw: i128;
@@ -204,20 +227,16 @@ export interface TradingConfig {
     adlClearTarget: i128;
     /** Realized-profit haircut threshold: while side pending PnL exceeds this fraction of half the vault, close payouts scale by allowance / side PnL, < 1 (SCALAR_18). */
     maxPnlTrader: i128;
-    /** Redeem cooldown from a vault order's createdAt, seconds. */
+    /** Redeem gate: redeems blocked while a side's pending PnL exceeds this fraction of half the post-redeem balance; in (0, maxPnlTrader] (SCALAR_18). */
+    maxPnlWithdraw: i128;
+    /** Redeem cooldown from a vault order's createdAt, seconds; 0 = fill as soon as a post-creation price exists. */
     redeemLock: u64;
-    /** Deposit cooldown from a vault order's createdAt, seconds; waived while pending losses sit at or under instantDepositPnl. */
-    depositLock: u64;
-    /** Share underpricing (net pending trader loss / vault) at or under which a deposit fills without the cooldown; <= maxPnlDeposit (SCALAR_18). */
-    instantDepositPnl: i128;
-    /** Vault fill fee rate on moved assets (SCALAR_18). */
-    vaultFee: i128;
+    /** Deposit fill fee rate on moved assets (SCALAR_18). */
+    depositFee: i128;
+    /** Redeem fill fee rate on moved assets (SCALAR_18). */
+    redeemFee: i128;
     /** Minimum assets per vault order fill, token-dec. */
     minDeposit: i128;
-    /** Deposit fills blocked while share underpricing (net pending trader loss / vault) exceeds this, < 1 (SCALAR_18). */
-    maxPnlDeposit: i128;
-    /** Redeem fills blocked while share overpricing (net pending trader profit / post-redeem vault) exceeds this, < 1 (SCALAR_18). */
-    maxPnlWithdraw: i128;
     /** Vault balance ceiling enforced on deposit fills, token-dec. */
     maxVaultBalance: i128;
 }
@@ -225,16 +244,6 @@ export interface TradingConfig {
 // =============================================================================
 // Converters: TS -> ScVal
 // =============================================================================
-
-/** Encode a unit-variant `OrderKind` as `scvVec([scvSymbol(kind)])`. */
-export function orderKindToScVal(kind: OrderKind): xdr.ScVal {
-    return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(kind)]);
-}
-
-/** Encode a unit-variant `VaultOrderKind` as `scvVec([scvSymbol(kind)])`. */
-export function vaultOrderKindToScVal(kind: VaultOrderKind): xdr.ScVal {
-    return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(kind)]);
-}
 
 /** Encode a `TradingConfig` as an alphabetically key-ordered `ScMap`. */
 export function tradingConfigToScVal(config: TradingConfig): xdr.ScVal {
@@ -246,22 +255,21 @@ export function tradingConfigToScVal(config: TradingConfig): xdr.ScVal {
         entry('adl_clear_target', i128Val(config.adlClearTarget)),
         entry('adl_max_pnl', i128Val(config.adlMaxPnl)),
         entry('borrow_rate', i128Val(config.borrowRate)),
-        entry('deposit_lock', u64Val(config.depositLock)),
+        entry('deposit_fee', i128Val(config.depositFee)),
+        entry('exec_fee', i128Val(config.execFee)),
         entry('fee_dom', i128Val(config.feeDom)),
         entry('fee_non_dom', i128Val(config.feeNonDom)),
         entry('funding_decrease', i128Val(config.fundingDecrease)),
         entry('funding_increase', i128Val(config.fundingIncrease)),
         entry('funding_max', i128Val(config.fundingMax)),
         entry('funding_min', i128Val(config.fundingMin)),
-        entry('impact_divisor', i128Val(config.impactDivisor)),
+        entry('impact_scalar', i128Val(config.impactScalar)),
         entry('increased_borrow_rate', i128Val(config.increasedBorrowRate)),
         entry('init_margin', i128Val(config.initMargin)),
-        entry('instant_deposit_pnl', i128Val(config.instantDepositPnl)),
         entry('keeper_rate', i128Val(config.keeperRate)),
         entry('liq_fee', i128Val(config.liqFee)),
         entry('maintenance_margin', i128Val(config.maintenanceMargin)),
         entry('max_open_interest', i128Val(config.maxOpenInterest)),
-        entry('max_pnl_deposit', i128Val(config.maxPnlDeposit)),
         entry('max_pnl_trader', i128Val(config.maxPnlTrader)),
         entry('max_pnl_withdraw', i128Val(config.maxPnlWithdraw)),
         entry('max_position_notional', i128Val(config.maxPositionNotional)),
@@ -273,11 +281,11 @@ export function tradingConfigToScVal(config: TradingConfig): xdr.ScVal {
         entry('min_order_notional', i128Val(config.minOrderNotional)),
         entry('min_position_notional', i128Val(config.minPositionNotional)),
         entry('notional_lock', u64Val(config.notionalLock)),
+        entry('redeem_fee', i128Val(config.redeemFee)),
         entry('redeem_lock', u64Val(config.redeemLock)),
         entry('target_util', i128Val(config.targetUtil)),
         entry('threshold_decrease_funding', i128Val(config.thresholdDecreaseFunding)),
         entry('threshold_stable_funding', i128Val(config.thresholdStableFunding)),
-        entry('vault_fee', i128Val(config.vaultFee)),
     ]);
 }
 
@@ -290,38 +298,21 @@ function big(v: unknown): bigint {
     return typeof v === 'bigint' ? v : BigInt(v as number);
 }
 
-/**
- * Normalize a decoded unit-variant enum to its variant name.
- *
- * `scValToNative` decodes a nested unit-variant enum field to a one-element
- * array (e.g. `['Increase']`); a bare string is also accepted so a future
- * stellar-sdk change to string decoding does not break parsing.
- */
-function unitVariant(v: unknown): string {
-    if (Array.isArray(v) && v.length === 1 && typeof v[0] === 'string') {
-        return v[0];
-    }
-    if (typeof v === 'string') {
-        return v;
-    }
-    throw new Error(`Expected a unit-variant enum value, got: ${JSON.stringify(v)}`);
-}
-
-/** Map a decoded `SidePair` (field names are already `long`/`short`, no case change). */
-function toSidePair(v: Record<string, unknown>): SidePair {
-    return { long: big(v.long), short: big(v.short) };
+/** Parse a `scValToNative`-decoded `SidePair` (field names are already `long`/`short`, no case change). */
+export function parseSidePair(raw: Record<string, unknown>): SidePair {
+    return { long: big(raw.long), short: big(raw.short) };
 }
 
 /** Parse a `scValToNative`-decoded `Order` into its camelCase interface. */
 export function parseOrder(raw: Record<string, unknown>): Order {
     return {
         isLong: raw.is_long as boolean,
-        kind: unitVariant(raw.kind) as OrderKind,
+        kind: Number(raw.kind) as OrderKind,
         notional: big(raw.notional),
         collateral: big(raw.collateral),
         triggerPrice: big(raw.trigger_price),
-        triggerAbove: raw.trigger_above as boolean,
         priceBound: big(raw.price_bound),
+        execFee: big(raw.exec_fee),
         createdAt: big(raw.created_at),
         expiration: Number(raw.expiration),
     };
@@ -330,11 +321,11 @@ export function parseOrder(raw: Record<string, unknown>): Order {
 /** Parse a `scValToNative`-decoded `VaultOrder` into its camelCase interface. */
 export function parseVaultOrder(raw: Record<string, unknown>): VaultOrder {
     return {
-        kind: unitVariant(raw.kind) as VaultOrderKind,
+        kind: Number(raw.kind) as VaultOrderKind,
         amount: big(raw.amount),
-        maxAdversePnl: big(raw.max_adverse_pnl),
+        minOut: big(raw.min_out),
+        execFee: big(raw.exec_fee),
         createdAt: big(raw.created_at),
-        unlocksAt: big(raw.unlocks_at),
     };
 }
 
@@ -348,23 +339,25 @@ export function parsePosition(raw: Record<string, unknown>): Position {
         borrowingIdx: big(raw.borrowing_idx),
         lockedNotional: big(raw.locked_notional),
         unlocksAt: big(raw.unlocks_at),
-        updatedAt: big(raw.updated_at),
+        pricedAt: big(raw.priced_at),
+        decreaseOrders: (raw.decrease_orders as unknown[]).map((id) => Number(id)),
     };
 }
 
 /** Parse a `scValToNative`-decoded `MarketData` into its camelCase interface. */
 export function parseMarketData(raw: Record<string, unknown>): MarketData {
     return {
-        notional: toSidePair(raw.notional as Record<string, unknown>),
-        collateral: toSidePair(raw.collateral as Record<string, unknown>),
-        tokens: toSidePair(raw.tokens as Record<string, unknown>),
-        fundingIdx: toSidePair(raw.funding_idx as Record<string, unknown>),
-        borrowingIdx: toSidePair(raw.borrowing_idx as Record<string, unknown>),
+        notional: parseSidePair(raw.notional as Record<string, unknown>),
+        collateral: parseSidePair(raw.collateral as Record<string, unknown>),
+        tokens: parseSidePair(raw.tokens as Record<string, unknown>),
+        fundingIdx: parseSidePair(raw.funding_idx as Record<string, unknown>),
+        borrowingIdx: parseSidePair(raw.borrowing_idx as Record<string, unknown>),
         fundingRate: big(raw.funding_rate),
         fundingUpdate: big(raw.funding_update),
         borrowingUpdate: big(raw.borrowing_update),
         fundingPool: big(raw.funding_pool),
         fundingOwed: big(raw.funding_owed),
+        lastPriceTime: big(raw.last_price_time),
     };
 }
 
@@ -385,9 +378,10 @@ export function parseTradingConfig(raw: Record<string, unknown>): TradingConfig 
         maxOpenInterest: big(raw.max_open_interest),
         minOrderNotional: big(raw.min_order_notional),
         minOrderCollateral: big(raw.min_order_collateral),
+        execFee: big(raw.exec_fee),
         feeDom: big(raw.fee_dom),
         feeNonDom: big(raw.fee_non_dom),
-        impactDivisor: big(raw.impact_divisor),
+        impactScalar: big(raw.impact_scalar),
         maxUtilOpen: big(raw.max_util_open),
         maxUtilWithdraw: big(raw.max_util_withdraw),
         initMargin: big(raw.init_margin),
@@ -406,13 +400,11 @@ export function parseTradingConfig(raw: Record<string, unknown>): TradingConfig 
         adlMaxPnl: big(raw.adl_max_pnl),
         adlClearTarget: big(raw.adl_clear_target),
         maxPnlTrader: big(raw.max_pnl_trader),
-        redeemLock: big(raw.redeem_lock),
-        depositLock: big(raw.deposit_lock),
-        instantDepositPnl: big(raw.instant_deposit_pnl),
-        vaultFee: big(raw.vault_fee),
-        minDeposit: big(raw.min_deposit),
-        maxPnlDeposit: big(raw.max_pnl_deposit),
         maxPnlWithdraw: big(raw.max_pnl_withdraw),
+        redeemLock: big(raw.redeem_lock),
+        depositFee: big(raw.deposit_fee),
+        redeemFee: big(raw.redeem_fee),
+        minDeposit: big(raw.min_deposit),
         maxVaultBalance: big(raw.max_vault_balance),
     };
 }

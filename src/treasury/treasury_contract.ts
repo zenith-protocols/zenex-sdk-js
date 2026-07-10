@@ -35,7 +35,7 @@ export class TreasuryContract extends Contract {
         withdraw: () => {},
         // Ownable methods
         getOwner: (result: string): string | undefined =>
-            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')) ?? undefined,
         transferOwnership: () => {},
         acceptOwnership: () => {},
         renounceOwnership: () => {},

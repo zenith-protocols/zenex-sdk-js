@@ -71,21 +71,12 @@ export enum ContractErrorType {
     VaultMaxDecimalsOffsetExceeded = 409,
     VaultMathOverflow = 410,
 
-    // Trading Errors (v1, 700-760): removed. The v2 trading contract's error
-    // range (700-772) overlaps with GovernanceError (770-772) below, so trading
-    // errors can no longer be safely merged into this flat cross-contract enum.
-    // Decode trading errors with the dedicated `TradingError` enum instead (it
-    // mirrors trading/src/errors.rs exactly; see below).
+    // Trading Errors (700-772): kept out of this flat enum. Decode trading
+    // errors with the dedicated `TradingError` enum instead (it mirrors
+    // trading/src/errors.rs exactly; see below). `contractErrorFromCode` falls
+    // through to it automatically.
 
-    // Governance Errors (770-772)
-    GovNotQueued = 770,
-    GovNotUnlocked = 771,
-    GovInvalidDelay = 772,
-
-    // Price Verifier Errors (780-791). 790 (FeedNotFound) and 791 (WrongExponent)
-    // are intentionally absent: they collide with StrategyInvalidAmount (790) and
-    // SharesLocked (791) in the Strategy Vault section below, and this flat enum
-    // cannot hold both meanings for one number.
+    // Price Verifier Errors (780-791)
     PVInvalidData = 780,
     PVInvalidPrice = 781,
     PVPriceStale = 782,
@@ -96,12 +87,17 @@ export enum ContractErrorType {
     PVInvalidChannel = 787,
     PVInvalidProperty = 788,
     PVInvalidMarketSession = 789,
+    PVFeedNotFound = 790,
+    PVWrongExponent = 791,
 
-    // Strategy Vault Errors (790-793)
-    StrategyInvalidAmount = 790,
-    SharesLocked = 791,
-    UnauthorizedStrategy = 792,
-    BelowMinDeposit = 793,
+    // Strategy Vault Errors (800-801)
+    StrategyInvalidAmount = 800,
+    StrategyPnlExceedsAssets = 801,
+
+    // Governance Errors (810-812)
+    GovNotQueued = 810,
+    GovNotUnlocked = 811,
+    GovInvalidDelay = 812,
 
     // Treasury Errors (900)
     TreasuryInvalidRate = 900,
@@ -123,16 +119,16 @@ const errorMessages: Record<number, string> = {
     [-15]: 'Source account does not exist',
     [-14]: 'Insufficient balance to cover fees and operations',
     [-13]: 'Transaction authentication failed',
-    [-12]: 'Bad sequence number — account may have pending transactions',
+    [-12]: 'Bad sequence number; account may have pending transactions',
     [-11]: 'Transaction has no operations',
     [-10]: 'Transaction submitted after its validity window',
     [-9]: 'Transaction submitted before its validity window',
 
     // Host Function
     [-5]: 'Insufficient refundable fee for host function execution',
-    [-4]: 'Contract entry has been archived — restore it first',
+    [-4]: 'Contract entry has been archived; restore it first',
     [-3]: 'Resource limit exceeded (CPU, memory, or storage)',
-    [-2]: 'Host function trapped — contract panicked',
+    [-2]: 'Host function trapped; contract panicked',
     [-1]: 'Malformed host function invocation',
 
     // Common
@@ -180,14 +176,9 @@ const errorMessages: Record<number, string> = {
     [409]: 'Decimals offset exceeds maximum (10)',
     [410]: 'Vault math overflow',
 
-    // Trading: v1 messages removed. The v2 trading messages live in
-    // `tradingErrorMessages` below and resolve through the dedicated
-    // `TradingError` enum (see the note in ContractErrorType above).
-
-    // Governance
-    [770]: 'Queued call not found or has expired',
-    [771]: 'Timelock delay has not yet passed',
-    [772]: 'Invalid delay value — must be between 1 second and 60 days',
+    // Trading: the v2 trading messages live in `tradingErrorMessages` below
+    // and resolve through the dedicated `TradingError` enum (see the note in
+    // ContractErrorType above).
 
     // Price Verifier
     [780]: 'Price update signature or format is invalid',
@@ -200,15 +191,20 @@ const errorMessages: Record<number, string> = {
     [787]: 'Price update payload channel is invalid',
     [788]: 'Price update payload contains an unknown property',
     [789]: 'Price update payload market session is invalid',
+    [790]: 'Price update does not carry the requested feed id',
+    [791]: 'Price update exponent does not match the market anchor',
 
     // Strategy Vault
-    [790]: 'Invalid amount for strategy operation',
-    [791]: 'Shares are still locked — wait for lock period to expire',
-    [792]: 'Caller is not the authorized strategy contract',
-    [793]: 'Deposit/mint asset amount is below the vault min_deposit',
+    [800]: 'Invalid amount for strategy operation',
+    [801]: 'Strategy withdrawal exceeds the vault assets',
+
+    // Governance
+    [810]: 'Queued call not found or has expired',
+    [811]: 'Timelock delay has not yet passed',
+    [812]: 'Invalid delay value (must be between 1 second and 60 days)',
 
     // Treasury
-    [900]: 'Fee rate out of range — must be between 0 and 50%',
+    [900]: 'Fee rate out of range (must be between 0 and 50%)',
 };
 
 export class ContractError extends Error {
@@ -220,42 +216,19 @@ export class ContractError extends Error {
     }
 }
 
-/** Contract-type hint for resolving codes that are ambiguous across contracts. */
-export type ContractErrorSource = 'trading' | 'governance';
-
 /**
  * Resolve a raw on-chain error code to a ContractError.
  *
- * Codes 770-772 exist in BOTH the v2 trading contract (AdlNotTriggered,
- * AdlOvershoot, AdlNotEligible) and the governance contract (NotQueued,
- * NotUnlocked, InvalidDelay). For those three codes the name is
- * context-dependent, so they only resolve when the caller passes a
- * `contractType` hint; without one they return UnknownError rather than
- * guessing. Every other code is unambiguous: it resolves from
- * ContractErrorType first, then falls back to the standalone TradingError
- * enum (trading codes 700-760 are not in the merged enum).
+ * The per-contract code namespaces are disjoint (trading 700-772,
+ * price-verifier 780-791, strategy-vault 800-801, governance 810-812,
+ * treasury 900), so every code resolves without a hint: from the merged
+ * `ContractErrorType` first, then the standalone `TradingError` enum.
  */
-export function contractErrorFromCode(
-    code: number,
-    contractType?: ContractErrorSource
-): ContractError {
-    const inMerged = code in ContractErrorType;
-    const inTrading = code in TradingError;
-
-    if (inMerged && inTrading) {
-        // Ambiguous (770-772): only a hint can disambiguate.
-        if (contractType === 'trading') {
-            return new ContractError(code as TradingError, tradingErrorMessages[code]);
-        }
-        if (contractType === 'governance') {
-            return new ContractError(code as ContractErrorType);
-        }
-        return new ContractError(ContractErrorType.UnknownError);
-    }
-    if (inMerged) {
+export function contractErrorFromCode(code: number): ContractError {
+    if (code in ContractErrorType) {
         return new ContractError(code as ContractErrorType);
     }
-    if (inTrading) {
+    if (code in TradingError) {
         return new ContractError(code as TradingError, tradingErrorMessages[code]);
     }
     return new ContractError(ContractErrorType.UnknownError);
@@ -264,11 +237,9 @@ export function contractErrorFromCode(
 /**
  * TradingError - exact v2 `trading/src/errors.rs` `TradingError` enum.
  *
- * Kept as its own enum rather than merged into `ContractErrorType`: v2 trading
- * error codes (700-772) overlap with `GovernanceError` (770-772), so a single
- * flat cross-contract code space can no longer represent both unambiguously.
- * Decode a trading-contract error against this enum specifically (the caller
- * already knows which contract raised the error).
+ * Kept as its own enum so the trading domain (the largest error surface)
+ * mirrors `errors.rs` one-to-one; `contractErrorFromCode` resolves trading
+ * codes through it automatically.
  */
 export enum TradingError {
     // --- config / construction ---
@@ -317,8 +288,12 @@ export enum TradingError {
     /** Order `expiration` is behind the current ledger sequence. */
     OrderExpired = 731,
     /** Delta pair is not an allowed combination, a moved value is below its dust
-     * floor, or the expiration lies beyond the storage horizon. */
+     * floor, or a trigger kind carries a non-positive `trigger_price`. */
     InvalidOrder = 732,
+    /** A side already holds `MAX_ORDERS_PER_SIDE` pending decrease orders. */
+    TooManyOrders = 733,
+    /** An order or vault-order `kind` discriminant is not a known variant. */
+    UnknownKind = 734,
     /** Verified price predates the position or order (anti-replay). */
     StalePrice = 740,
     /** Fill price is worse than the order's `price_bound`. */
@@ -329,12 +304,15 @@ export enum TradingError {
     // --- vault orders ---
     /** No vault order exists for `(user, id)`. */
     VaultOrderNotFound = 750,
-    /** Redeem order filled before its `redeem_lock` cooldown elapsed. */
+    /** Vault order filled before its kind's lock cooldown elapsed. */
     VaultOrderLocked = 751,
-    /** Vault order filled while pending trader PnL exceeds the gate factor. */
-    PendingPnlExceeded = 752,
+    /** Vault order fill returned less than the order's `min_out`. */
+    MinOutNotMet = 752,
     /** Deposit fill would push the vault balance above `max_vault_balance`. */
     VaultBalanceExceeded = 753,
+    /** Redeem fill while a side's pending PnL exceeds `max_pnl_withdraw` of
+     * half the post-redeem vault balance. */
+    PendingPnlExceeded = 754,
 
     // --- funding ---
     /** Claim attempted with no claimable funding balance. */
@@ -369,14 +347,17 @@ export const tradingErrorMessages: Record<number, string> = {
     [722]: 'Liquidation attempted while equity is above maintenance margin',
     [730]: 'No keeper order exists for (user, id)',
     [731]: 'Order expiration is behind the current ledger sequence',
-    [732]: 'Invalid order (delta pair, dust floor, or expiration horizon)',
+    [732]: 'Invalid order (no-op shape, dust floor, or missing trigger price)',
+    [733]: 'Side already holds the maximum pending decrease orders',
+    [734]: 'Order kind discriminant is not a known variant',
     [740]: 'Verified price predates the position or order (anti-replay)',
     [741]: 'Fill price is worse than the order price_bound',
     [742]: 'Order trigger_price has not been crossed at the verified price',
     [750]: 'No vault order exists for (user, id)',
-    [751]: 'Redeem order filled before its redeem_lock cooldown elapsed',
-    [752]: 'Vault order filled while pending trader PnL exceeds the gate factor',
+    [751]: 'Vault order filled before its lock cooldown elapsed',
+    [752]: 'Vault order fill returned less than the order min_out',
     [753]: 'Deposit fill would push the vault balance above max_vault_balance',
+    [754]: 'Redeem fill would leave pending PnL above the max_pnl_withdraw gate',
     [760]: 'Claim attempted with no claimable funding balance',
     [770]: 'ADL execution attempted while the PnL ratio is at or below the trigger',
     [771]: 'ADL close left the pending PnL under the clear target',

@@ -13,20 +13,16 @@ import { Position, MarketData, TradingConfig, parsePosition } from './trading_ty
 // `notional / tokens`; PnL is `tokens * price - notional` for a long, inverse
 // for a short.
 //
-// Truncation semantics: the contract's fixed-point helpers use true floor
-// (toward -inf) and true ceil (toward +inf). The SDK's `mulCeil` matches true
-// ceil for every sign; `mulFloor` (BigInt `/`, which truncates toward zero)
-// matches true floor only for non-negative products. Every `mulFloor` below
-// operates on non-negative products (token/price magnitudes), so plain
-// truncation reproduces the Rust exactly; the one exception is
-// `liquidationPrice`, whose signed intermediate is clamped to zero.
+// Rounding semantics: the contract's fixed-point helpers use true floor
+// (toward -inf) and true ceil (toward +inf). The SDK's `mulFloor` and
+// `mulCeil` implement the same rounding for every sign, so each formula
+// below reproduces the Rust exactly.
 //
 // The `priceScalar` argument on the PnL functions is the fixed-point scalar
 // baked into `Position.tokens` by the contract's `math::to_tokens`
 // (`tokens = notional * SCALAR_18 / price`), so for the v2 contract callers pass
 // `SCALAR_18`. The oracle's own price scalar (`10^-exponent`) cancels between
-// `tokens` and `price` and is not this argument. See the Task 3 report for the
-// naming note.
+// `tokens` and `price` and is not this argument.
 // =============================================================================
 
 /**
@@ -72,16 +68,21 @@ export function pendingBorrowing(position: Position, marketData: MarketData, isL
 }
 
 /**
- * Position equity, token-dec: `collateral + pnl - pendingFunding -
+ * Position equity, token-dec: `collateral + pnl - max(0, pendingFunding) -
  * pendingBorrowing`.
  *
  * The contract's `Position::equity` is `collateral + pnl` because
  * `calculate_fees` has already debited the accruals into `collateral`; a stored
  * position read by the SDK has not been settled, so this subtracts the pending
- * accruals via their index deltas. `pendingFunding` is signed, so earned funding
- * (a negative accrual) raises equity, reflecting the total economic value to the
- * trader. On-chain, only paid funding debits the margin (earned funding routes
- * to a separate claimable balance).
+ * accruals via their index deltas. Matching `Fees::debit`, only paid funding
+ * (a positive accrual) debits the margin; earned funding routes to the user's
+ * separate claimable balance and never shores up the position's equity.
+ *
+ * The `marketData` indices themselves are as of the market's last on-chain
+ * accrual (`fundingUpdate` / `borrowingUpdate`); this does not extrapolate the
+ * current rates over the seconds since, whereas the contract advances both
+ * indices to `now` before any equity check. Between keeper touches the result
+ * slightly overstates equity.
  */
 export function positionEquity(
     position: Position,
@@ -90,10 +91,12 @@ export function positionEquity(
     priceScalar: bigint,
     isLong: boolean,
 ): bigint {
+    const funding = pendingFunding(position, marketData, isLong);
+    const paidFunding = funding > 0n ? funding : 0n;
     return (
         position.collateral +
         positionPnl(position, price, priceScalar, isLong) -
-        pendingFunding(position, marketData, isLong) -
+        paidFunding -
         pendingBorrowing(position, marketData, isLong)
     );
 }
@@ -124,6 +127,12 @@ export function unlockedNotional(position: Position, nowSecs: bigint): bigint {
  * second-order for the threshold estimate. Funding is taken at
  * `max(0, pending)` since earned funding does not shore up the position's
  * liquidation equity (`Fees::debit` only debits paid funding).
+ *
+ * The `marketData` indices are as of the market's last on-chain accrual; the
+ * estimate does not extrapolate the current rates over the seconds since,
+ * whereas the contract advances both indices to `now` before a liquidation
+ * check. Between keeper touches the estimate sits slightly further from the
+ * mark than the true threshold.
  */
 export function liquidationPrice(
     position: Position,
@@ -211,7 +220,7 @@ export class PositionView {
         return pendingBorrowing(this.position, marketData, this.isLong);
     }
 
-    /** Equity: collateral + PnL less pending funding/borrowing. */
+    /** Equity: collateral + PnL less pending paid funding and borrowing. */
     equity(marketData: MarketData, price: bigint, priceScalar: bigint = SCALAR_18): bigint {
         return positionEquity(this.position, marketData, price, priceScalar, this.isLong);
     }

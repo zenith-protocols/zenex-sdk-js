@@ -42,9 +42,8 @@ export {
     OrderKind,
     VaultOrderKind,
     FULL_CLOSE,
-    orderKindToScVal,
-    vaultOrderKindToScVal,
     tradingConfigToScVal,
+    parseSidePair,
     parseOrder,
     parseVaultOrder,
     parsePosition,
@@ -64,6 +63,7 @@ export {
     sidePnl,
     netPnl,
     utilization,
+    impactFee,
     skewSplitFees,
     // Config validation
     validateTradingConfig,
@@ -98,16 +98,19 @@ export type {
     TradingCancelOrderEvent,
     TradingCreateVaultOrderEvent,
     TradingCancelVaultOrderEvent,
-    TradingExecuteVaultOrderEvent,
+    TradingDepositFillEvent,
+    TradingRedeemFillEvent,
     TradingClaimFundingEvent,
     TradingAdlUpdateEvent,
+    TradingFundingAccrualEvent,
+    TradingBorrowingAccrualEvent,
     TradingStatusUpdateEvent,
     TradingConfigUpdateEvent,
     TradingTerminalPriceUpdateEvent,
     TradingIncreaseFillEvent,
     TradingDecreaseFillEvent,
+    TradingCloseFillEvent,
     TradingLiquidationEvent,
-    TradingPositionUpdateEvent,
     TradingEvent,
 } from './trading/index.js';
 
@@ -252,7 +255,6 @@ export {
     parseError,
     parseResult,
 } from './response_parser.js';
-export type { ContractErrorSource } from './response_parser.js';
 export { tradingErrorMessages } from './errors.js';
 
 // =============================================================================

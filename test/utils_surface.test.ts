@@ -7,7 +7,7 @@ import {
     contractInstanceLedgerKey,
 } from '../src/ledger-keys.js';
 import { Asset, assetToScVal, assetFromScVal, getAssetKey, getAssetName, assetsEqual, assetFromKey } from '../src/asset.js';
-import { toFixed, toFloat, divFloor, divCeil, SCALAR_7 } from '../src/math.js';
+import { toFixed, toFloat, divFloor, divCeil, SCALAR_18 } from '../src/math.js';
 import { simulateAndParse } from '../src/simulate.js';
 import { ContractError } from '../src/errors.js';
 import { SmartAccountContract, signerToScVal, contextRuleTypeToScVal, sessionConfigToScVal } from '../src/smart-account/smart_account_contract.js';
@@ -80,9 +80,9 @@ describe('asset helpers', () => {
 });
 
 describe('math extras', () => {
-    it('toFixed / toFloat round-trip at 7 decimals', () => {
-        expect(toFixed(1.5)).toBe(15000000n);
-        expect(toFloat(SCALAR_7)).toBe(1);
+    it('toFixed / toFloat round-trip with explicit decimals', () => {
+        expect(toFixed(1.5, 7)).toBe(15000000n);
+        expect(toFloat(SCALAR_18, 18)).toBe(1);
         expect(toFixed(2, 2)).toBe(200n);
         expect(toFloat(200n, 2)).toBe(2);
     });

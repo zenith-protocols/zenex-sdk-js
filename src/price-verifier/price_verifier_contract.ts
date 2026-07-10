@@ -1,10 +1,10 @@
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { i32, u32, u64, i128 } from '../index.js';
 
-// Verified price data returned by the oracle
+// Verified price data returned by the oracle. Carries the bid/ask pair in
+// the feed's native precision; the trading contract fills the adverse side.
 export interface PriceVerifierPriceData {
     feed_id: u32;
-    price: i128;
     exponent: i32;
     bid: i128;
     ask: i128;
@@ -29,7 +29,7 @@ export interface PriceVerifierConstructorArgs {
  */
 export class PriceVerifierContract extends Contract {
     static spec: contract.Spec = new contract.Spec([
-        "AAAAAQAAALtWZXJpZmllZCBwcmljZSBkYXRhIHJldHVybmVkIGJ5IHRoZSBvcmFjbGUuCgpUaGUgdHJhZGluZyBjb250cmFjdCB1c2VzIHRoaXMgdG8gZGV0ZXJtaW5lIGVudHJ5L2V4aXQgcHJpY2VzIGFuZCBjb21wdXRlIFBuTC4KYHByaWNlX3NjYWxhcmAgaXMgZGVyaXZlZCBhdCB0aGUgY2FsbCBzaXRlIGFzIGAxMF4oLWV4cG9uZW50KWAuAAAAAAAAAAAJUHJpY2VEYXRhAAAAAAAABgAAAGlCZXN0IGFzayBmcm9tIFB5dGggTGF6ZXIgKHNhbWUgcHJlY2lzaW9uIGFzIGBwcmljZWApOyByZXF1aXJlZC4gVHJhZGluZyBmaWxscwp0aGUgYWR2ZXJzZSBvcGVuIHNpZGUgaGVyZS4AAAAAAAADYXNrAAAAAAsAAABqQmVzdCBiaWQgZnJvbSBQeXRoIExhemVyIChzYW1lIHByZWNpc2lvbiBhcyBgcHJpY2VgKTsgcmVxdWlyZWQuIFRyYWRpbmcgZmlsbHMKdGhlIGFkdmVyc2UgY2xvc2Ugc2lkZSBoZXJlLgAAAAAAA2JpZAAAAAALAAAATE5lZ2F0aXZlIGV4cG9uZW50IGRlZmluaW5nIHByaWNlIHByZWNpc2lvbiAoZS5nLiAtOCBtZWFucyA4IGRlY2ltYWwgcGxhY2VzKS4AAAAIZXhwb25lbnQAAAAFAAAAQlB5dGggZmVlZCBpZGVudGlmaWVyICh1MzIgbWFwcGluZyB0byBhbiBhc3NldCBwYWlyLCBlLmcuIEJUQy9VU0QpLgAAAAAAB2ZlZWRfaWQAAAAABAAAAGhBZ2dyZWdhdGUgKG1pZCkgcHJpY2UgaW4gdGhlIGZlZWQncyBuYXRpdmUgcHJlY2lzaW9uIChlLmcuIGZvciBleHBvbmVudCAtOCwgMTBfMDAwXzAwMF8wMDBfMDAwID0gJDEwMGspLgAAAAVwcmljZQAAAAAAAAsAAABEVW5peCB0aW1lc3RhbXAgKHNlY29uZHMpIHdoZW4gdGhlIHByaWNlIHdhcyBwdWJsaXNoZWQgYnkgdGhlIG9yYWNsZS4AAAAMcHVibGlzaF90aW1lAAAABg==",
+        "AAAAAQAAALtWZXJpZmllZCBwcmljZSBkYXRhIHJldHVybmVkIGJ5IHRoZSBvcmFjbGUuCgpUaGUgdHJhZGluZyBjb250cmFjdCB1c2VzIHRoaXMgdG8gZGV0ZXJtaW5lIGVudHJ5L2V4aXQgcHJpY2VzIGFuZCBjb21wdXRlIFBuTC4KYHByaWNlX3NjYWxhcmAgaXMgZGVyaXZlZCBhdCB0aGUgY2FsbCBzaXRlIGFzIGAxMF4oLWV4cG9uZW50KWAuAAAAAAAAAAAJUHJpY2VEYXRhAAAAAAAABQAAAGdCZXN0IGFzayBmcm9tIFB5dGggTGF6ZXIgKHNhbWUgcHJlY2lzaW9uIGFzIGBiaWRgKTsgcmVxdWlyZWQuIFRyYWRpbmcgZmlsbHMKdGhlIGFkdmVyc2Ugb3BlbiBzaWRlIGhlcmUuAAAAAANhc2sAAAAACwAAAJtCZXN0IGJpZCBmcm9tIFB5dGggTGF6ZXIgaW4gdGhlIGZlZWQncyBuYXRpdmUgcHJlY2lzaW9uIChmb3IgZXhwb25lbnQgLTgsCjEwXzAwMF8wMDBfMDAwXzAwMCA9ICQxMDBrKTsgcmVxdWlyZWQuIFRyYWRpbmcgZmlsbHMgdGhlIGFkdmVyc2UgY2xvc2Ugc2lkZSBoZXJlLgAAAAADYmlkAAAAAAsAAABMTmVnYXRpdmUgZXhwb25lbnQgZGVmaW5pbmcgcHJpY2UgcHJlY2lzaW9uIChlLmcuIC04IG1lYW5zIDggZGVjaW1hbCBwbGFjZXMpLgAAAAhleHBvbmVudAAAAAUAAABCUHl0aCBmZWVkIGlkZW50aWZpZXIgKHUzMiBtYXBwaW5nIHRvIGFuIGFzc2V0IHBhaXIsIGUuZy4gQlRDL1VTRCkuAAAAAAAHZmVlZF9pZAAAAAAEAAAARFVuaXggdGltZXN0YW1wIChzZWNvbmRzKSB3aGVuIHRoZSBwcmljZSB3YXMgcHVibGlzaGVkIGJ5IHRoZSBvcmFjbGUuAAAADHB1Ymxpc2hfdGltZQAAAAY=",
         "AAAAAAAAAChSZXR1cm5zIHRoZSBQeXRoIExhemVyIGNvbnRyYWN0IGFkZHJlc3MuAAAABWxhemVyAAAAAAAAAAAAAAEAAAAT",
         "AAAAAAAAAJBSZXR1cm5zIGBTb21lKEFkZHJlc3MpYCBpZiBvd25lcnNoaXAgaXMgc2V0LCBvciBgTm9uZWAgaWYgb3duZXJzaGlwIGhhcwpiZWVuIHJlbm91bmNlZC4KCiMgQXJndW1lbnRzCgoqIGBlYCAtIEFjY2VzcyB0byB0aGUgU29yb2JhbiBlbnZpcm9ubWVudC4AAAAJZ2V0X293bmVyAAAAAAAAAAAAAAEAAAPoAAAAEw==",
         "AAAAAAAAADNVcGRhdGUgdGhlIFB5dGggTGF6ZXIgY29udHJhY3QgYWRkcmVzcy4gT3duZXIgb25seS4AAAAADHVwZGF0ZV9sYXplcgAAAAEAAAAAAAAACW5ld19sYXplcgAAAAAAABMAAAAA",
@@ -67,7 +67,7 @@ export class PriceVerifierContract extends Contract {
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // Ownable
         getOwner: (result: string): string | undefined =>
-            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')) ?? undefined,
         transferOwnership: () => {},
         acceptOwnership: () => {},
         renounceOwnership: () => {},

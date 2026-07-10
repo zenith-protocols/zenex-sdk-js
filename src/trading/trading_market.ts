@@ -1,6 +1,6 @@
 import { rpc, xdr, scValToNative } from '@stellar/stellar-sdk';
 import { Network } from '../index.js';
-import { SCALAR_18, mulFloor, mulCeil, divCeil } from '../math.js';
+import { SCALAR_18, mulFloor, mulCeil } from '../math.js';
 import { persistentLedgerKey } from '../ledger-keys.js';
 import { MarketData, TradingConfig, parseMarketData } from './trading_types.js';
 
@@ -9,24 +9,28 @@ import { MarketData, TradingConfig, parseMarketData } from './trading_types.js';
 //
 // Every formula is ported from
 // `zenex-contracts/trading/src/trading/market_data.rs` (`side_pnl`, `net_pnl`,
-// `skew_split`) and `market.rs::trade_fees` (branch v2/dev). The market is a
-// single per-contract singleton in v2.
+// `skew_split`), `market.rs::trade_fees`, and `math.rs::impact_fee` (branch
+// v2/dev). The market is a single per-contract singleton in v2.
 //
-// Truncation semantics match `trading_position.ts`: `mulCeil` is true ceil for
-// every sign; `mulFloor` (BigInt truncation toward zero) matches true floor for
-// the non-negative products used here. `priceScalar` is the SCALAR_18 scalar
-// baked into `tokens` (see `trading_position.ts`); callers pass `SCALAR_18`.
+// Rounding semantics match `trading_position.ts`: `mulFloor` and `mulCeil`
+// are true floor (toward -inf) and true ceil (toward +inf) for every sign,
+// matching the contract's fixed-point helpers. `priceScalar` is the SCALAR_18
+// scalar baked into `tokens` (see `trading_position.ts`); callers pass
+// `SCALAR_18`.
 // =============================================================================
 
-/** The base + impact trade fee for a skew-split fill (token-dec), with the split legs. */
+/** Impact-fee rate ceiling: 10% of notional (constants.rs::MAX_IMPACT_RATE). */
+const MAX_IMPACT_RATE = SCALAR_18 / 10n;
+
+/** The base + impact trade fee for a fill (token-dec), with the skew-split legs. */
 export interface SkewSplitFees {
     /** Worsening notional leg (moves the book further from balance), token-dec. */
     worsening: bigint;
     /** Improving notional leg (moves the book toward balance), token-dec. */
     improving: bigint;
-    /** Trade fee: `fee_dom` on the worsening leg plus `fee_non_dom` on the improving leg. */
+    /** Trade fee: `feeDom` on the worsening leg plus `feeNonDom` on the improving leg. */
     base: bigint;
-    /** Price-impact fee: `worsening / impact_divisor`, charged on the worsening leg only. */
+    /** Size-quadratic impact fee on the fill's full notional, regardless of skew direction. */
     impact: bigint;
 }
 
@@ -79,6 +83,20 @@ export function utilization(marketData: MarketData, vaultBalance: bigint): bigin
 }
 
 /**
+ * Size-quadratic impact fee on a fill's `notional` (token-dec):
+ * `min(ceil(notional^2 / impactScalar), ceil(notional * MAX_IMPACT_RATE))`,
+ * a fee rate that grows linearly with the fill size until the 10% rate
+ * ceiling.
+ *
+ * Ports `math::impact_fee`; charged on every fill's full notional.
+ */
+export function impactFee(notional: bigint, impactScalar: bigint): bigint {
+    const fee = mulCeil(notional, notional, impactScalar);
+    const cap = mulCeil(notional, MAX_IMPACT_RATE, SCALAR_18);
+    return fee < cap ? fee : cap;
+}
+
+/**
  * Split a signed token change on `is_long`'s side into its worsening/improving
  * legs and compute the resulting trade fees, token-dec.
  *
@@ -86,15 +104,14 @@ export function utilization(marketData: MarketData, vaultBalance: bigint): bigin
  * split by its effect on the book's token imbalance, then that split is mapped
  * pro-rata onto the fill's `signedNotional`: the worsening notional rounds up
  * (`ceil(|notional| * worseningTokens / |signedTokens|)`), the improving leg
- * takes the exact remainder. The base fee charges `fee_dom` (ceil) on the
- * worsening notional and `fee_non_dom` (ceil) on the improving notional; the
- * impact fee is `ceil(worseningNotional * SCALAR_18 / impact_divisor)` on the
- * worsening leg only.
+ * takes the exact remainder. The base fee charges `feeDom` (ceil) on the
+ * worsening notional and `feeNonDom` (ceil) on the improving notional; the
+ * impact fee is [`impactFee`] on the fill's full notional, regardless of skew
+ * direction.
  *
  * Note: `Market::trade_fees` takes both the signed notional and signed tokens;
  * the token change drives the skew split while the notional is what the fee is
- * charged on. The brief listed only `signedTokens`, so `signedNotional` is added
- * here to port the mapping faithfully.
+ * charged on.
  */
 export function skewSplitFees(
     config: TradingConfig,
@@ -132,8 +149,8 @@ export function skewSplitFees(
 
     const base =
         mulCeil(worsening, config.feeDom, SCALAR_18) + mulCeil(improving, config.feeNonDom, SCALAR_18);
-    // apply_divisor: ceil(worsening * SCALAR_18 / impact_divisor).
-    const impact = divCeil(worsening, config.impactDivisor, SCALAR_18);
+    // Size-quadratic impact fee on the full notional (math.rs::impact_fee).
+    const impact = impactFee(notional, config.impactScalar);
 
     return { worsening, improving, base, impact };
 }
@@ -181,7 +198,7 @@ export class MarketView {
         return utilization(this.data, vaultBalance);
     }
 
-    /** Trade fees for a skew-split fill on `isLong`'s side. */
+    /** Trade fees for a fill on `isLong`'s side (skew-split base fee + size-quadratic impact fee). */
     skewSplitFees(config: TradingConfig, isLong: boolean, signedNotional: bigint, signedTokens: bigint): SkewSplitFees {
         return skewSplitFees(config, this.data, isLong, signedNotional, signedTokens);
     }

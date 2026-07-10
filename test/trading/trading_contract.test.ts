@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { xdr, scValToNative, StrKey } from '@stellar/stellar-sdk';
+import { xdr, scValToNative, StrKey, nativeToScVal } from '@stellar/stellar-sdk';
 import { TradingContract, DeployArgs } from '../../src/trading/trading_contract.js';
 import { OrderKind, VaultOrderKind, FULL_CLOSE, TradingConfig } from '../../src/trading/trading_types.js';
 
@@ -7,12 +7,13 @@ const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
 const KEEPER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
 
-function decodeInvoke(op: string) {
-    const body = xdr.Operation.fromXDR(op, 'base64').body().invokeHostFunctionOp();
+function decodeInvoke(operation: string) {
+    const body = xdr.Operation.fromXDR(operation, 'base64').body().invokeHostFunctionOp();
     const invoke = body.hostFunction().invokeContract();
     return {
         fn: invoke.functionName().toString(),
-        args: invoke.args().map((a) => scValToNative(a)),
+        rawArgs: invoke.args(),
+        args: invoke.args().map((arg) => scValToNative(arg)),
     };
 }
 
@@ -20,13 +21,14 @@ function makeConfig(): TradingConfig {
     return {
         keeperRate: 1n,
         minPositionNotional: 1n,
-        maxPositionNotional: 1n,
-        maxOpenInterest: 1n,
+        maxPositionNotional: 2n,
+        maxOpenInterest: 2n,
         minOrderNotional: 1n,
         minOrderCollateral: 1n,
+        execFee: 1n,
         feeDom: 1n,
         feeNonDom: 1n,
-        impactDivisor: 1n,
+        impactScalar: 1n,
         maxUtilOpen: 1n,
         maxUtilWithdraw: 1n,
         initMargin: 1n,
@@ -45,82 +47,143 @@ function makeConfig(): TradingConfig {
         adlMaxPnl: 1n,
         adlClearTarget: 1n,
         maxPnlTrader: 1n,
-        redeemLock: 60n,
-        depositLock: 60n,
-        instantDepositPnl: 1n,
-        vaultFee: 1n,
-        minDeposit: 1n,
-        maxPnlDeposit: 1n,
         maxPnlWithdraw: 1n,
-        maxVaultBalance: 1n,
+        redeemLock: 60n,
+        depositFee: 1n,
+        redeemFee: 1n,
+        minDeposit: 1n,
+        maxVaultBalance: 100n,
     };
 }
 
 describe('TradingContract', () => {
     const contract = new TradingContract(CONTRACT_ID);
 
-    it('createOrder builds create_order with the exact arg order and types', () => {
-        const op = contract.createOrder(USER, true, OrderKind.Increase, 100n, 10n, 5n, true, 200n, 12345);
-        const { fn, args } = decodeInvoke(op);
+    it('createOrder builds create_order with the exact 8-arg order and types', () => {
+        const operation = contract.createOrder(
+            USER, true, OrderKind.LimitIncrease, 100n, 10n, 55n, 200n, 12345,
+        );
+        const { fn, rawArgs, args } = decodeInvoke(operation);
         expect(fn).toBe('create_order');
-        expect(args).toEqual([USER, true, ['Increase'], 100n, 10n, 5n, true, 200n, 12345]);
+        // (user, is_long, kind, notional, collateral, trigger_price, price_bound, expiration)
+        expect(args).toEqual([USER, true, 1, 100n, 10n, 55n, 200n, 12345]);
+        expect(rawArgs).toHaveLength(8);
+        expect(rawArgs[1].switch().name).toBe('scvBool');
+        // kind crosses the ABI as a plain u32, matching order.rs #[repr(u32)]
+        expect(rawArgs[2].switch().name).toBe('scvU32');
+        expect(rawArgs[2].u32()).toBe(1);
+        expect(rawArgs[3].switch().name).toBe('scvI128');
+        expect(rawArgs[7].switch().name).toBe('scvU32');
     });
 
-    it('closePosition emits Decrease + FULL_CLOSE + zero collateral', () => {
-        const op = contract.closePosition({ user: USER, isLong: true, priceBound: 0n, expiration: 0 });
-        const { fn, args } = decodeInvoke(op);
+    it('createOrderCall encodes identically to createOrder', () => {
+        const call = contract.createOrderCall(USER, false, OrderKind.StopDecrease, 1n, 2n, 3n, 4n, 5);
+        expect(call.func).toBe('create_order');
+        expect(call.contract).toBe(CONTRACT_ID);
+        expect(call.args.map((arg) => scValToNative(arg))).toEqual([USER, false, 5, 1n, 2n, 3n, 4n, 5]);
+    });
+
+    it('every OrderKind encodes its u32 discriminant in the built XDR', () => {
+        const kindByDiscriminant: Array<[OrderKind, number]> = [
+            [OrderKind.MarketIncrease, 0],
+            [OrderKind.LimitIncrease, 1],
+            [OrderKind.StopIncrease, 2],
+            [OrderKind.MarketDecrease, 3],
+            [OrderKind.LimitDecrease, 4],
+            [OrderKind.StopDecrease, 5],
+        ];
+        for (const [kind, discriminant] of kindByDiscriminant) {
+            const { rawArgs } = decodeInvoke(contract.createOrder(USER, true, kind, 1n, 1n, 0n, 0n, 1));
+            expect(rawArgs[2].switch().name).toBe('scvU32');
+            expect(rawArgs[2].u32()).toBe(discriminant);
+        }
+    });
+
+    it('closePosition emits MarketDecrease + FULL_CLOSE + zero collateral', () => {
+        const operation = contract.closePosition({ user: USER, isLong: true, priceBound: 0n, expiration: 0 });
+        const { fn, args } = decodeInvoke(operation);
         expect(fn).toBe('create_order');
-        expect(args[2]).toEqual(['Decrease']);
+        expect(args[2]).toBe(OrderKind.MarketDecrease);
         expect(args[3]).toBe(FULL_CLOSE);
         expect(args[4]).toBe(0n);
     });
 
-    it('placeStopLoss on a long sets trigger_above = false', () => {
-        const op = contract.placeStopLoss({ user: USER, isLong: true, triggerPrice: 50n, priceBound: 0n, expiration: 0 });
-        const { args } = decodeInvoke(op);
-        expect(args[6]).toBe(false);
+    it('openMarket emits MarketIncrease with an unused trigger of 0', () => {
+        const { args } = decodeInvoke(contract.openMarket({
+            user: USER, isLong: true, notional: 100n, collateral: 10n, priceBound: 5n, expiration: 99,
+        }));
+        expect(args).toEqual([USER, true, 0, 100n, 10n, 0n, 5n, 99]);
     });
 
-    it('placeStopLoss on a short sets trigger_above = true', () => {
-        const op = contract.placeStopLoss({ user: USER, isLong: false, triggerPrice: 50n, priceBound: 0n, expiration: 0 });
-        const { args } = decodeInvoke(op);
-        expect(args[6]).toBe(true);
+    it('openLimit emits LimitIncrease carrying the trigger price', () => {
+        const { args } = decodeInvoke(contract.openLimit({
+            user: USER, isLong: true, notional: 100n, collateral: 10n,
+            triggerPrice: 50n, priceBound: 0n, expiration: 0,
+        }));
+        expect(args[2]).toBe(OrderKind.LimitIncrease);
+        expect(args[5]).toBe(50n);
     });
 
-    it('placeTakeProfit inverts placeStopLoss\'s trigger_above', () => {
-        const longTp = decodeInvoke(
-            contract.placeTakeProfit({ user: USER, isLong: true, triggerPrice: 50n, priceBound: 0n, expiration: 0 }),
-        );
-        const shortTp = decodeInvoke(
-            contract.placeTakeProfit({ user: USER, isLong: false, triggerPrice: 50n, priceBound: 0n, expiration: 0 }),
-        );
-        expect(longTp.args[6]).toBe(true);
-        expect(shortTp.args[6]).toBe(false);
+    it('placeTakeProfit emits LimitDecrease and defaults to FULL_CLOSE', () => {
+        const { args } = decodeInvoke(contract.placeTakeProfit({
+            user: USER, isLong: true, triggerPrice: 200n, priceBound: 0n, expiration: 3,
+        }));
+        expect(args[2]).toBe(OrderKind.LimitDecrease);
+        expect(args[3]).toBe(FULL_CLOSE);
+        expect(args[4]).toBe(0n);
+        expect(args[5]).toBe(200n);
     });
 
-    it('openLimit on a long sets trigger_above = false', () => {
-        const op = contract.openLimit({
-            user: USER, isLong: true, notional: 100n, collateral: 10n, triggerPrice: 50n, priceBound: 0n, expiration: 0,
-        });
-        const { fn, args } = decodeInvoke(op);
+    it('placeStopLoss emits StopDecrease and honours a partial notional', () => {
+        const { args } = decodeInvoke(contract.placeStopLoss({
+            user: USER, isLong: false, triggerPrice: 90n, notional: 40n, priceBound: 0n, expiration: 3,
+        }));
+        expect(args[2]).toBe(OrderKind.StopDecrease);
+        expect(args[3]).toBe(40n);
+        expect(args[5]).toBe(90n);
+    });
+
+    it('withdrawCollateral emits MarketDecrease with notional 0', () => {
+        const { fn, args } = decodeInvoke(contract.withdrawCollateral({
+            user: USER, isLong: true, amount: 25n, expiration: 0,
+        }));
         expect(fn).toBe('create_order');
-        expect(args[2]).toEqual(['Increase']);
-        expect(args[6]).toBe(false);
-    });
-
-    it('withdrawCollateral emits Decrease with notional 0', () => {
-        const op = contract.withdrawCollateral({ user: USER, isLong: true, amount: 25n, expiration: 0 });
-        const { fn, args } = decodeInvoke(op);
-        expect(fn).toBe('create_order');
-        expect(args[2]).toEqual(['Decrease']);
+        expect(args[2]).toBe(OrderKind.MarketDecrease);
         expect(args[3]).toBe(0n);
         expect(args[4]).toBe(25n);
     });
 
+    it('addCollateral emits MarketIncrease with notional 0', () => {
+        const { args } = decodeInvoke(contract.addCollateral({
+            user: USER, isLong: false, amount: 7n, expiration: 2,
+        }));
+        expect(args[2]).toBe(OrderKind.MarketIncrease);
+        expect(args[3]).toBe(0n);
+        expect(args[4]).toBe(7n);
+    });
+
+    it('createVaultOrder builds create_vault_order with a u32 kind and minOut', () => {
+        const { fn, rawArgs, args } = decodeInvoke(
+            contract.createVaultOrder(USER, VaultOrderKind.Redeem, 500n, 490n),
+        );
+        expect(fn).toBe('create_vault_order');
+        expect(args).toEqual([USER, 1, 500n, 490n]);
+        expect(rawArgs[1].switch().name).toBe('scvU32');
+        expect(rawArgs[3].switch().name).toBe('scvI128');
+    });
+
+    it('depositVault and redeemVault map onto the two VaultOrderKind discriminants', () => {
+        const deposit = decodeInvoke(contract.depositVault({ user: USER, amount: 1000n, minOut: 3n }));
+        expect(deposit.fn).toBe('create_vault_order');
+        expect(deposit.args).toEqual([USER, VaultOrderKind.Deposit, 1000n, 3n]);
+
+        const redeem = decodeInvoke(contract.redeemVault({ user: USER, shares: 500n, minOut: 1n }));
+        expect(redeem.args).toEqual([USER, VaultOrderKind.Redeem, 500n, 1n]);
+    });
+
     it('executeOrder carries the price bytes', () => {
         const price = Buffer.from([1, 2, 3, 4]);
-        const op = contract.executeOrder(KEEPER, USER, 7, price);
-        const { fn, args } = decodeInvoke(op);
+        const { fn, args } = decodeInvoke(contract.executeOrder(KEEPER, USER, 7, price));
         expect(fn).toBe('execute_order');
         expect(args[0]).toBe(KEEPER);
         expect(args[1]).toBe(USER);
@@ -128,28 +191,33 @@ describe('TradingContract', () => {
         expect(Buffer.from(args[3] as Uint8Array)).toEqual(price);
     });
 
-    it('setConfig embeds the alphabetical config map', () => {
-        const op = contract.setConfig(makeConfig());
-        const { fn, args } = decodeInvoke(op);
+    it('executeVaultOrder takes 4 args (keeper, user, id, price)', () => {
+        const price = Buffer.from([9, 9]);
+        const { fn, args } = decodeInvoke(contract.executeVaultOrder(KEEPER, USER, 2, price));
+        expect(fn).toBe('execute_vault_order');
+        expect(args).toHaveLength(4);
+        expect(args[0]).toBe(KEEPER);
+        expect(args[1]).toBe(USER);
+        expect(args[2]).toBe(2);
+        expect(Buffer.from(args[3] as Uint8Array)).toEqual(price);
+    });
+
+    it('getOrderCounter builds the view and its parser decodes a u32', () => {
+        const { fn, args } = decodeInvoke(contract.getOrderCounter(USER));
+        expect(fn).toBe('get_order_counter');
+        expect(args).toEqual([USER]);
+        const raw = xdr.ScVal.scvU32(17).toXDR('base64');
+        expect(TradingContract.parsers.getOrderCounter(raw)).toBe(17);
+    });
+
+    it('setConfig embeds the alphabetical 34-key config map', () => {
+        const { fn, rawArgs } = decodeInvoke(contract.setConfig(makeConfig()));
         expect(fn).toBe('set_config');
-        const map = args[0] as Record<string, unknown>;
-        const keys = Object.keys(map);
+        const keys = rawArgs[0].map()!.map((mapEntry) => mapEntry.key().sym().toString());
+        expect(keys).toHaveLength(34);
         expect(keys).toEqual([...keys].sort());
         expect(keys[0]).toBe('adl_clear_target');
-    });
-
-    it('depositVault builds create_vault_order with Deposit kind', () => {
-        const op = contract.depositVault({ user: USER, amount: 1000n, maxAdversePnl: 0n });
-        const { fn, args } = decodeInvoke(op);
-        expect(fn).toBe('create_vault_order');
-        expect(args).toEqual([USER, ['Deposit'], 1000n, 0n]);
-    });
-
-    it('redeemVault builds create_vault_order with Redeem kind', () => {
-        const op = contract.redeemVault({ user: USER, shares: 500n, maxAdversePnl: 1n });
-        const { fn, args } = decodeInvoke(op);
-        expect(fn).toBe('create_vault_order');
-        expect(args).toEqual([USER, ['Redeem'], 500n, 1n]);
+        expect(keys[33]).toBe('threshold_stable_funding');
     });
 
     it('parsers.createOrder decodes a u32 ScVal', () => {
@@ -157,29 +225,49 @@ describe('TradingContract', () => {
         expect(TradingContract.parsers.createOrder(raw)).toBe(42);
     });
 
-    it('parsers.getPosition returns camelCase fields', () => {
-        const fields = [
-            'collateral', 'notional', 'tokens', 'funding_idx', 'borrowing_idx',
-            'locked_notional', 'unlocks_at', 'updated_at',
-        ];
-        const entries = fields.map((key, i) =>
-            new xdr.ScMapEntry({
-                key: xdr.ScVal.scvSymbol(key),
-                val: xdr.ScVal.scvI128(new xdr.Int128Parts({ hi: xdr.Int64.fromString('0'), lo: xdr.Uint64.fromString(String(i)) })),
-            }),
-        );
-        const positionScVal = xdr.ScVal.scvMap(entries);
-        const raw = positionScVal.toXDR('base64');
-        const parsed = TradingContract.parsers.getPosition(raw);
+    it('parsers.cancelOrder decodes the i128 refund', () => {
+        const raw = nativeToScVal(1234n, { type: 'i128' }).toXDR('base64');
+        expect(TradingContract.parsers.cancelOrder(raw)).toBe(1234n);
+    });
+
+    it('parsers.getOrder returns undefined on Option None (scvVoid)', () => {
+        const raw = xdr.ScVal.scvVoid().toXDR('base64');
+        expect(TradingContract.parsers.getOrder(raw)).toBeUndefined();
+    });
+
+    it('parsers.getVaultOrder returns undefined on Option None (scvVoid)', () => {
+        const raw = xdr.ScVal.scvVoid().toXDR('base64');
+        expect(TradingContract.parsers.getVaultOrder(raw)).toBeUndefined();
+    });
+
+    it('parsers.getPosition returns camelCase fields including pricedAt and decreaseOrders', () => {
+        const entry = (key: string, val: xdr.ScVal) =>
+            new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
+        const i128Val = (value: bigint) => nativeToScVal(value, { type: 'i128' });
+        const u64Val = (value: bigint) => nativeToScVal(value, { type: 'u64' });
+        // Alphabetical field order, matching #[contracttype] serialization.
+        const positionScVal = xdr.ScVal.scvMap([
+            entry('borrowing_idx', i128Val(1n)),
+            entry('collateral', i128Val(2n)),
+            entry('decrease_orders', xdr.ScVal.scvVec([xdr.ScVal.scvU32(3), xdr.ScVal.scvU32(9)])),
+            entry('funding_idx', i128Val(4n)),
+            entry('locked_notional', i128Val(5n)),
+            entry('notional', i128Val(6n)),
+            entry('priced_at', u64Val(7n)),
+            entry('tokens', i128Val(8n)),
+            entry('unlocks_at', u64Val(9n)),
+        ]);
+        const parsed = TradingContract.parsers.getPosition(positionScVal.toXDR('base64'));
         expect(parsed).toEqual({
-            collateral: 0n,
-            notional: 1n,
-            tokens: 2n,
-            fundingIdx: 3n,
-            borrowingIdx: 4n,
+            borrowingIdx: 1n,
+            collateral: 2n,
+            decreaseOrders: [3, 9],
+            fundingIdx: 4n,
             lockedNotional: 5n,
-            unlocksAt: 6n,
-            updatedAt: 7n,
+            notional: 6n,
+            pricedAt: 7n,
+            tokens: 8n,
+            unlocksAt: 9n,
         });
     });
 
@@ -194,11 +282,13 @@ describe('TradingContract', () => {
             exponent: -8,
             config: makeConfig(),
         };
-        const op = TradingContract.deploy(USER, Buffer.alloc(32, 9), deployArgs, undefined, 'hex');
-        const decoded = xdr.Operation.fromXDR(op, 'base64');
+        const operation = TradingContract.deploy(USER, Buffer.alloc(32, 9), deployArgs, undefined, 'hex');
+        const decoded = xdr.Operation.fromXDR(operation, 'base64');
         const createContract = decoded.body().invokeHostFunctionOp().hostFunction().createContractV2();
-        const ctorArgs = createContract.constructorArgs().map((a) => scValToNative(a));
-        expect(ctorArgs[5]).toBe(1);
-        expect(ctorArgs[6]).toBe(-8);
+        const constructorArgs = createContract.constructorArgs();
+        expect(constructorArgs).toHaveLength(8);
+        expect(scValToNative(constructorArgs[5])).toBe(1);
+        expect(scValToNative(constructorArgs[6])).toBe(-8);
+        expect(constructorArgs[7].map()!).toHaveLength(34);
     });
 });

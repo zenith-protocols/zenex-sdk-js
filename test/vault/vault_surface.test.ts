@@ -53,57 +53,37 @@ describe('VaultContract surface', () => {
         expect(decodeInvoke(vault.symbol()).fn).toBe('symbol');
     });
 
-    it('builds ERC-4626 ops', () => {
+    it('builds the vault view and strategy ops (string and Address arg forms)', () => {
         expect(decodeInvoke(vault.queryAsset()).fn).toBe('query_asset');
+        expect(decodeInvoke(vault.getStrategy()).fn).toBe('get_strategy');
         expect(decodeInvoke(vault.totalAssets()).fn).toBe('total_assets');
-        expect(decodeInvoke(vault.convertToShares(1n)).args).toEqual([1n]);
-        expect(decodeInvoke(vault.convertToAssets(2n)).args).toEqual([2n]);
-        expect(decodeInvoke(vault.maxDeposit(RECEIVER)).args).toEqual([RECEIVER]);
-        expect(decodeInvoke(vault.previewDeposit(3n)).args).toEqual([3n]);
-        expect(decodeInvoke(vault.deposit(4n, RECEIVER, OWNER, STRATEGY)).args)
-            .toEqual([4n, RECEIVER, OWNER, STRATEGY]);
-        expect(decodeInvoke(vault.maxMint(RECEIVER)).args).toEqual([RECEIVER]);
-        expect(decodeInvoke(vault.previewMint(5n)).args).toEqual([5n]);
-        expect(decodeInvoke(vault.mint(6n, RECEIVER, OWNER, STRATEGY)).args)
-            .toEqual([6n, RECEIVER, OWNER, STRATEGY]);
-        expect(decodeInvoke(vault.maxWithdraw(OWNER)).args).toEqual([OWNER]);
-        expect(decodeInvoke(vault.previewWithdraw(7n)).args).toEqual([7n]);
-        expect(decodeInvoke(vault.withdraw(8n, RECEIVER, OWNER, STRATEGY)).args)
-            .toEqual([8n, RECEIVER, OWNER, STRATEGY]);
-        expect(decodeInvoke(vault.maxRedeem(OWNER)).args).toEqual([OWNER]);
-        expect(decodeInvoke(vault.previewRedeem(9n)).args).toEqual([9n]);
-        expect(decodeInvoke(vault.redeem(10n, RECEIVER, OWNER, STRATEGY)).args)
-            .toEqual([10n, RECEIVER, OWNER, STRATEGY]);
-        expect(decodeInvoke(vault.strategyWithdraw(STRATEGY, 11n)).args).toEqual([STRATEGY, 11n]);
-        expect(decodeInvoke(vault.strategyWithdraw(Address.fromString(STRATEGY), 11n)).args)
-            .toEqual([STRATEGY, 11n]);
+        expect(decodeInvoke(vault.previewDeposit(3n, -1n)).args).toEqual([3n, -1n]);
+        expect(decodeInvoke(vault.previewRedeem(9n, 2n)).args).toEqual([9n, 2n]);
+        expect(decodeInvoke(vault.strategyDeposit(4n, RECEIVER, OWNER, 1n)).args)
+            .toEqual([4n, RECEIVER, OWNER, 1n]);
+        expect(decodeInvoke(vault.strategyDeposit(4n, Address.fromString(RECEIVER), Address.fromString(OWNER), 1n)).args)
+            .toEqual([4n, RECEIVER, OWNER, 1n]);
+        expect(decodeInvoke(vault.strategyRedeem(10n, RECEIVER, OWNER, -2n)).args)
+            .toEqual([10n, RECEIVER, OWNER, -2n]);
+        expect(decodeInvoke(vault.strategyWithdraw(11n)).args).toEqual([11n]);
     });
 
     it('parses results through the WASM spec', () => {
-        const p = VaultContract.parsers;
-        expect(p.totalSupply(i128Res(100n))).toBe(100n);
-        expect(p.balance(i128Res(1n))).toBe(1n);
-        expect(p.allowance(i128Res(2n))).toBe(2n);
-        expect(p.decimals(xdr.ScVal.scvU32(7).toXDR('base64'))).toBe(7);
-        expect(p.name(xdr.ScVal.scvString('Zenex Vault').toXDR('base64'))).toBe('Zenex Vault');
-        expect(p.symbol(xdr.ScVal.scvString('zXLM').toXDR('base64'))).toBe('zXLM');
-        expect(String(p.queryAsset(Address.fromString(ASSET).toScVal().toXDR('base64')))).toBe(ASSET);
-        expect(p.totalAssets(i128Res(3n))).toBe(3n);
-        expect(p.convertToShares(i128Res(4n))).toBe(4n);
-        expect(p.convertToAssets(i128Res(5n))).toBe(5n);
-        expect(p.maxDeposit(i128Res(6n))).toBe(6n);
-        expect(p.previewDeposit(i128Res(7n))).toBe(7n);
-        expect(p.deposit(i128Res(8n))).toBe(8n);
-        expect(p.maxMint(i128Res(9n))).toBe(9n);
-        expect(p.previewMint(i128Res(10n))).toBe(10n);
-        expect(p.mint(i128Res(11n))).toBe(11n);
-        expect(p.maxWithdraw(i128Res(12n))).toBe(12n);
-        expect(p.previewWithdraw(i128Res(13n))).toBe(13n);
-        expect(p.withdraw(i128Res(14n))).toBe(14n);
-        expect(p.maxRedeem(i128Res(15n))).toBe(15n);
-        expect(p.previewRedeem(i128Res(16n))).toBe(16n);
-        expect(p.redeem(i128Res(17n))).toBe(17n);
-        expect(p.strategyWithdraw()).toBeUndefined();
+        const parsers = VaultContract.parsers;
+        expect(parsers.totalSupply(i128Res(100n))).toBe(100n);
+        expect(parsers.balance(i128Res(1n))).toBe(1n);
+        expect(parsers.allowance(i128Res(2n))).toBe(2n);
+        expect(parsers.decimals(xdr.ScVal.scvU32(7).toXDR('base64'))).toBe(7);
+        expect(parsers.name(xdr.ScVal.scvString('Zenex Vault').toXDR('base64'))).toBe('Zenex Vault');
+        expect(parsers.symbol(xdr.ScVal.scvString('zXLM').toXDR('base64'))).toBe('zXLM');
+        expect(String(parsers.queryAsset(Address.fromString(ASSET).toScVal().toXDR('base64')))).toBe(ASSET);
+        expect(String(parsers.getStrategy(Address.fromString(STRATEGY).toScVal().toXDR('base64')))).toBe(STRATEGY);
+        expect(parsers.totalAssets(i128Res(3n))).toBe(3n);
+        expect(parsers.previewDeposit(i128Res(7n))).toBe(7n);
+        expect(parsers.previewRedeem(i128Res(16n))).toBe(16n);
+        expect(parsers.strategyDeposit(i128Res(8n))).toBe(8n);
+        expect(parsers.strategyRedeem(i128Res(17n))).toBe(17n);
+        expect(parsers.strategyWithdraw()).toBeUndefined();
     });
 });
 
@@ -128,7 +108,10 @@ describe('decodeVaultEvent', () => {
 describe('VaultState computed properties', () => {
     const network = { rpc: 'http://localhost', passphrase: 'Test' };
     const state = new VaultState(
-        { asset: ASSET, totalShares: 200, totalAssets: 100, decimalsOffset: 1 },
+        {
+            asset: ASSET, totalShares: 200, totalAssets: 100,
+            decimalsOffset: 1, shareDecimals: 8, assetDecimals: 7,
+        },
         network,
         CONTRACT_ID,
     );
@@ -141,7 +124,10 @@ describe('VaultState computed properties', () => {
 
     it('handles empty vault edge cases', () => {
         const empty = new VaultState(
-            { asset: ASSET, totalShares: 0, totalAssets: 0, decimalsOffset: 0 },
+            {
+                asset: ASSET, totalShares: 0, totalAssets: 0,
+                decimalsOffset: 0, shareDecimals: 7, assetDecimals: 7,
+            },
             network,
             CONTRACT_ID,
         );

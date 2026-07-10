@@ -1,17 +1,20 @@
-export const SCALAR_7 = BigInt(10000000);
-export const SCALAR_14 = BigInt(100000000000000);
+/** The single v2 fixed-point scalar (18 decimals): rates, fees, ratios, margins, indices. */
 export const SCALAR_18 = BigInt(1000000000000000000);
 
-// Trading limits
-export const MAX_MARKETS = 32;
-export const MAX_POSITIONS = 25;
-export const MIN_OPEN_TIME = 30;
-
-export function toFixed(x: number, decimals = 7): bigint {
+/**
+ * Convert a float to fixed-point at `decimals`. Token amounts are per-deployment
+ * (pass the settlement token's decimals); SCALAR_18 quantities pass 18.
+ */
+export function toFixed(x: number, decimals: number): bigint {
   return BigInt(Math.round(x * 10 ** decimals));
 }
 
-export function toFloat(x: bigint, decimals = 7): number {
+/**
+ * Convert a fixed-point value at `decimals` to a float. Token amounts are
+ * per-deployment (pass the settlement token's decimals); SCALAR_18 quantities
+ * pass 18.
+ */
+export function toFloat(x: bigint, decimals: number): number {
   return Number(x) / 10 ** decimals;
 }
 
@@ -31,15 +34,20 @@ export function divCeil(x: bigint, y: bigint, denominator: bigint): bigint {
   return mulDivCeil(x, denominator, y);
 }
 
-// Performs floor(x * y / z)
+// Performs floor(x * y / z): true floor toward -inf for every sign, matching
+// the contract's `fixed_mul_floor` / `fixed_div_floor`.
 function mulDivFloor(x: bigint, y: bigint, z: bigint): bigint {
   const r = x * y;
-  return r / z;
+  const quotient = r / z;
+  const remainder = r % z;
+  return remainder !== 0n && (r < 0n) !== (z < 0n) ? quotient - 1n : quotient;
 }
 
-// Performs ceil(x * y / z)
+// Performs ceil(x * y / z): true ceil toward +inf for every sign, matching
+// the contract's `fixed_mul_ceil` / `fixed_div_ceil`.
 function mulDivCeil(x: bigint, y: bigint, z: bigint): bigint {
   const r = x * y;
+  const quotient = r / z;
   const remainder = r % z;
-  return r / z + (remainder > 0n ? 1n : 0n);
+  return remainder !== 0n && (r < 0n) === (z < 0n) ? quotient + 1n : quotient;
 }

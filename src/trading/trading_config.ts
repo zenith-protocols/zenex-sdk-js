@@ -11,7 +11,7 @@ import { TradingConfig } from './trading_types.js';
 // valid (the contract's `Ok(())`).
 //
 // All ratio/rate/fee/margin fields are SCALAR_18-scaled; notional/order/vault
-// fields are token-dec. The bound constants below mirror
+// fields and execFee are token-dec. The bound constants below mirror
 // `trading/src/trading/constants.rs` exactly.
 // =============================================================================
 
@@ -21,8 +21,6 @@ const MAX_KEEPER_RATE = SCALAR_18 / 2n;
 const MAX_FEE_RATE = SCALAR_18 / 100n;
 /** Global utilization cap ceiling: 1000%. */
 const MAX_UTIL = 10n * SCALAR_18;
-/** Impact-divisor floor: caps the impact fee at 10% of notional. */
-const MIN_IMPACT = 10n * SCALAR_18;
 /** Max initial margin: 50% = 2x min leverage. */
 const MAX_MARGIN = SCALAR_18 / 2n;
 /** Min initial margin: 0.1% = 1000x max leverage. */
@@ -39,13 +37,13 @@ const SECONDS_PER_YEAR = 31_536_000n;
 const MAX_BORROW_RATE = (10n * SCALAR_18) / SECONDS_PER_YEAR;
 /** Max funding-rate magnitude: 1000% APR, per second. */
 const MAX_FUNDING_RATE = (10n * SCALAR_18) / SECONDS_PER_YEAR;
-/** Min decrease lock on newly added notional (seconds). */
+/** Min decrease lock on newly added notional: the price-verifier's staleness ceiling (seconds). */
 const MIN_NOTIONAL_LOCK = 15n;
 /** Max decrease lock on newly added notional: 1 day (seconds). */
 const MAX_NOTIONAL_LOCK = 86_400n;
 /** Max redeem cooldown on vault orders: 30 days (seconds). */
 const MAX_REDEEM_LOCK = 2_592_000n;
-/** The vault-order fill floor is bounded to this fraction of `max_vault_balance`. */
+/** The vault-order fill floor is bounded to this fraction of `maxVaultBalance`. */
 const MIN_DEPOSIT_DIVISOR = 100n;
 
 /**
@@ -82,12 +80,12 @@ export function validateTradingConfig(config: TradingConfig): string[] {
         ['fundingMax', 'fundingMax'],
         ['adlMaxPnl', 'adlMaxPnl'],
         ['adlClearTarget', 'adlClearTarget'],
-        ['instantDepositPnl', 'instantDepositPnl'],
-        ['vaultFee', 'vaultFee'],
+        ['depositFee', 'depositFee'],
+        ['redeemFee', 'redeemFee'],
         ['minDeposit', 'minDeposit'],
-        ['maxPnlDeposit', 'maxPnlDeposit'],
-        ['maxPnlWithdraw', 'maxPnlWithdraw'],
         ['maxPnlTrader', 'maxPnlTrader'],
+        ['maxPnlWithdraw', 'maxPnlWithdraw'],
+        ['execFee', 'execFee'],
     ];
     for (const [key, name] of nonNegative) {
         if ((config[key] as bigint) < 0n) {
@@ -105,11 +103,10 @@ export function validateTradingConfig(config: TradingConfig): string[] {
     if (config.liqFee > MAX_LIQ_FEE) v.push('liqFee exceeds MAX_LIQ_FEE (25%)');
     if (config.notionalLock > MAX_NOTIONAL_LOCK) v.push('notionalLock exceeds MAX_NOTIONAL_LOCK (1 day)');
     if (config.redeemLock > MAX_REDEEM_LOCK) v.push('redeemLock exceeds MAX_REDEEM_LOCK (30 days)');
-    if (config.depositLock > MAX_REDEEM_LOCK) v.push('depositLock exceeds MAX_REDEEM_LOCK (30 days)');
 
     // --- Floors (InvalidConfig). ---
     if (config.initMargin < MIN_MARGIN) v.push('initMargin is below MIN_MARGIN (0.1%)');
-    if (config.impactDivisor < MIN_IMPACT) v.push('impactDivisor is below MIN_IMPACT (caps impact at 10%)');
+    if (config.impactScalar <= 0n) v.push('impactScalar must be positive');
 
     // The decrease lock must outlast the price-verifier's staleness window.
     if (config.notionalLock < MIN_NOTIONAL_LOCK) v.push('notionalLock is below MIN_NOTIONAL_LOCK (15s)');
@@ -136,8 +133,9 @@ export function validateTradingConfig(config: TradingConfig): string[] {
     // The vault-order fill floor keeps dust fills out.
     if (config.minDeposit <= 0n) v.push('minDeposit must be positive');
 
-    // Vault fill fee rate is bounded.
-    if (config.vaultFee > MAX_FEE_RATE) v.push('vaultFee exceeds MAX_FEE_RATE (1%)');
+    // Vault fill fee rates are bounded.
+    if (config.depositFee > MAX_FEE_RATE) v.push('depositFee exceeds MAX_FEE_RATE (1%)');
+    if (config.redeemFee > MAX_FEE_RATE) v.push('redeemFee exceeds MAX_FEE_RATE (1%)');
 
     // Open cap positive; withdraw cap at least the open cap.
     if (config.maxUtilOpen <= 0n) v.push('maxUtilOpen must be positive');
@@ -158,8 +156,9 @@ export function validateTradingConfig(config: TradingConfig): string[] {
         v.push('increasedBorrowRate exceeds MAX_BORROW_RATE (1000% APR)');
     }
 
-    // Funding velocity: the decay band sits inside the stable band, and the
-    // charged floor cannot exceed the bounded rate cap.
+    // Funding velocity: the decay band sits inside the stable band, the
+    // charged floor cannot exceed the bounded rate cap, and the accelerations
+    // share the rate bound.
     if (config.thresholdStableFunding > SCALAR_18) v.push('thresholdStableFunding exceeds SCALAR_18 (100%)');
     if (config.thresholdDecreaseFunding > config.thresholdStableFunding) {
         v.push('thresholdDecreaseFunding must not exceed thresholdStableFunding');
@@ -169,23 +168,22 @@ export function validateTradingConfig(config: TradingConfig): string[] {
     if (config.fundingIncrease > MAX_FUNDING_RATE) v.push('fundingIncrease exceeds MAX_FUNDING_RATE (1000% APR)');
     if (config.fundingDecrease > MAX_FUNDING_RATE) v.push('fundingDecrease exceeds MAX_FUNDING_RATE (1000% APR)');
 
-    // Solvency ladder: the ADL clear target sits below the trigger (hysteresis),
-    // the trigger at or below the trader haircut threshold, with band floors.
+    // Solvency ladder, every rung a side pending PnL factor of half the vault
+    // balance: the ADL clear target sits below the trigger (hysteresis), the
+    // trigger at or below the trader haircut threshold, with band floors. The
+    // redeem gate is positive and at most the haircut threshold.
     if (config.adlMaxPnl >= SCALAR_18) v.push('adlMaxPnl must be below SCALAR_18 (100%)');
     if (config.adlMaxPnl < MIN_ADL_TRIGGER) v.push('adlMaxPnl is below MIN_ADL_TRIGGER (45%)');
     if (config.adlClearTarget > config.adlMaxPnl) v.push('adlClearTarget must not exceed adlMaxPnl');
     if (config.adlClearTarget < MIN_ADL_CLEAR) v.push('adlClearTarget is below MIN_ADL_CLEAR (40%)');
     if (config.maxPnlTrader >= SCALAR_18) v.push('maxPnlTrader must be below SCALAR_18 (100%)');
     if (config.adlMaxPnl > config.maxPnlTrader) v.push('adlMaxPnl must not exceed maxPnlTrader');
-
-    // Vault fairness gates: the LP entry/exit tolerances sit below the
-    // insolvency line, the instant-deposit waiver at or below the deposit gate,
-    // and the vault size cap is positive.
-    if (config.maxPnlDeposit >= SCALAR_18) v.push('maxPnlDeposit must be below SCALAR_18 (100%)');
-    if (config.maxPnlWithdraw >= SCALAR_18) v.push('maxPnlWithdraw must be below SCALAR_18 (100%)');
-    if (config.instantDepositPnl > config.maxPnlDeposit) {
-        v.push('instantDepositPnl must not exceed maxPnlDeposit');
+    if (config.maxPnlWithdraw <= 0n) v.push('maxPnlWithdraw must be positive');
+    if (config.maxPnlWithdraw > config.maxPnlTrader) {
+        v.push('maxPnlWithdraw must not exceed maxPnlTrader');
     }
+
+    // The vault size cap is positive.
     if (config.maxVaultBalance <= 0n) v.push('maxVaultBalance must be positive');
 
     // The fill floor stays a small fraction of the vault cap. BigInt has no

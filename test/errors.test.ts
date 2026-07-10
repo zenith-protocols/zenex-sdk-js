@@ -1,8 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { TradingError, ContractErrorType } from '../src/errors.js';
+import {
+    ContractError,
+    ContractErrorType,
+    TradingError,
+    contractErrorFromCode,
+    tradingErrorMessages,
+} from '../src/errors.js';
+
+// =============================================================================
+// Error enums are hand-checked against the contract sources:
+//   trading/src/errors.rs          (TradingError, 700-772)
+//   price-verifier/src/error.rs    (PriceVerifierError, 780-791)
+//   strategy-vault/src/strategy.rs (StrategyVaultError, 800-801)
+//   governance/src/errors.rs       (GovernanceError, 810-812)
+//   treasury/src/lib.rs            (TreasuryError, 900)
+// The namespaces are disjoint, so contractErrorFromCode takes no hint.
+// =============================================================================
 
 describe('TradingError (v2 trading/src/errors.rs)', () => {
     it('matches every v2 trading error code exactly', () => {
+        // config / construction
         expect(TradingError.InvalidConfig).toBe(700);
         expect(TradingError.InvalidPrice).toBe(701);
         expect(TradingError.InvalidStatus).toBe(702);
@@ -10,48 +27,167 @@ describe('TradingError (v2 trading/src/errors.rs)', () => {
         expect(TradingError.MarketFrozen).toBe(704);
         expect(TradingError.IncreaseHalted).toBe(705);
         expect(TradingError.MarketNotCleared).toBe(706);
+        // general
         expect(TradingError.NegativeValueNotAllowed).toBe(710);
+        // position sizing / margin
         expect(TradingError.NotionalBelowMinimum).toBe(711);
         expect(TradingError.NotionalAboveMaximum).toBe(712);
         expect(TradingError.InsufficientMargin).toBe(713);
         expect(TradingError.UtilizationExceeded).toBe(714);
         expect(TradingError.OpenInterestExceeded).toBe(715);
+        // position lifecycle
         expect(TradingError.PositionNotFound).toBe(720);
         expect(TradingError.NotionalLocked).toBe(721);
         expect(TradingError.NotLiquidatable).toBe(722);
+        // orders / price
         expect(TradingError.OrderNotFound).toBe(730);
         expect(TradingError.OrderExpired).toBe(731);
         expect(TradingError.InvalidOrder).toBe(732);
+        expect(TradingError.TooManyOrders).toBe(733);
+        expect(TradingError.UnknownKind).toBe(734);
         expect(TradingError.StalePrice).toBe(740);
         expect(TradingError.PriceBoundExceeded).toBe(741);
         expect(TradingError.TriggerNotMet).toBe(742);
+        // vault orders
         expect(TradingError.VaultOrderNotFound).toBe(750);
         expect(TradingError.VaultOrderLocked).toBe(751);
-        expect(TradingError.PendingPnlExceeded).toBe(752);
+        expect(TradingError.MinOutNotMet).toBe(752);
         expect(TradingError.VaultBalanceExceeded).toBe(753);
+        expect(TradingError.PendingPnlExceeded).toBe(754);
+        // funding
         expect(TradingError.NothingToClaim).toBe(760);
+        // ADL
         expect(TradingError.AdlNotTriggered).toBe(770);
         expect(TradingError.AdlOvershoot).toBe(771);
         expect(TradingError.AdlNotEligible).toBe(772);
     });
 
-    it('has exactly 30 members (no stale v1 codes)', () => {
-        const numericValues = Object.values(TradingError).filter((v) => typeof v === 'number');
-        expect(numericValues).toHaveLength(30);
+    it('has exactly 33 members (the full errors.rs surface, no stale codes)', () => {
+        // Hand count from errors.rs: 700-706 (7) + 710 (1) + 711-715 (5)
+        // + 720-722 (3) + 730-734 (5) + 740-742 (3) + 750-754 (5) + 760 (1)
+        // + 770-772 (3) = 33.
+        const numericValues = Object.values(TradingError).filter((value) => typeof value === 'number');
+        expect(numericValues).toHaveLength(33);
+    });
+
+    it('752 means MinOutNotMet, and PendingPnlExceeded moved to 754', () => {
+        expect(TradingError[752]).toBe('MinOutNotMet');
+        expect(TradingError[754]).toBe('PendingPnlExceeded');
+    });
+
+    it('every trading code has a human-readable message', () => {
+        const numericValues = Object.values(TradingError).filter(
+            (value): value is number => typeof value === 'number'
+        );
+        for (const code of numericValues) {
+            expect(tradingErrorMessages[code], `message for code ${code}`).toBeTruthy();
+        }
     });
 });
 
-describe('ContractErrorType v1 trading codes removed', () => {
-    it('no longer carries the v1 trading names (MarketNotFound, PriceSlippage, etc. are gone)', () => {
-        expect((ContractErrorType as unknown as Record<string, unknown>).MarketNotFound).toBeUndefined();
-        expect((ContractErrorType as unknown as Record<string, unknown>).PriceSlippage).toBeUndefined();
-        expect((ContractErrorType as unknown as Record<string, unknown>).LeverageAboveMaximum).toBeUndefined();
-        expect((ContractErrorType as unknown as Record<string, unknown>).ContractFrozen).toBeUndefined();
+describe('ContractErrorType periphery codes (v2 contracts)', () => {
+    it('price-verifier covers 780-791 including the feed-anchor pair', () => {
+        expect(ContractErrorType.PVInvalidData).toBe(780);
+        expect(ContractErrorType.PVInvalidPrice).toBe(781);
+        expect(ContractErrorType.PVPriceStale).toBe(782);
+        expect(ContractErrorType.PVInvalidStaleness).toBe(783);
+        expect(ContractErrorType.PVTruncatedData).toBe(784);
+        expect(ContractErrorType.PVInvalidPayloadLength).toBe(785);
+        expect(ContractErrorType.PVInvalidPayloadMagic).toBe(786);
+        expect(ContractErrorType.PVInvalidChannel).toBe(787);
+        expect(ContractErrorType.PVInvalidProperty).toBe(788);
+        expect(ContractErrorType.PVInvalidMarketSession).toBe(789);
+        expect(ContractErrorType.PVFeedNotFound).toBe(790);
+        expect(ContractErrorType.PVWrongExponent).toBe(791);
     });
 
-    it('governance codes are untouched (770-772 still map to governance meanings there)', () => {
-        expect(ContractErrorType.GovNotQueued).toBe(770);
-        expect(ContractErrorType.GovNotUnlocked).toBe(771);
-        expect(ContractErrorType.GovInvalidDelay).toBe(772);
+    it('strategy-vault is the 800-801 pair from strategy.rs', () => {
+        expect(ContractErrorType.StrategyInvalidAmount).toBe(800);
+        expect(ContractErrorType.StrategyPnlExceedsAssets).toBe(801);
+    });
+
+    it('governance moved to 810-812 per governance/src/errors.rs', () => {
+        expect(ContractErrorType.GovNotQueued).toBe(810);
+        expect(ContractErrorType.GovNotUnlocked).toBe(811);
+        expect(ContractErrorType.GovInvalidDelay).toBe(812);
+    });
+
+    it('treasury InvalidRate stays at 900', () => {
+        expect(ContractErrorType.TreasuryInvalidRate).toBe(900);
+    });
+
+    it('no ContractErrorType member sits in the trading 700-772 range', () => {
+        const numericValues = Object.values(ContractErrorType).filter(
+            (value): value is number => typeof value === 'number'
+        );
+        const inTradingRange = numericValues.filter((code) => code >= 700 && code <= 772);
+        expect(inTradingRange).toEqual([]);
+    });
+
+    it('the stale names are gone (v1 trading, old strategy-vault 790-793, governance 770-772 aliases)', () => {
+        const memberNames = ContractErrorType as unknown as Record<string, unknown>;
+        expect(memberNames.MarketNotFound).toBeUndefined();
+        expect(memberNames.PriceSlippage).toBeUndefined();
+        expect(memberNames.LeverageAboveMaximum).toBeUndefined();
+        expect(memberNames.ContractFrozen).toBeUndefined();
+        expect(memberNames.SharesLocked).toBeUndefined();
+        // 770-772 no longer resolve inside the merged enum (trading owns them)
+        expect((ContractErrorType as unknown as Record<number, string>)[770]).toBeUndefined();
+        expect((ContractErrorType as unknown as Record<number, string>)[771]).toBeUndefined();
+        expect((ContractErrorType as unknown as Record<number, string>)[772]).toBeUndefined();
+    });
+});
+
+describe('contractErrorFromCode (hint-free resolution)', () => {
+    it('takes only the code (collision-hint parameter deleted)', () => {
+        expect(contractErrorFromCode.length).toBe(1);
+    });
+
+    it('resolves the new trading codes', () => {
+        expect(contractErrorFromCode(733).type).toBe(TradingError.TooManyOrders);
+        expect(contractErrorFromCode(734).type).toBe(TradingError.UnknownKind);
+        expect(contractErrorFromCode(742).type).toBe(TradingError.TriggerNotMet);
+        expect(contractErrorFromCode(752).type).toBe(TradingError.MinOutNotMet);
+        expect(contractErrorFromCode(754).type).toBe(TradingError.PendingPnlExceeded);
+        expect(contractErrorFromCode(760).type).toBe(TradingError.NothingToClaim);
+    });
+
+    it('resolves 770-772 unhinted to the trading ADL errors with ADL messages', () => {
+        const adlNotTriggered = contractErrorFromCode(770);
+        expect(adlNotTriggered.type).toBe(TradingError.AdlNotTriggered);
+        expect(adlNotTriggered.message).toMatch(/ADL/);
+        expect(adlNotTriggered.message).not.toMatch(/queued/i);
+
+        expect(contractErrorFromCode(771).type).toBe(TradingError.AdlOvershoot);
+        expect(contractErrorFromCode(772).type).toBe(TradingError.AdlNotEligible);
+    });
+
+    it('resolves governance 810-812 with the queue/timelock messages', () => {
+        const notQueued = contractErrorFromCode(810);
+        expect(notQueued.type).toBe(ContractErrorType.GovNotQueued);
+        expect(notQueued.message).toMatch(/queued/i);
+        expect(notQueued.message).not.toMatch(/ADL/);
+
+        expect(contractErrorFromCode(811).type).toBe(ContractErrorType.GovNotUnlocked);
+        expect(contractErrorFromCode(812).type).toBe(ContractErrorType.GovInvalidDelay);
+    });
+
+    it('resolves strategy-vault 800-801 and price-verifier 790-791', () => {
+        expect(contractErrorFromCode(800).type).toBe(ContractErrorType.StrategyInvalidAmount);
+        expect(contractErrorFromCode(801).type).toBe(ContractErrorType.StrategyPnlExceedsAssets);
+        expect(contractErrorFromCode(790).type).toBe(ContractErrorType.PVFeedNotFound);
+        expect(contractErrorFromCode(791).type).toBe(ContractErrorType.PVWrongExponent);
+    });
+
+    it('falls back to UnknownError for codes in no namespace', () => {
+        expect(contractErrorFromCode(999).type).toBe(ContractErrorType.UnknownError);
+        expect(contractErrorFromCode(0).type).toBe(ContractErrorType.UnknownError);
+        expect(contractErrorFromCode(707).type).toBe(ContractErrorType.UnknownError);
+    });
+
+    it('returns ContractError instances carrying the numeric code', () => {
+        const error = contractErrorFromCode(741);
+        expect(error).toBeInstanceOf(ContractError);
+        expect(error.type).toBe(741);
     });
 });

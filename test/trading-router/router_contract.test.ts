@@ -22,40 +22,52 @@ function decodeInvoke(op: string) {
 describe('TradingRouterContract', () => {
     const contract = new TradingRouterContract(CONTRACT_ID);
 
-    it('createAndFill builds create_and_fill with the exact 13-arg order', () => {
+    it('createAndFill builds create_and_fill with the exact 12-arg order and a u32 kind', () => {
         const price = Buffer.from([9, 9, 9]);
         const op = contract.createAndFill(
-            TRADING, KEEPER, USER, 1000n, true, OrderKind.Increase, 100n, 10n,
-            5n, true, 200n, 12345, price,
+            TRADING, KEEPER, USER, 1000n, true, OrderKind.MarketIncrease, 100n, 10n,
+            5n, 200n, 12345, price,
         );
-        const { fn, args } = decodeInvoke(op);
+        const { fn, args, rawArgs } = decodeInvoke(op);
         expect(fn).toBe('create_and_fill');
-        expect(args.slice(0, 12)).toEqual([
-            TRADING, KEEPER, USER, 1000n, true, ['Increase'], 100n, 10n,
-            5n, true, 200n, 12345,
+        expect(args).toHaveLength(12);
+        // (trading, keeper, user, approve_amount, is_long, kind, notional,
+        //  collateral, trigger_price, price_bound, expiration, price)
+        expect(args.slice(0, 11)).toEqual([
+            TRADING, KEEPER, USER, 1000n, true, 0, 100n, 10n,
+            5n, 200n, 12345,
         ]);
-        expect(Buffer.from(args[12] as Uint8Array)).toEqual(price);
+        expect(rawArgs[5].switch().name).toBe('scvU32');
+        expect(Buffer.from(args[11] as Uint8Array)).toEqual(price);
     });
 
     it('createAndTryFill builds create_and_try_fill with the same arg order', () => {
         const price = Buffer.from([1, 2]);
         const op = contract.createAndTryFill(
-            TRADING, KEEPER, USER, 0n, false, OrderKind.Decrease, 50n, 5n,
-            0n, false, 0n, 999, price,
+            TRADING, KEEPER, USER, 0n, false, OrderKind.MarketDecrease, 50n, 5n,
+            0n, 0n, 999, price,
         );
-        const { fn, args } = decodeInvoke(op);
+        const { fn, args, rawArgs } = decodeInvoke(op);
         expect(fn).toBe('create_and_try_fill');
-        expect(args[5]).toEqual(['Decrease']);
-        expect(Buffer.from(args[12] as Uint8Array)).toEqual(price);
+        expect(args).toHaveLength(12);
+        expect(args[5]).toBe(3);
+        expect(rawArgs[5].switch().name).toBe('scvU32');
+        expect(Buffer.from(args[11] as Uint8Array)).toEqual(price);
     });
 
-    it('createAndTryFillVaultOrder builds create_and_try_fill_vault_order with 7 args', () => {
+    it('createAndTryFillVaultOrder builds create_and_try_fill_vault_order with min_out and a u32 kind', () => {
         const price = Buffer.from([7]);
-        const op = contract.createAndTryFillVaultOrder(TRADING, KEEPER, USER, VaultOrderKind.Deposit, 500n, 0n, price);
-        const { fn, args } = decodeInvoke(op);
+        const op = contract.createAndTryFillVaultOrder(TRADING, KEEPER, USER, VaultOrderKind.Deposit, 500n, 450n, price);
+        const { fn, args, rawArgs } = decodeInvoke(op);
         expect(fn).toBe('create_and_try_fill_vault_order');
-        expect(args.slice(0, 6)).toEqual([TRADING, KEEPER, USER, ['Deposit'], 500n, 0n]);
+        expect(args).toHaveLength(7);
+        // (trading, keeper, user, kind, amount, min_out, price)
+        expect(args.slice(0, 6)).toEqual([TRADING, KEEPER, USER, 0, 500n, 450n]);
+        expect(rawArgs[3].switch().name).toBe('scvU32');
         expect(Buffer.from(args[6] as Uint8Array)).toEqual(price);
+
+        const redeemOp = contract.createAndTryFillVaultOrder(TRADING, KEEPER, USER, VaultOrderKind.Redeem, 200n, 0n, price);
+        expect(decodeInvoke(redeemOp).args[3]).toBe(1);
     });
 
     it('adlSweep encodes targets as a vec of alphabetical maps (amount, is_long, user)', () => {
