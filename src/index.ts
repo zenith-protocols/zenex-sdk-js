@@ -121,7 +121,6 @@ export type {
 export {
     TradingRouterContract,
     callToScVal,
-    adlTargetToScVal,
     parseCallOutcome,
     parseFillAttempt,
 } from './trading-router/index.js';
@@ -130,7 +129,7 @@ export type {
     Call,
     CallOutcome,
     FillAttempt,
-    AdlTarget,
+    CreateAndFillWithFeeArgs,
 } from './trading-router/index.js';
 
 // =============================================================================

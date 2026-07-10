@@ -25,7 +25,7 @@ describe('TradingRouterContract extras', () => {
         expect(args[0].vec()!.length).toBe(1);
     });
 
-    it('parses multicall, multicallTry, createAndFill, and adlSweep results', () => {
+    it('parses multicall, multicallTry, and the create-and-fill results', () => {
         const p = TradingRouterContract.parsers;
 
         const rawVec = xdr.ScVal.scvVec([nativeToScVal(1n, { type: 'i128' })]).toXDR('base64');
@@ -38,9 +38,9 @@ describe('TradingRouterContract extras', () => {
         ]);
         const outcomes = xdr.ScVal.scvVec([outcome]).toXDR('base64');
         expect(p.multicallTry(outcomes)).toEqual([{ ok: true, value: 7n, error: 0 }]);
-        expect(p.adlSweep(outcomes)).toEqual([{ ok: true, value: 7n, error: 0 }]);
 
         expect(p.createAndFill(nativeToScVal(9n, { type: 'i128' }).toXDR('base64'))).toBe(9n);
+        expect(p.createAndFillWithFee(nativeToScVal(9n, { type: 'i128' }).toXDR('base64'))).toBe(9n);
 
         const attempt = xdr.ScVal.scvMap([
             entry('error', xdr.ScVal.scvU32(0)),
@@ -49,7 +49,7 @@ describe('TradingRouterContract extras', () => {
             entry('payout', nativeToScVal(5n, { type: 'i128' })),
         ]).toXDR('base64');
         expect(p.createAndTryFill(attempt)).toEqual({ id: 3, filled: true, payout: 5n, error: 0 });
-        expect(p.createAndTryFillVaultOrder(attempt)).toEqual({ id: 3, filled: true, payout: 5n, error: 0 });
+        expect(p.createAndTryFillWithFee(attempt)).toEqual({ id: 3, filled: true, payout: 5n, error: 0 });
     });
 });
 

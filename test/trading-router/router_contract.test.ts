@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, Address } from '@stellar/stellar-sdk';
 import { TradingRouterContract } from '../../src/trading-router/router_contract.js';
-import { Call, AdlTarget, parseFillAttempt, parseCallOutcome } from '../../src/trading-router/router_types.js';
-import { OrderKind, VaultOrderKind } from '../../src/trading/trading_types.js';
+import { Call, parseFillAttempt, parseCallOutcome } from '../../src/trading-router/router_types.js';
+import { OrderKind } from '../../src/trading/trading_types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 4));
@@ -55,34 +55,45 @@ describe('TradingRouterContract', () => {
         expect(Buffer.from(args[11] as Uint8Array)).toEqual(price);
     });
 
-    it('createAndTryFillVaultOrder builds create_and_try_fill_vault_order with min_out and a u32 kind', () => {
-        const price = Buffer.from([7]);
-        const op = contract.createAndTryFillVaultOrder(TRADING, KEEPER, USER, VaultOrderKind.Deposit, 500n, 450n, price);
+    it('createAndFillWithFee builds create_and_fill_with_fee with the exact 16-arg order', () => {
+        const price = Buffer.from([4, 2]);
+        const feeToken = StrKey.encodeContract(Buffer.alloc(32, 5));
+        const feeRecipient = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
+        const op = contract.createAndFillWithFee({
+            trading: TRADING, user: USER, feeToken, maxFeeAmount: 3000n,
+            approveAmount: 1000n, isLong: true, kind: OrderKind.MarketIncrease,
+            notional: 100n, collateral: 10n, triggerPrice: 0n, priceBound: 200n,
+            expiration: 12345, feeAmount: 2500n, feeRecipient, keeper: KEEPER, price,
+        });
         const { fn, args, rawArgs } = decodeInvoke(op);
-        expect(fn).toBe('create_and_try_fill_vault_order');
-        expect(args).toHaveLength(7);
-        // (trading, keeper, user, kind, amount, min_out, price)
-        expect(args.slice(0, 6)).toEqual([TRADING, KEEPER, USER, 0, 500n, 450n]);
-        expect(rawArgs[3].switch().name).toBe('scvU32');
-        expect(Buffer.from(args[6] as Uint8Array)).toEqual(price);
-
-        const redeemOp = contract.createAndTryFillVaultOrder(TRADING, KEEPER, USER, VaultOrderKind.Redeem, 200n, 0n, price);
-        expect(decodeInvoke(redeemOp).args[3]).toBe(1);
+        expect(fn).toBe('create_and_fill_with_fee');
+        expect(args).toHaveLength(16);
+        // (trading, user, fee_token, max_fee_amount, approve_amount, is_long,
+        //  kind, notional, collateral, trigger_price, price_bound, expiration,
+        //  fee_amount, fee_recipient, keeper, price)
+        expect(args.slice(0, 15)).toEqual([
+            TRADING, USER, feeToken, 3000n, 1000n, true, 0, 100n, 10n,
+            0n, 200n, 12345, 2500n, feeRecipient, KEEPER,
+        ]);
+        expect(rawArgs[6].switch().name).toBe('scvU32');
+        expect(Buffer.from(args[15] as Uint8Array)).toEqual(price);
     });
 
-    it('adlSweep encodes targets as a vec of alphabetical maps (amount, is_long, user)', () => {
-        const targets: AdlTarget[] = [
-            { user: USER, isLong: true, amount: 100n },
-            { user: KEEPER, isLong: false, amount: 200n },
-        ];
-        const op = contract.adlSweep(TRADING, KEEPER, targets, Buffer.from([1]));
+    it('createAndTryFillWithFee builds create_and_try_fill_with_fee with the same arg order', () => {
+        const price = Buffer.from([8]);
+        const feeToken = StrKey.encodeContract(Buffer.alloc(32, 5));
+        const feeRecipient = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
+        const op = contract.createAndTryFillWithFee({
+            trading: TRADING, user: USER, feeToken, maxFeeAmount: 500n,
+            approveAmount: 0n, isLong: false, kind: OrderKind.MarketDecrease,
+            notional: 50n, collateral: 0n, triggerPrice: 0n, priceBound: 0n,
+            expiration: 999, feeAmount: 0n, feeRecipient, keeper: KEEPER, price,
+        });
         const { fn, args } = decodeInvoke(op);
-        expect(fn).toBe('adl_sweep');
-        const decodedTargets = args[2] as Record<string, unknown>[];
-        expect(decodedTargets).toHaveLength(2);
-        expect(Object.keys(decodedTargets[0])).toEqual(['amount', 'is_long', 'user']);
-        expect(decodedTargets[0]).toEqual({ amount: 100n, is_long: true, user: USER });
-        expect(decodedTargets[1]).toEqual({ amount: 200n, is_long: false, user: KEEPER });
+        expect(fn).toBe('create_and_try_fill_with_fee');
+        expect(args).toHaveLength(16);
+        expect(args[6]).toBe(3);
+        expect(Buffer.from(args[15] as Uint8Array)).toEqual(price);
     });
 
     it('buildCall + multicall round-trip: decode op, assert nested call vec', () => {

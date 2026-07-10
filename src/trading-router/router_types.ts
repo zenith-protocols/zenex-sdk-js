@@ -50,16 +50,6 @@ export interface FillAttempt {
     error: number;
 }
 
-/** One deleveraging target of an ADL sweep. */
-export interface AdlTarget {
-    /** Position owner. */
-    user: string;
-    /** Position side. */
-    isLong: boolean;
-    /** Notional to close (token-dec); clamped to the contract ceiling. */
-    amount: bigint;
-}
-
 // =============================================================================
 // Converters: TS -> ScVal
 // =============================================================================
@@ -72,17 +62,6 @@ export function callToScVal(call: Call): xdr.ScVal {
         entry('args', xdr.ScVal.scvVec(call.args)),
         entry('contract', Address.fromString(call.contract).toScVal()),
         entry('func', xdr.ScVal.scvSymbol(call.func)),
-    ]);
-}
-
-/** Encode an `AdlTarget` as an alphabetically key-ordered `ScMap` (amount, is_long, user). */
-export function adlTargetToScVal(target: AdlTarget): xdr.ScVal {
-    const entry = (key: string, val: xdr.ScVal) =>
-        new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
-    return xdr.ScVal.scvMap([
-        entry('amount', nativeToScVal(target.amount, { type: 'i128' })),
-        entry('is_long', xdr.ScVal.scvBool(target.isLong)),
-        entry('user', Address.fromString(target.user).toScVal()),
     ]);
 }
 
