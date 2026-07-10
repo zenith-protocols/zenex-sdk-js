@@ -111,9 +111,9 @@ describe('package root exports', () => {
         expect(SDK.parseFillAttempt).toBeTypeOf('function');
     });
 
-    it('exports the token approve/bundle helpers', () => {
-        expect(SDK.approveCall).toBeTypeOf('function');
-        expect(SDK.approveAndOrder).toBeTypeOf('function');
+    it('does not export the removed token approve/bundle helpers', () => {
+        expect(SDK.approveCall).toBeUndefined();
+        expect(SDK.approveAndOrder).toBeUndefined();
     });
 
     it('exports the errors and response parsing surface', () => {

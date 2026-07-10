@@ -134,19 +134,6 @@ export type {
 } from './trading-router/index.js';
 
 // =============================================================================
-// Token Module (SEP-41 helpers + atomic approve/order bundle)
-// =============================================================================
-
-export {
-    approveCall,
-    approveAndOrder,
-} from './token/index.js';
-
-export type {
-    ApproveAndOrderParams,
-} from './token/index.js';
-
-// =============================================================================
 // Factory Module
 // =============================================================================
 
