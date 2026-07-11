@@ -11,6 +11,7 @@ export {
     callToScVal,
     parseCallOutcome,
     parseFillAttempt,
+    UNTYPED_FAILURE,
 } from './router_types.js';
 
 export type {

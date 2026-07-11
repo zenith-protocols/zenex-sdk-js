@@ -123,6 +123,7 @@ export {
     callToScVal,
     parseCallOutcome,
     parseFillAttempt,
+    UNTYPED_FAILURE,
 } from './trading-router/index.js';
 
 export type {

@@ -1,4 +1,4 @@
-import { Address, xdr, nativeToScVal } from '@stellar/stellar-sdk';
+import { Address, xdr, scValToNative } from '@stellar/stellar-sdk';
 
 // =============================================================================
 // Type mirrors and ScVal converters for the v2 TradingRouter contract's types.
@@ -18,19 +18,29 @@ export interface Call {
     args: xdr.ScVal[];
 }
 
+/** `error` marker for a failure that carries no contract error code. */
+export const UNTYPED_FAILURE = 0xffffffff;
+
 /**
- * The result of one batched call.
+ * The decoded result of one batched call.
  *
- * `value` carries the return value when the call returns an `i128` (keeper
- * payouts), `0n` otherwise. `error` is `0` on success, the contract error
- * code on a typed failure, `u32::MAX` (`4294967295`) on an untyped one.
+ * On the wire `multicall_try` returns raw values, one per call: the call's
+ * return value when it lands, or the failure as a host `Error` value when it
+ * does not (the two cannot collide; the host turns an error-tagged return
+ * into a failure). This interface is the SDK's decoded view of one element.
  */
 export interface CallOutcome {
     /** The call landed. */
     ok: boolean;
-    /** The return value when the call returns an `i128`; `0n` otherwise. */
-    value: bigint;
-    /** `0` on success, the contract error code otherwise. */
+    /**
+     * The call's decoded return value when ok (`scValToNative`; `null` for a
+     * void return); `undefined` on failure.
+     */
+    value: unknown;
+    /**
+     * `0` on success, the contract error code on a typed failure,
+     * `UNTYPED_FAILURE` on a non-contract (host) one.
+     */
     error: number;
 }
 
@@ -74,13 +84,16 @@ function big(v: unknown): bigint {
     return typeof v === 'bigint' ? v : BigInt(v as number);
 }
 
-/** Parse a `scValToNative`-decoded `CallOutcome` into its camelCase interface. */
-export function parseCallOutcome(raw: Record<string, unknown>): CallOutcome {
-    return {
-        ok: raw.ok as boolean,
-        value: big(raw.value),
-        error: Number(raw.error),
-    };
+/** Parse one raw `multicall_try` outcome `ScVal` into a [`CallOutcome`]. */
+export function parseCallOutcome(raw: xdr.ScVal): CallOutcome {
+    if (raw.switch() === xdr.ScValType.scvError()) {
+        const error = raw.error();
+        const code = error.switch() === xdr.ScErrorType.sceContract()
+            ? error.contractCode()
+            : UNTYPED_FAILURE;
+        return { ok: false, value: undefined, error: code };
+    }
+    return { ok: true, value: scValToNative(raw), error: 0 };
 }
 
 /** Parse a `scValToNative`-decoded `FillAttempt` into its camelCase interface. */
