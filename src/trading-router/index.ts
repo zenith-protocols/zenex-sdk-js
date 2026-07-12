@@ -9,6 +9,7 @@ export type { CreateAndFillWithFeeArgs } from './router_contract.js';
 // Core types, converters, and parsers
 export {
     callToScVal,
+    createOrderCall,
     parseCallOutcome,
     parseFillAttempt,
     UNTYPED_FAILURE,
@@ -18,4 +19,5 @@ export type {
     Call,
     CallOutcome,
     FillAttempt,
+    OrderParams,
 } from './router_types.js';

@@ -31,12 +31,7 @@ describe('TradingRouterContract extras', () => {
         const rawVec = xdr.ScVal.scvVec([nativeToScVal(1n, { type: 'i128' })]).toXDR('base64');
         expect(p.multicall(rawVec)).toEqual([1n]);
 
-        const outcome = xdr.ScVal.scvMap([
-            entry('error', xdr.ScVal.scvU32(0)),
-            entry('ok', xdr.ScVal.scvBool(true)),
-            entry('value', nativeToScVal(7n, { type: 'i128' })),
-        ]);
-        const outcomes = xdr.ScVal.scvVec([outcome]).toXDR('base64');
+        const outcomes = xdr.ScVal.scvVec([nativeToScVal(7n, { type: 'i128' })]).toXDR('base64');
         expect(p.multicallTry(outcomes)).toEqual([{ ok: true, value: 7n, error: 0 }]);
 
         expect(p.createAndFill(nativeToScVal(9n, { type: 'i128' }).toXDR('base64'))).toBe(9n);

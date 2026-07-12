@@ -1,4 +1,6 @@
-import { Address, xdr, scValToNative } from '@stellar/stellar-sdk';
+import { Address, xdr, scValToNative, nativeToScVal } from '@stellar/stellar-sdk';
+import type { i128, u32 } from '../index.js';
+import { OrderKind } from '../trading/trading_types.js';
 
 // =============================================================================
 // Type mirrors and ScVal converters for the v2 TradingRouter contract's types.
@@ -16,6 +18,61 @@ export interface Call {
     func: string;
     /** Positional arguments, host-encoded. */
     args: xdr.ScVal[];
+}
+
+/**
+ * The trading-contract `create_order` arguments, in a shape the router
+ * builders can turn into a fillable [`Call`] (see [`createOrderCall`]).
+ *
+ * Mirrors `trading::create_order` one-for-one, plus the `trading` target the
+ * `Call` runs against. `kind` crosses the ABI as a plain `u32` discriminant.
+ */
+export interface OrderParams {
+    /** The target trading contract the `create_order` runs on. */
+    trading: string;
+    /** The order owner. */
+    user: string;
+    /** Side the order targets. */
+    isLong: boolean;
+    /** OrderKind discriminant (0 = MarketIncrease .. 5 = StopDecrease). */
+    kind: OrderKind;
+    /** Size change magnitude (>= 0), token-dec. */
+    notional: i128;
+    /** Margin change magnitude (>= 0), token-dec. */
+    collateral: i128;
+    /** Crossing level for a trigger kind (price_scalar); unread for a market kind. */
+    triggerPrice: i128;
+    /** Fill slippage limit (price_scalar); 0 = unbounded. */
+    priceBound: i128;
+    /** Ledger sequence; eligible while the current sequence <= expiration. */
+    expiration: u32;
+}
+
+/**
+ * Build a `create_order`-shaped [`Call`] from [`OrderParams`], for composing
+ * router batches (`multicall`, `create_and_fill`, and their kin).
+ *
+ * The encoding mirrors `TradingContract.createOrderCall` exactly, so a bundled
+ * order is byte-identical to a direct one; only the router executes it (and
+ * the user's auth entry nests under the router call). The router's fill
+ * convention treats the FIRST call in a batch as the order to fill, so this
+ * helper's output is what belongs at `calls[0]` of a create-and-fill batch.
+ */
+export function createOrderCall(params: OrderParams): Call {
+    return {
+        contract: params.trading,
+        func: 'create_order',
+        args: [
+            Address.fromString(params.user).toScVal(),
+            xdr.ScVal.scvBool(params.isLong),
+            xdr.ScVal.scvU32(params.kind),
+            nativeToScVal(params.notional, { type: 'i128' }),
+            nativeToScVal(params.collateral, { type: 'i128' }),
+            nativeToScVal(params.triggerPrice, { type: 'i128' }),
+            nativeToScVal(params.priceBound, { type: 'i128' }),
+            xdr.ScVal.scvU32(params.expiration),
+        ],
+    };
 }
 
 /** `error` marker for a failure that carries no contract error code. */

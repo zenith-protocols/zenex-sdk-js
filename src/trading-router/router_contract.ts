@@ -1,9 +1,8 @@
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative } from '@stellar/stellar-sdk';
-import { i128, u32 } from '../index.js';
-import type { OrderKind } from '../trading/trading_types.js';
+import { i128 } from '../index.js';
 import {
-    Call, CallOutcome, FillAttempt,
-    callToScVal, parseCallOutcome, parseFillAttempt,
+    Call, CallOutcome, FillAttempt, OrderParams,
+    callToScVal, createOrderCall, parseCallOutcome, parseFillAttempt,
 } from './router_types.js';
 
 /** Coerce a `Buffer | Uint8Array` price update into a `Buffer` for `scvBytes`. */
@@ -11,23 +10,16 @@ function priceBuffer(price: Buffer | Uint8Array): Buffer {
     return price instanceof Buffer ? price : Buffer.from(price);
 }
 
-/** Shared shape of the create-and-fill argument tuple (fee and fee-free forms). */
-interface CreateAndFillArgs {
-    trading: string;
-    user: string;
-    isLong: boolean;
-    kind: OrderKind;
-    notional: i128;
-    collateral: i128;
-    triggerPrice: i128;
-    priceBound: i128;
-    expiration: u32;
-    keeper: string;
-    price: Buffer | Uint8Array;
-}
-
 /** Arguments for the fee-abstracted create-and-fill flows. */
-export interface CreateAndFillWithFeeArgs extends CreateAndFillArgs {
+export interface CreateAndFillWithFeeArgs {
+    /**
+     * The batch to run, front to back. `calls[0]` must be a `create_order`
+     * (build it with [`TradingRouterContract.createOrderCall`]); it is the
+     * order the fill leg targets. Calls after the first simply rest.
+     */
+    calls: Call[];
+    /** The order owner and fee payer; the fill's order owner. */
+    user: string;
     /** Token the relayer fee is collected in. */
     feeToken: string;
     /** User-authorized fee ceiling (token-dec). */
@@ -36,6 +28,10 @@ export interface CreateAndFillWithFeeArgs extends CreateAndFillArgs {
     feeAmount: i128;
     /** Fee payee. */
     feeRecipient: string;
+    /** Fill-reward recipient. */
+    keeper: string;
+    /** Serialized price update for the fill leg. */
+    price: Buffer | Uint8Array;
 }
 
 /**
@@ -112,16 +108,19 @@ export class TradingRouterContract extends Contract {
     }
 
     /**
-     * Create an order on `trading` and fill it in the same invocation;
-     * returns the fill payout (token-dec).
+     * Run `calls` in order and fill the first one, all in a single
+     * invocation; returns the fill payout (token-dec).
      *
-     * Fill-or-kill: a failing fill unwinds the creation, so nothing rests.
-     * With `keeper = user` the fill reward round-trips to the trader.
+     * `calls` runs front to back with `multicall` semantics (strict: any
+     * failing call traps the whole batch). By convention `calls[0]` is a
+     * `create_order` on the trading contract and is the order the fill
+     * targets; build it with [`TradingRouterContract.createOrderCall`].
+     * Calls after the first are never filled: a resting TP/SL create in
+     * positions `1..n` simply rests. Empty `calls` traps.
      *
-     * `kind` is the trading contract's `OrderKind` discriminant (crosses
-     * the ABI as a plain u32). Remaining arguments mirror the trading
-     * contract's `create_order`, with `price` (the serialized price update
-     * for the fill) last.
+     * Fill-or-kill: a failing fill unwinds the whole batch, so nothing
+     * rests. `user` is the fill's order owner; with `keeper = user` the fill
+     * reward round-trips to the trader.
      *
      * # Returns
      * - The fill payout paid to `keeper` (token-dec).
@@ -131,41 +130,27 @@ export class TradingRouterContract extends Contract {
      *   `execute_order` errors.
      */
     createAndFill(
-        trading: string,
-        keeper: string,
+        calls: Call[],
         user: string,
-        isLong: boolean,
-        kind: OrderKind,
-        notional: i128,
-        collateral: i128,
-        triggerPrice: i128,
-        priceBound: i128,
-        expiration: u32,
+        keeper: string,
         price: Buffer | Uint8Array,
     ): string {
         return this.call(
             'create_and_fill',
-            Address.fromString(trading).toScVal(),
-            Address.fromString(keeper).toScVal(),
+            xdr.ScVal.scvVec(calls.map(callToScVal)),
             Address.fromString(user).toScVal(),
-            xdr.ScVal.scvBool(isLong),
-            xdr.ScVal.scvU32(kind),
-            nativeToScVal(notional, { type: 'i128' }),
-            nativeToScVal(collateral, { type: 'i128' }),
-            nativeToScVal(triggerPrice, { type: 'i128' }),
-            nativeToScVal(priceBound, { type: 'i128' }),
-            xdr.ScVal.scvU32(expiration),
+            Address.fromString(keeper).toScVal(),
             xdr.ScVal.scvBytes(priceBuffer(price)),
         ).toXDR('base64');
     }
 
     /**
-     * Create an order on `trading` and attempt an immediate fill; returns
-     * the `FillAttempt`.
+     * Run `calls` in order and attempt an immediate fill of the first one;
+     * returns the `FillAttempt`.
      *
-     * The creation is strict; the fill leg is isolated. A failed fill
-     * leaves the order resting for a later keeper fill and reports why via
-     * the attempt's error code.
+     * The batch is strict; the fill leg is isolated. A failed fill leaves
+     * every created order resting for a later keeper fill and reports why
+     * via the attempt's error code.
      *
      * Arguments mirror `createAndFill`.
      *
@@ -177,45 +162,36 @@ export class TradingRouterContract extends Contract {
      *   failures are reported in the `FillAttempt`.
      */
     createAndTryFill(
-        trading: string,
-        keeper: string,
+        calls: Call[],
         user: string,
-        isLong: boolean,
-        kind: OrderKind,
-        notional: i128,
-        collateral: i128,
-        triggerPrice: i128,
-        priceBound: i128,
-        expiration: u32,
+        keeper: string,
         price: Buffer | Uint8Array,
     ): string {
         return this.call(
             'create_and_try_fill',
-            Address.fromString(trading).toScVal(),
-            Address.fromString(keeper).toScVal(),
+            xdr.ScVal.scvVec(calls.map(callToScVal)),
             Address.fromString(user).toScVal(),
-            xdr.ScVal.scvBool(isLong),
-            xdr.ScVal.scvU32(kind),
-            nativeToScVal(notional, { type: 'i128' }),
-            nativeToScVal(collateral, { type: 'i128' }),
-            nativeToScVal(triggerPrice, { type: 'i128' }),
-            nativeToScVal(priceBound, { type: 'i128' }),
-            xdr.ScVal.scvU32(expiration),
+            Address.fromString(keeper).toScVal(),
             xdr.ScVal.scvBytes(priceBuffer(price)),
         ).toXDR('base64');
     }
 
     /**
-     * Collect a relayer fee from `user`, then create an order on `trading`
-     * and fill it in the same invocation; returns the fill payout
-     * (token-dec).
+     * Collect a relayer fee from `user`, then run `calls` and fill the first
+     * one, all in a single invocation; returns the fill payout (token-dec).
      *
-     * The user's authorization covers the signed prefix (`trading` through
-     * `expiration`); `feeAmount`, `feeRecipient`, `keeper`, and `price` sit
-     * outside it, so the submitter sets them after signing. Fill-or-kill: a
-     * failing fill unwinds the creation, the approvals, and the fee, so
-     * nothing rests. `feeAmount` must not exceed `maxFeeAmount`; `0n` skips
-     * collection.
+     * `calls[0]` must be a `create_order` (the order the fill targets); build
+     * it with [`TradingRouterContract.createOrderCall`]. Calls after the
+     * first simply rest.
+     *
+     * The user's authorization covers the signed prefix
+     * `(calls, feeToken, maxFeeAmount)`; the replaceable tail
+     * `(feeAmount, feeRecipient, keeper, price)` sits outside it, so the
+     * relay sets those after signing. The whole batch is signed as one value,
+     * so the inner `create_order` (and any further inner calls) ride the
+     * signed auth tree as sub-invocation entries. Fill-or-kill: a failing
+     * fill unwinds the batch, the approvals, and the fee, so nothing rests.
+     * `feeAmount` must not exceed `maxFeeAmount`; `0n` skips collection.
      *
      * # Returns
      * - The fill payout paid to `keeper` (token-dec).
@@ -240,10 +216,11 @@ export class TradingRouterContract extends Contract {
      * Collect a relayer fee from `user`, then create an order on `trading`
      * and attempt an immediate fill; returns the `FillAttempt`.
      *
-     * Shares `createAndFillWithFee`'s envelope and authorization. The fee
-     * and creation legs are strict; the fill leg is isolated, so a failed
-     * fill leaves the order resting with the fee collected and reports why
-     * via the attempt's error code.
+     * Shares `createAndFillWithFee`'s envelope and authorization (signed
+     * prefix `(calls, feeToken, maxFeeAmount)`). The fee and batch legs are
+     * strict; the fill leg is isolated, so a failed fill leaves every created
+     * order resting with the fee collected and reports why via the attempt's
+     * error code.
      *
      * # Returns
      * - The `FillAttempt` carrying the created order id.
@@ -268,26 +245,34 @@ export class TradingRouterContract extends Contract {
     static buildCall(contract: string, func: string, args: xdr.ScVal[]): Call {
         return { contract, func, args };
     }
+
+    /**
+     * Build a `create_order`-shaped `Call` from `OrderParams`, ready to sit at
+     * `calls[0]` of a create-and-fill batch (or anywhere in a `multicall`).
+     *
+     * Re-exports the `createOrderCall` helper as a static so batch composition
+     * needs only the router binding. The encoding mirrors
+     * `TradingContract.createOrderCall`, so a bundled order is byte-identical
+     * to a direct one.
+     */
+    static createOrderCall(params: OrderParams): Call {
+        return createOrderCall(params);
+    }
 }
 
 /**
- * Encode the 15-arg with-fee tuple in on-chain order. The last four slots
- * (`fee_amount`, `fee_recipient`, `keeper`, `price`) are the injected tail
- * outside the user's signature; the relay rewrites them before submission.
+ * Encode the 8-arg with-fee tuple in on-chain order:
+ * `(calls, user, fee_token, max_fee_amount, fee_amount, fee_recipient,
+ * keeper, price)`. The signed prefix is `(calls, fee_token, max_fee_amount)`;
+ * the replaceable tail `(fee_amount, fee_recipient, keeper, price)` sits
+ * outside the user's signature and the relay rewrites it before submission.
  */
 function withFeeScVals(args: CreateAndFillWithFeeArgs): xdr.ScVal[] {
     return [
-        Address.fromString(args.trading).toScVal(),
+        xdr.ScVal.scvVec(args.calls.map(callToScVal)),
         Address.fromString(args.user).toScVal(),
         Address.fromString(args.feeToken).toScVal(),
         nativeToScVal(args.maxFeeAmount, { type: 'i128' }),
-        xdr.ScVal.scvBool(args.isLong),
-        xdr.ScVal.scvU32(args.kind),
-        nativeToScVal(args.notional, { type: 'i128' }),
-        nativeToScVal(args.collateral, { type: 'i128' }),
-        nativeToScVal(args.triggerPrice, { type: 'i128' }),
-        nativeToScVal(args.priceBound, { type: 'i128' }),
-        xdr.ScVal.scvU32(args.expiration),
         nativeToScVal(args.feeAmount, { type: 'i128' }),
         Address.fromString(args.feeRecipient).toScVal(),
         Address.fromString(args.keeper).toScVal(),

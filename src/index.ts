@@ -121,6 +121,7 @@ export type {
 export {
     TradingRouterContract,
     callToScVal,
+    createOrderCall,
     parseCallOutcome,
     parseFillAttempt,
     UNTYPED_FAILURE,
@@ -130,6 +131,7 @@ export type {
     Call,
     CallOutcome,
     FillAttempt,
+    OrderParams,
     CreateAndFillWithFeeArgs,
 } from './trading-router/index.js';
 
