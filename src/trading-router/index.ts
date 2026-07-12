@@ -11,13 +11,11 @@ export {
     callToScVal,
     createOrderCall,
     parseCallOutcome,
-    parseFillAttempt,
     UNTYPED_FAILURE,
 } from './router_types.js';
 
 export type {
     Call,
     CallOutcome,
-    FillAttempt,
     OrderParams,
 } from './router_types.js';

@@ -12,9 +12,6 @@ function decodeInvoke(op: string) {
     return { fn: invoke.functionName().toString(), args: invoke.args() };
 }
 
-const entry = (k: string, v: xdr.ScVal) =>
-    new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(k), val: v });
-
 describe('TradingRouterContract extras', () => {
     const router = new TradingRouterContract(ROUTER_ID);
 
@@ -34,17 +31,25 @@ describe('TradingRouterContract extras', () => {
         const outcomes = xdr.ScVal.scvVec([nativeToScVal(7n, { type: 'i128' })]).toXDR('base64');
         expect(p.multicallTry(outcomes)).toEqual([{ ok: true, value: 7n, error: 0 }]);
 
-        expect(p.createAndFill(nativeToScVal(9n, { type: 'i128' }).toXDR('base64'))).toBe(9n);
-        expect(p.createAndFillWithFee(nativeToScVal(9n, { type: 'i128' }).toXDR('base64'))).toBe(9n);
-
-        const attempt = xdr.ScVal.scvMap([
-            entry('error', xdr.ScVal.scvU32(0)),
-            entry('filled', xdr.ScVal.scvBool(true)),
-            entry('id', xdr.ScVal.scvU32(3)),
-            entry('payout', nativeToScVal(5n, { type: 'i128' })),
+        // Create-and-fill returns Vec<Val>: [ order id, fill payout ]; raw passthrough.
+        const fillResult = xdr.ScVal.scvVec([
+            xdr.ScVal.scvU32(3), nativeToScVal(9n, { type: 'i128' }),
         ]).toXDR('base64');
-        expect(p.createAndTryFill(attempt)).toEqual({ id: 3, filled: true, payout: 5n, error: 0 });
-        expect(p.createAndTryFillWithFee(attempt)).toEqual({ id: 3, filled: true, payout: 5n, error: 0 });
+        expect(p.createAndFill(fillResult)).toEqual([3, 9n]);
+        expect(p.createAndFillWithFee(fillResult)).toEqual([3, 9n]);
+
+        // Try variant returns Vec<Val> split into CallOutcome[]; last outcome is the fill.
+        const attempt = xdr.ScVal.scvVec([
+            xdr.ScVal.scvU32(3), nativeToScVal(5n, { type: 'i128' }),
+        ]).toXDR('base64');
+        expect(p.createAndTryFill(attempt)).toEqual([
+            { ok: true, value: 3, error: 0 },
+            { ok: true, value: 5n, error: 0 },
+        ]);
+        expect(p.createAndTryFillWithFee(attempt)).toEqual([
+            { ok: true, value: 3, error: 0 },
+            { ok: true, value: 5n, error: 0 },
+        ]);
     });
 });
 

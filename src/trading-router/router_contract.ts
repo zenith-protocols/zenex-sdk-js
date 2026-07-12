@@ -1,8 +1,8 @@
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative } from '@stellar/stellar-sdk';
 import { i128 } from '../index.js';
 import {
-    Call, CallOutcome, FillAttempt, OrderParams,
-    callToScVal, createOrderCall, parseCallOutcome, parseFillAttempt,
+    Call, CallOutcome, OrderParams,
+    callToScVal, createOrderCall, parseCallOutcome,
 } from './router_types.js';
 
 /** Coerce a `Buffer | Uint8Array` price update into a `Buffer` for `scvBytes`. */
@@ -85,14 +85,26 @@ export class TradingRouterContract extends Contract {
         multicallWithFee: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // --- create-and-fill flows ---
-        createAndFill: (result: string): i128 =>
+        // Every create-and-fill entry returns a `Vec<Val>`, multicall-style:
+        // the N call results with the fill outcome appended as the last
+        // element. `results[0]` is the created order id (`calls[0]`'s return).
+        //
+        // Strict variants mirror `multicall` (raw passthrough): the batch
+        // traps on any failure, so all elements decode cleanly and the last
+        // element is the fill payout (i128, as a bigint).
+        createAndFill: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        createAndTryFill: (result: string): FillAttempt =>
-            parseFillAttempt(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
-        createAndFillWithFee: (result: string): i128 =>
+        createAndFillWithFee: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        createAndTryFillWithFee: (result: string): FillAttempt =>
-            parseFillAttempt(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
+        // Try variants mirror `multicallTry`: each element is a `CallOutcome`.
+        // The last element is the isolated fill outcome, `ok: true` (payout in
+        // `value`) when filled or `ok: false` (rested; `error` carries the
+        // contract code) when the fill did not land. Every earlier element is
+        // a strict success (`ok: true`).
+        createAndTryFill: (result: string): CallOutcome[] =>
+            (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(parseCallOutcome),
+        createAndTryFillWithFee: (result: string): CallOutcome[] =>
+            (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(parseCallOutcome),
     };
 
     /**
@@ -167,7 +179,7 @@ export class TradingRouterContract extends Contract {
 
     /**
      * Run `calls` in order and fill the first one, all in a single
-     * invocation; returns the fill payout (token-dec).
+     * invocation; returns the batch results with the fill payout appended.
      *
      * `calls` runs front to back with `multicall` semantics (strict: any
      * failing call traps the whole batch). By convention `calls[0]` is a
@@ -181,7 +193,10 @@ export class TradingRouterContract extends Contract {
      * reward round-trips to the trader.
      *
      * # Returns
-     * - The fill payout paid to `keeper` (token-dec).
+     * - A `Vec<Val>`: the N call results with the fill payout appended as the
+     *   last element (length N+1). `results[0]` is the created order id; the
+     *   last element is the payout paid to `keeper` (token-dec). Decode with
+     *   `parsers.createAndFill` (raw passthrough, like `parsers.multicall`).
      *
      * # Errors
      * - Propagates the trading contract's `create_order` and
@@ -204,20 +219,26 @@ export class TradingRouterContract extends Contract {
 
     /**
      * Run `calls` in order and attempt an immediate fill of the first one;
-     * returns the `FillAttempt`.
+     * returns the batch results with the fill outcome appended.
      *
      * The batch is strict; the fill leg is isolated. A failed fill leaves
      * every created order resting for a later keeper fill and reports why
-     * via the attempt's error code.
+     * via the appended fill outcome's error code.
      *
      * Arguments mirror `createAndFill`.
      *
      * # Returns
-     * - The `FillAttempt` carrying the created order id.
+     * - A `Vec<Val>`: the N call results with the fill outcome appended as the
+     *   last element (length N+1), `multicall_try`-style. `results[0]` is the
+     *   created order id. The last element is the isolated fill outcome: the
+     *   payout `Val` when the fill lands, or a host `Error` value when it does
+     *   not (the order rests). Decode with `parsers.createAndTryFill` (a
+     *   `CallOutcome[]`, like `parsers.multicallTry`): the last outcome's
+     *   `ok` tells filled from rested.
      *
      * # Errors
      * - Propagates the trading contract's `create_order` errors; fill
-     *   failures are reported in the `FillAttempt`.
+     *   failures are reported in the appended outcome, not thrown.
      */
     createAndTryFill(
         calls: Call[],
@@ -236,7 +257,8 @@ export class TradingRouterContract extends Contract {
 
     /**
      * Collect a relayer fee from `user`, then run `calls` and fill the first
-     * one, all in a single invocation; returns the fill payout (token-dec).
+     * one, all in a single invocation; returns the batch results with the
+     * fill payout appended.
      *
      * `calls[0]` must be a `create_order` (the order the fill targets); build
      * it with [`TradingRouterContract.createOrderCall`]. Calls after the
@@ -252,7 +274,11 @@ export class TradingRouterContract extends Contract {
      * `feeAmount` must not exceed `maxFeeAmount`; `0n` skips collection.
      *
      * # Returns
-     * - The fill payout paid to `keeper` (token-dec).
+     * - A `Vec<Val>`: the N call results with the fill payout appended as the
+     *   last element (length N+1). `results[0]` is the created order id; the
+     *   last element is the payout paid to `keeper` (token-dec). Decode with
+     *   `parsers.createAndFillWithFee` (raw passthrough, like
+     *   `parsers.multicall`).
      *
      * # Errors
      * - `stellar_fee_abstraction::FeeAbstractionError::InvalidFeeBounds`
@@ -271,23 +297,29 @@ export class TradingRouterContract extends Contract {
     }
 
     /**
-     * Collect a relayer fee from `user`, then create an order on `trading`
-     * and attempt an immediate fill; returns the `FillAttempt`.
+     * Collect a relayer fee from `user`, then run `calls` and attempt an
+     * immediate fill of the first one; returns the batch results with the
+     * fill outcome appended.
      *
      * Shares `createAndFillWithFee`'s envelope and authorization (signed
      * prefix `(calls, feeToken, maxFeeAmount)`). The fee and batch legs are
      * strict; the fill leg is isolated, so a failed fill leaves every created
-     * order resting with the fee collected and reports why via the attempt's
-     * error code.
+     * order resting with the fee collected and reports why via the appended
+     * fill outcome's error code.
      *
      * # Returns
-     * - The `FillAttempt` carrying the created order id.
+     * - A `Vec<Val>`: the N call results with the fill outcome appended as the
+     *   last element (length N+1), `multicall_try`-style. `results[0]` is the
+     *   created order id; the last element is the isolated fill outcome
+     *   (payout `Val` when filled, host `Error` value when rested). Decode
+     *   with `parsers.createAndTryFillWithFee` (a `CallOutcome[]`, like
+     *   `parsers.multicallTry`).
      *
      * # Errors
      * - `stellar_fee_abstraction::FeeAbstractionError::InvalidFeeBounds`
      *   (#5003): `feeAmount` is negative or exceeds `maxFeeAmount`.
      * - Propagates the trading contract's `create_order` errors; fill
-     *   failures are reported in the `FillAttempt`.
+     *   failures are reported in the appended outcome, not thrown.
      *
      * # Events
      * - `fee_collected`: the fee moved from `user` to `feeRecipient`.

@@ -123,14 +123,12 @@ export {
     callToScVal,
     createOrderCall,
     parseCallOutcome,
-    parseFillAttempt,
     UNTYPED_FAILURE,
 } from './trading-router/index.js';
 
 export type {
     Call,
     CallOutcome,
-    FillAttempt,
     OrderParams,
     CreateAndFillWithFeeArgs,
     MulticallWithFeeArgs,

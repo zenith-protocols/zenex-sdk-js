@@ -106,8 +106,9 @@ describe('package root exports', () => {
 
     it('exports the trading-router converters and parsers', () => {
         expect(SDK.callToScVal).toBeTypeOf('function');
+        expect(SDK.createOrderCall).toBeTypeOf('function');
         expect(SDK.parseCallOutcome).toBeTypeOf('function');
-        expect(SDK.parseFillAttempt).toBeTypeOf('function');
+        expect(SDK.parseFillAttempt).toBeUndefined();
         expect(SDK.adlTargetToScVal).toBeUndefined();
     });
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, Address } from '@stellar/stellar-sdk';
 import { TradingRouterContract } from '../../src/trading-router/router_contract.js';
-import { Call, createOrderCall, parseFillAttempt, parseCallOutcome } from '../../src/trading-router/router_types.js';
+import { Call, createOrderCall, parseCallOutcome } from '../../src/trading-router/router_types.js';
 import { TradingContract } from '../../src/trading/trading_contract.js';
 import { OrderKind } from '../../src/trading/trading_types.js';
 
@@ -190,11 +190,6 @@ describe('TradingRouterContract', () => {
         expect(parseCallOutcome(err)).toEqual({ ok: false, value: undefined, error: 730 });
     });
 
-    it('parseFillAttempt camelCases { id, filled, payout, error }', () => {
-        const raw = { id: 7, filled: true, payout: 123n, error: 0 };
-        expect(parseFillAttempt(raw)).toEqual({ id: 7, filled: true, payout: 123n, error: 0 });
-    });
-
     it('parsers.multicall passes through raw scValToNative array', () => {
         const inner = xdr.ScVal.scvVec([xdr.ScVal.scvU32(1), xdr.ScVal.scvU32(2)]);
         const raw = inner.toXDR('base64');
@@ -206,18 +201,31 @@ describe('TradingRouterContract', () => {
         expect(TradingRouterContract.parsers.multicallTry(raw)).toEqual([{ ok: true, value: 5n, error: 0 }]);
     });
 
-    it('parsers.createAndTryFill decodes a FillAttempt map', () => {
-        const entry = (key: string, val: xdr.ScVal) => new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
-        const attempt = xdr.ScVal.scvMap([
-            entry('error', xdr.ScVal.scvU32(0)),
-            entry('filled', xdr.ScVal.scvBool(true)),
-            entry('id', xdr.ScVal.scvU32(3)),
-            entry('payout', nativeI128(10n)),
+    it('parsers.createAndFill passes the Vec<Val> through raw: results[0] = order id, last = payout', () => {
+        // Single-create batch: [ create_order id (u32), fill payout (i128) ].
+        const raw = xdr.ScVal.scvVec([xdr.ScVal.scvU32(3), nativeI128(10n)]).toXDR('base64');
+        const results = TradingRouterContract.parsers.createAndFill(raw);
+        expect(results).toEqual([3, 10n]);
+        expect(results[0]).toBe(3);                       // order id
+        expect(results[results.length - 1]).toBe(10n);    // fill payout
+        // createAndFillWithFee shares the raw passthrough.
+        expect(TradingRouterContract.parsers.createAndFillWithFee(raw)).toEqual([3, 10n]);
+    });
+
+    it('parsers.createAndTryFill splits into CallOutcome[]: last outcome filled vs rested', () => {
+        // Filled: last element is the payout Val.
+        const filled = xdr.ScVal.scvVec([xdr.ScVal.scvU32(3), nativeI128(10n)]).toXDR('base64');
+        expect(TradingRouterContract.parsers.createAndTryFill(filled)).toEqual([
+            { ok: true, value: 3, error: 0 },
+            { ok: true, value: 10n, error: 0 },
         ]);
-        const raw = attempt.toXDR('base64');
-        expect(TradingRouterContract.parsers.createAndTryFill(raw)).toEqual({
-            id: 3, filled: true, payout: 10n, error: 0,
-        });
+
+        // Rested: last element is a host Error value (the fill did not land).
+        const err = xdr.ScVal.scvError(xdr.ScError.sceContract(731));
+        const rested = xdr.ScVal.scvVec([xdr.ScVal.scvU32(3), err]).toXDR('base64');
+        const outcomes = TradingRouterContract.parsers.createAndTryFillWithFee(rested);
+        expect(outcomes[0]).toEqual({ ok: true, value: 3, error: 0 });   // order id created
+        expect(outcomes[outcomes.length - 1]).toEqual({ ok: false, value: undefined, error: 731 });
     });
 });
 

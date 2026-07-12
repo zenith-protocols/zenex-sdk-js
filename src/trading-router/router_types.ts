@@ -101,22 +101,6 @@ export interface CallOutcome {
     error: number;
 }
 
-/**
- * The result of a create-and-try-fill flow.
- *
- * `id` is `0` only for a Retired-market redeem that paid out at creation.
- */
-export interface FillAttempt {
-    /** The created order id; `0` for a Retired-market redeem paid out at creation. */
-    id: number;
-    /** The immediate fill landed. */
-    filled: boolean;
-    /** The fill payout when filled (token-dec). */
-    payout: bigint;
-    /** `0` when filled; the fill's contract error code otherwise. */
-    error: number;
-}
-
 // =============================================================================
 // Converters: TS -> ScVal
 // =============================================================================
@@ -136,11 +120,6 @@ export function callToScVal(call: Call): xdr.ScVal {
 // Parsers: scValToNative output (snake_case) -> camelCase interface
 // =============================================================================
 
-/** Coerce a decoded numeric (already `bigint`, or occasionally `number`) to `bigint`. */
-function big(v: unknown): bigint {
-    return typeof v === 'bigint' ? v : BigInt(v as number);
-}
-
 /** Parse one raw `multicall_try` outcome `ScVal` into a [`CallOutcome`]. */
 export function parseCallOutcome(raw: xdr.ScVal): CallOutcome {
     if (raw.switch() === xdr.ScValType.scvError()) {
@@ -151,14 +130,4 @@ export function parseCallOutcome(raw: xdr.ScVal): CallOutcome {
         return { ok: false, value: undefined, error: code };
     }
     return { ok: true, value: scValToNative(raw), error: 0 };
-}
-
-/** Parse a `scValToNative`-decoded `FillAttempt` into its camelCase interface. */
-export function parseFillAttempt(raw: Record<string, unknown>): FillAttempt {
-    return {
-        id: Number(raw.id),
-        filled: raw.filled as boolean,
-        payout: big(raw.payout),
-        error: Number(raw.error),
-    };
 }
