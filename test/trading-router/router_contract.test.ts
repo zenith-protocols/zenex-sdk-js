@@ -72,20 +72,20 @@ describe('TradingRouterContract', () => {
         expect(calls[1].args).toEqual([USER, true, 4, 50n, 0n, 300n, 0n, 12345]);
     });
 
-    it('createAndFillWithFee builds the exact 8-arg order (calls, user, fee_token, max_fee, fee_amount, fee_recipient, keeper, price)', () => {
+    it('createAndFillWithFee builds the exact 9-arg order (calls, user, fee_token, max_fee, fee_expiration, fee_amount, fee_recipient, keeper, price)', () => {
         const price = Buffer.from([4, 2]);
         const feeToken = StrKey.encodeContract(Buffer.alloc(32, 5));
         const feeRecipient = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
         const op = contract.createAndFillWithFee({
             calls: [fillCall()], user: USER, feeToken, maxFeeAmount: 3000n,
-            feeAmount: 2500n, feeRecipient, keeper: KEEPER, price,
+            feeExpiration: 1000, feeAmount: 2500n, feeRecipient, keeper: KEEPER, price,
         });
         const { fn, args } = decodeInvoke(op);
         expect(fn).toBe('create_and_fill_with_fee');
-        expect(args).toHaveLength(8);
+        expect(args).toHaveLength(9);
         expect((args[0] as unknown[])).toHaveLength(1);
-        expect(args.slice(1, 7)).toEqual([USER, feeToken, 3000n, 2500n, feeRecipient, KEEPER]);
-        expect(Buffer.from(args[7] as Uint8Array)).toEqual(price);
+        expect(args.slice(1, 8)).toEqual([USER, feeToken, 3000n, 1000, 2500n, feeRecipient, KEEPER]);
+        expect(Buffer.from(args[8] as Uint8Array)).toEqual(price);
     });
 
     it('createAndTryFillWithFee builds create_and_try_fill_with_fee with the same arg order', () => {
@@ -94,13 +94,13 @@ describe('TradingRouterContract', () => {
         const feeRecipient = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
         const op = contract.createAndTryFillWithFee({
             calls: [fillCall()], user: USER, feeToken, maxFeeAmount: 500n,
-            feeAmount: 0n, feeRecipient, keeper: KEEPER, price,
+            feeExpiration: 1000, feeAmount: 0n, feeRecipient, keeper: KEEPER, price,
         });
         const { fn, args } = decodeInvoke(op);
         expect(fn).toBe('create_and_try_fill_with_fee');
-        expect(args).toHaveLength(8);
-        expect(args.slice(1, 7)).toEqual([USER, feeToken, 500n, 0n, feeRecipient, KEEPER]);
-        expect(Buffer.from(args[7] as Uint8Array)).toEqual(price);
+        expect(args).toHaveLength(9);
+        expect(args.slice(1, 8)).toEqual([USER, feeToken, 500n, 1000, 0n, feeRecipient, KEEPER]);
+        expect(Buffer.from(args[8] as Uint8Array)).toEqual(price);
     });
 
     it('createOrderCall mirrors TradingContract.createOrderCall byte-for-byte and crosses kind as u32', () => {
@@ -122,7 +122,7 @@ describe('TradingRouterContract', () => {
         expect(routerCall.args[2].switch().name).toBe('scvU32');
     });
 
-    it('multicallWithFee builds the exact 6-arg order (calls, user, fee_token, max_fee, fee_amount, fee_recipient)', () => {
+    it('multicallWithFee builds the exact 7-arg order (calls, user, fee_token, max_fee, fee_expiration, fee_amount, fee_recipient)', () => {
         const feeToken = StrKey.encodeContract(Buffer.alloc(32, 5));
         const feeRecipient = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
         const cancel = TradingRouterContract.buildCall(TRADING, 'cancel_order', [
@@ -131,15 +131,15 @@ describe('TradingRouterContract', () => {
         ]);
         const op = contract.multicallWithFee({
             calls: [cancel], user: USER, feeToken, maxFeeAmount: 3000n,
-            feeAmount: 2500n, feeRecipient,
+            feeExpiration: 1000, feeAmount: 2500n, feeRecipient,
         });
         const { fn, args } = decodeInvoke(op);
         expect(fn).toBe('multicall_with_fee');
-        expect(args).toHaveLength(6);
+        expect(args).toHaveLength(7);
         const calls = args[0] as Record<string, unknown>[];
         expect(calls).toHaveLength(1);
         expect(calls[0].func).toBe('cancel_order');
-        expect(args.slice(1)).toEqual([USER, feeToken, 3000n, 2500n, feeRecipient]);
+        expect(args.slice(1)).toEqual([USER, feeToken, 3000n, 1000, 2500n, feeRecipient]);
     });
 
     it('parsers.multicallWithFee passes through raw scValToNative array', () => {
