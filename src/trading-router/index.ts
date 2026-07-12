@@ -4,7 +4,7 @@
 
 // Contract binding
 export { TradingRouterContract } from './router_contract.js';
-export type { CreateAndFillWithFeeArgs } from './router_contract.js';
+export type { CreateAndFillWithFeeArgs, MulticallWithFeeArgs } from './router_contract.js';
 
 // Core types, converters, and parsers
 export {

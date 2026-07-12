@@ -122,6 +122,32 @@ describe('TradingRouterContract', () => {
         expect(routerCall.args[2].switch().name).toBe('scvU32');
     });
 
+    it('multicallWithFee builds the exact 6-arg order (calls, user, fee_token, max_fee, fee_amount, fee_recipient)', () => {
+        const feeToken = StrKey.encodeContract(Buffer.alloc(32, 5));
+        const feeRecipient = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
+        const cancel = TradingRouterContract.buildCall(TRADING, 'cancel_order', [
+            Address.fromString(USER).toScVal(),
+            xdr.ScVal.scvU32(7),
+        ]);
+        const op = contract.multicallWithFee({
+            calls: [cancel], user: USER, feeToken, maxFeeAmount: 3000n,
+            feeAmount: 2500n, feeRecipient,
+        });
+        const { fn, args } = decodeInvoke(op);
+        expect(fn).toBe('multicall_with_fee');
+        expect(args).toHaveLength(6);
+        const calls = args[0] as Record<string, unknown>[];
+        expect(calls).toHaveLength(1);
+        expect(calls[0].func).toBe('cancel_order');
+        expect(args.slice(1)).toEqual([USER, feeToken, 3000n, 2500n, feeRecipient]);
+    });
+
+    it('parsers.multicallWithFee passes through raw scValToNative array', () => {
+        const inner = xdr.ScVal.scvVec([nativeI128(3n), nativeI128(4n)]);
+        const raw = inner.toXDR('base64');
+        expect(TradingRouterContract.parsers.multicallWithFee(raw)).toEqual([3n, 4n]);
+    });
+
     it('buildCall + multicall round-trip: decode op, assert nested call vec', () => {
         const inner: Call = {
             contract: TRADING,

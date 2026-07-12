@@ -10,6 +10,27 @@ function priceBuffer(price: Buffer | Uint8Array): Buffer {
     return price instanceof Buffer ? price : Buffer.from(price);
 }
 
+/**
+ * Arguments for the fee-abstracted pure batch (`multicallWithFee`).
+ *
+ * Signed prefix: `(calls, feeToken, maxFeeAmount)`. Replaceable tail set by
+ * the relay after signing: `(feeAmount, feeRecipient)`.
+ */
+export interface MulticallWithFeeArgs {
+    /** The batch to run strictly, front to back. No fill convention applies. */
+    calls: Call[];
+    /** The fee payer. */
+    user: string;
+    /** Token the relayer fee is collected in. */
+    feeToken: string;
+    /** User-authorized fee ceiling (token-dec). */
+    maxFeeAmount: i128;
+    /** Fee collected (token-dec); `0n` skips collection. */
+    feeAmount: i128;
+    /** Fee payee. */
+    feeRecipient: string;
+}
+
 /** Arguments for the fee-abstracted create-and-fill flows. */
 export interface CreateAndFillWithFeeArgs {
     /**
@@ -61,6 +82,8 @@ export class TradingRouterContract extends Contract {
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         multicallTry: (result: string): CallOutcome[] =>
             (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(parseCallOutcome),
+        multicallWithFee: (result: string): unknown[] =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // --- create-and-fill flows ---
         createAndFill: (result: string): i128 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
@@ -104,6 +127,41 @@ export class TradingRouterContract extends Contract {
         return this.call(
             'multicall_try',
             xdr.ScVal.scvVec(calls.map(callToScVal)),
+        ).toXDR('base64');
+    }
+
+    /**
+     * Collect a relayer fee from `user`, then run `calls` in order; returns
+     * each call's raw return value (same shape as `multicall`).
+     *
+     * A pure fee-wrapped batch with no fill convention, no keeper, and no
+     * price: the fee leg runs first (strict), then the calls run strictly
+     * front to back, so either every call lands or none do. This is the
+     * gasless envelope for cancels-only batches (for example the exit creator
+     * deleting every level), which the fill-bearing create-and-* entries
+     * cannot carry.
+     *
+     * The user's authorization covers the signed prefix
+     * `(calls, feeToken, maxFeeAmount)`; the replaceable tail
+     * `(feeAmount, feeRecipient)` sits outside it, so the relay sets those
+     * after signing. `feeAmount` must not exceed `maxFeeAmount`; `0n` skips
+     * collection.
+     *
+     * # Returns
+     * - The raw return value of each call, in call order. Decode with
+     *   `parsers.multicallWithFee`, which passes the `Vec<Val>` through
+     *   `scValToNative` untouched (results are left raw, exactly like
+     *   `parsers.multicall`).
+     */
+    multicallWithFee(args: MulticallWithFeeArgs): string {
+        return this.call(
+            'multicall_with_fee',
+            xdr.ScVal.scvVec(args.calls.map(callToScVal)),
+            Address.fromString(args.user).toScVal(),
+            Address.fromString(args.feeToken).toScVal(),
+            nativeToScVal(args.maxFeeAmount, { type: 'i128' }),
+            nativeToScVal(args.feeAmount, { type: 'i128' }),
+            Address.fromString(args.feeRecipient).toScVal(),
         ).toXDR('base64');
     }
 

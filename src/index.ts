@@ -133,6 +133,7 @@ export type {
     FillAttempt,
     OrderParams,
     CreateAndFillWithFeeArgs,
+    MulticallWithFeeArgs,
 } from './trading-router/index.js';
 
 // =============================================================================
