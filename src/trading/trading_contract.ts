@@ -517,11 +517,26 @@ export class TradingContract extends Contract {
      * - VaultOrderNotFound (750) if no vault order `(user, id)` exists.
      */
     cancelVaultOrder(user: string, id: u32): string {
-        return this.call(
-            'cancel_vault_order',
-            Address.fromString(user).toScVal(),
-            xdr.ScVal.scvU32(id),
-        ).toXDR('base64');
+        const call = this.cancelVaultOrderCall(user, id);
+        return this.call(call.func, ...call.args).toXDR('base64');
+    }
+
+    /**
+     * Build the `cancel_vault_order` invocation as a `Call` (contract, func,
+     * args), for batching under the trading-router's `multicall`.
+     *
+     * Shares its argument encoding with `cancelVaultOrder`, so a bundled
+     * cancel is byte-identical to a direct one.
+     */
+    cancelVaultOrderCall(user: string, id: u32): Call {
+        return {
+            contract: this.contractId(),
+            func: 'cancel_vault_order',
+            args: [
+                Address.fromString(user).toScVal(),
+                xdr.ScVal.scvU32(id),
+            ],
+        };
     }
 
     /**
