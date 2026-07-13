@@ -436,11 +436,27 @@ export class TradingContract extends Contract {
      * - OrderNotFound (730) if no order `(user, id)` exists.
      */
     cancelOrder(user: string, id: u32): string {
-        return this.call(
-            'cancel_order',
-            Address.fromString(user).toScVal(),
-            xdr.ScVal.scvU32(id),
-        ).toXDR('base64');
+        const call = this.cancelOrderCall(user, id);
+        return this.call(call.func, ...call.args).toXDR('base64');
+    }
+
+    /**
+     * Build the `cancel_order` invocation as a `Call` (contract, func, args),
+     * for batching under the trading-router's `multicall`.
+     *
+     * Shares its argument encoding with `cancelOrder`, so a bundled cancel is
+     * byte-identical to a direct one; the only difference is the router
+     * executes it (and the user's auth entry nests under the router call).
+     */
+    cancelOrderCall(user: string, id: u32): Call {
+        return {
+            contract: this.contractId(),
+            func: 'cancel_order',
+            args: [
+                Address.fromString(user).toScVal(),
+                xdr.ScVal.scvU32(id),
+            ],
+        };
     }
 
     /**
