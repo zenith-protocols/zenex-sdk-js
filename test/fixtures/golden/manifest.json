@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "contractsCommit": "4c631eb17af53ec5e6875f42bf71a43af295e521",
+  "productionSourceTree": "3c9815124a70cd8ee3f6fddad2baf072606588bb",
+  "toolchain": {
+    "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+    "cargo": "cargo 1.93.1 (083ac5135 2025-12-15)",
+    "stellarCli": "stellar 25.2.0 (28484880988199233a7e8e87c97cb12dac323cb3)",
+    "stellarXdr": "stellar-xdr 25.0.0 (dc9f40fcb83c3054341f70b65a2222073369b37b)",
+    "xdrCurrentRevision": "0a621ec7811db000a60efae5b35f78dee3aa2533",
+    "sorobanSdk": "25.3.0"
+  },
+  "cargoLock": {
+    "path": "Cargo.lock",
+    "sha256": "1b07b1d4d9e7d55ecb66d01b3d9c0e367bf342ab5ea9ed11f2b3c495d7c9eab2"
+  },
+  "vectors": [
+    {
+      "path": "test-vectors/strategy-vault-v2.json",
+      "sha256": "55e80e219e5ecb8a5177425df6445274b467fd69ca9436fbadbc13d3e9bff172",
+      "bytes": 12355
+    },
+    {
+      "path": "test-vectors/trading-v2.json",
+      "sha256": "15b8ff1b98a10733abfae9d9bbc25772fa617f88a30f89dea05095ed859b250e",
+      "bytes": 56276
+    }
+  ],
+  "contracts": [
+    {
+      "package": "factory",
+      "path": "artifacts/v2/wasm/factory.wasm",
+      "sha256": "3b4fb39c1733aeb2704acd9bfdc10ba185933ac8624f43b0124a56573adac7bd",
+      "bytes": 7722
+    },
+    {
+      "package": "governance",
+      "path": "artifacts/v2/wasm/governance.wasm",
+      "sha256": "751b7cc97b3c348e1eaf263eaef0c694ac1c5b3879256e68afe4ab9be8efac87",
+      "bytes": 10130
+    },
+    {
+      "package": "price-verifier",
+      "path": "artifacts/v2/wasm/price_verifier.wasm",
+      "sha256": "a305fb2c74d335602fc4c29e33f12772e747f80d0734293fbea83b709db0a2b3",
+      "bytes": 15247
+    },
+    {
+      "package": "strategy-vault",
+      "path": "artifacts/v2/wasm/strategy_vault.wasm",
+      "sha256": "26899099b15ef633220eabfd0871d2678170a3faab12a4e45eb1b986964950eb",
+      "bytes": 20915
+    },
+    {
+      "package": "trading",
+      "path": "artifacts/v2/wasm/trading.wasm",
+      "sha256": "c5e821f5903ada0021e521af259848b9ea9dd89ae08760dbba950b4fea092794",
+      "bytes": 64947
+    },
+    {
+      "package": "trading-router",
+      "path": "artifacts/v2/wasm/trading_router.wasm",
+      "sha256": "1affc4279fdc11de0ae14d2a8958f34aa88dfed4759f93a5a49b85c5c545caaa",
+      "bytes": 12350
+    },
+    {
+      "package": "treasury",
+      "path": "artifacts/v2/wasm/treasury.wasm",
+      "sha256": "85322d7b3edd30ac9c5f9a7dfb187dfa9eadf0781333ad841fe1bedb75a0eae9",
+      "bytes": 6248
+    }
+  ]
+}

@@ -25,7 +25,9 @@
         "test": "vitest run",
         "test:coverage": "vitest run --coverage",
         "specs:generate": "node scripts/contract-specs.mjs generate",
-        "specs:check": "node scripts/contract-specs.mjs check"
+        "specs:check": "node scripts/contract-specs.mjs check",
+        "vectors:sync": "node scripts/sync-contract-vectors.mjs sync",
+        "vectors:check": "node scripts/sync-contract-vectors.mjs check"
     },
     "exports": {
         ".": {
