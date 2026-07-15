@@ -764,6 +764,14 @@ export function buildVaultActionExecution(
                     'resting vault action requires rest-only execution',
                 );
             }
+            if (
+                input.policy.transport === 'direct' &&
+                Object.prototype.hasOwnProperty.call(input, 'routerAddress')
+            ) {
+                return invalidVaultAction(
+                    'routerAddress is accepted only for relayed resting actions',
+                );
+            }
             const restingQuote: ExactVaultRestingOrderCreationQuote = {
                 ...quote,
                 value: creation,

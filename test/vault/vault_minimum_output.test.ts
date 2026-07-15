@@ -8,6 +8,7 @@ import {
 const assumptions = [
     'minimum output is derived from a caller-supplied estimated fill output',
     'vault order fill output can change before keeper execution',
+    'minimum output is rounded down in atomic units',
 ];
 
 function derive(

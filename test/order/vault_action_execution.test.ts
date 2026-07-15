@@ -231,6 +231,22 @@ describe('buildVaultActionExecution', () => {
         });
     });
 
+    it('rejects a Router identity on direct resting execution', () => {
+        expect(
+            buildVaultActionExecution({
+                tradingAddress: TRADING,
+                routerAddress: ROUTER,
+                user: USER,
+                quote: exactQuote(Status.Active, 'deposit'),
+                policy: { kind: 'restOnly', transport: 'direct' },
+            }),
+        ).toMatchObject({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: expect.stringContaining('relayed resting'),
+        });
+    });
+
     it.each([
         ['nonpositive shares', { shares: 0n }],
         ['nonzero execution fee', { executionFee: 1n }],
