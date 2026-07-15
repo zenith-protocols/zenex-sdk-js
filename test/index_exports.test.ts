@@ -49,8 +49,12 @@ describe('package root exports', () => {
 
     it('does not export the removed kind-to-ScVal converters', () => {
         // Kinds now cross the ABI as plain u32; the wrapper converters are gone.
-        expect((SDK as Record<string, unknown>).orderKindToScVal).toBeUndefined();
-        expect((SDK as Record<string, unknown>).vaultOrderKindToScVal).toBeUndefined();
+        expect(
+            (SDK as Record<string, unknown>).orderKindToScVal,
+        ).toBeUndefined();
+        expect(
+            (SDK as Record<string, unknown>).vaultOrderKindToScVal,
+        ).toBeUndefined();
     });
 
     it('exports the trading math helpers and loaders', () => {
@@ -72,8 +76,12 @@ describe('package root exports', () => {
     it('exports the event enums and decoders', () => {
         expect(SDK.TradingEventType.CreateOrder).toBe('create_order');
         expect(SDK.TradingEventType.CancelOrder).toBe('cancel_order');
-        expect(SDK.TradingEventType.CreateVaultOrder).toBe('create_vault_order');
-        expect(SDK.TradingEventType.CancelVaultOrder).toBe('cancel_vault_order');
+        expect(SDK.TradingEventType.CreateVaultOrder).toBe(
+            'create_vault_order',
+        );
+        expect(SDK.TradingEventType.CancelVaultOrder).toBe(
+            'cancel_vault_order',
+        );
         expect(SDK.TradingEventType.DepositFill).toBe('deposit_fill');
         expect(SDK.TradingEventType.RedeemFill).toBe('redeem_fill');
         expect(SDK.TradingEventType.CloseFill).toBe('close_fill');
@@ -100,8 +108,12 @@ describe('package root exports', () => {
         const eventTypes = SDK.TradingEventType as Record<string, unknown>;
         expect(eventTypes.PositionUpdate).toBeUndefined();
         expect(eventTypes.ExecuteVaultOrder).toBeUndefined();
-        expect(Object.values(SDK.TradingEventType)).not.toContain('position_update');
-        expect(Object.values(SDK.TradingEventType)).not.toContain('execute_vault_order');
+        expect(Object.values(SDK.TradingEventType)).not.toContain(
+            'position_update',
+        );
+        expect(Object.values(SDK.TradingEventType)).not.toContain(
+            'execute_vault_order',
+        );
     });
 
     it('exports the trading-router converters and parsers', () => {
@@ -182,6 +194,30 @@ describe('package root exports', () => {
         expect(SDK.sessionConfigToScVal).toBeTypeOf('function');
     });
 
+    it('exports exact quote, transaction, relay, and data boundaries', () => {
+        expect(SDK.quotePositionAction).toBeTypeOf('function');
+        expect(SDK.quoteMarginAdjustment).toBeTypeOf('function');
+        expect(SDK.quoteVaultDeposit).toBeTypeOf('function');
+        expect(SDK.quoteVaultRedeem).toBeTypeOf('function');
+        expect(SDK.loadTradingSnapshot).toBeTypeOf('function');
+        expect(SDK.buildOrderOperation).toBeTypeOf('function');
+        expect(SDK.buildPositionActionExecution).toBeTypeOf('function');
+        expect(SDK.buildMarginAdjustmentExecution).toBeTypeOf('function');
+        expect(SDK.buildRelayCallRequest).toBeTypeOf('function');
+        expect(SDK.buildPriceFreeRelayOperation).toBeTypeOf('function');
+        expect(SDK.buildSmartAccountDeploymentRequest).toBeTypeOf('function');
+        expect(SDK.SMART_ACCOUNT_DEPLOYMENT_MAX_TIMEOUT_SECONDS).toBe(30);
+        expect(SDK.buildSingleMarketSessionRule).toBeTypeOf('function');
+        expect(SDK.prepareStrictTransaction).toBeTypeOf('function');
+        expect(SDK.ZenexDataClient).toBeTypeOf('function');
+        expect(SDK.streamZenexEvents).toBeTypeOf('function');
+        expect(SDK.executeZenexResync).toBeTypeOf('function');
+        expect(SDK.createZenexTrustBundle).toBeTypeOf('function');
+        expect(SDK.decodeApiSchema).toBeTypeOf('function');
+        expect(SDK.decodeLatestPriceUpdate).toBeTypeOf('function');
+        expect(SDK.API_VERSION).toBe('v1');
+    });
+
     it('does not carry the removed v1 FixedMath constants', () => {
         const fixedMath = SDK.FixedMath as Record<string, unknown>;
         expect(fixedMath.SCALAR_7).toBeUndefined();
@@ -193,6 +229,8 @@ describe('package root exports', () => {
 
     it('does not export the removed v1 oracle helpers', () => {
         expect((SDK as Record<string, unknown>).getOraclePrice).toBeUndefined();
-        expect((SDK as Record<string, unknown>).getOracleDecimals).toBeUndefined();
+        expect(
+            (SDK as Record<string, unknown>).getOracleDecimals,
+        ).toBeUndefined();
     });
 });

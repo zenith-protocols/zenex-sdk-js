@@ -44,11 +44,20 @@ export interface SkewSplitFees {
  * `side_pnl(maximize = false)` at zero bid/ask spread. `priceScalar` = SCALAR_18
  * for v2.
  */
-export function sidePnl(marketData: MarketData, price: bigint, priceScalar: bigint, isLong: boolean): bigint {
+export function sidePnl(
+    marketData: MarketData,
+    price: bigint,
+    priceScalar: bigint,
+    isLong: boolean,
+): bigint {
     const pnl = isLong
-        ? mulFloor(marketData.tokens.long, price, priceScalar) - marketData.notional.long
-        : marketData.notional.short - mulCeil(marketData.tokens.short, price, priceScalar);
-    const sideCollateral = isLong ? marketData.collateral.long : marketData.collateral.short;
+        ? mulFloor(marketData.tokens.long, price, priceScalar) -
+          marketData.notional.long
+        : marketData.notional.short -
+          mulCeil(marketData.tokens.short, price, priceScalar);
+    const sideCollateral = isLong
+        ? marketData.collateral.long
+        : marketData.collateral.short;
     const floor = -sideCollateral;
     return pnl > floor ? pnl : floor;
 }
@@ -60,8 +69,15 @@ export function sidePnl(marketData: MarketData, price: bigint, priceScalar: bigi
  * marking. This is the vault's share mispricing (positive = shares overstate
  * fair value by unpaid profit).
  */
-export function netPnl(marketData: MarketData, price: bigint, priceScalar: bigint): bigint {
-    return sidePnl(marketData, price, priceScalar, true) + sidePnl(marketData, price, priceScalar, false);
+export function netPnl(
+    marketData: MarketData,
+    price: bigint,
+    priceScalar: bigint,
+): bigint {
+    return (
+        sidePnl(marketData, price, priceScalar, true) +
+        sidePnl(marketData, price, priceScalar, false)
+    );
 }
 
 /**
@@ -72,8 +88,14 @@ export function netPnl(marketData: MarketData, price: bigint, priceScalar: bigin
  * This is the notional-based display ratio, distinct from the price-bearing
  * reserve (`MarketData::reserved`) that the on-chain open cap gates against.
  * The ratio is not capped, so it can exceed SCALAR_18.
+ *
+ * @remarks Display estimate only. Contract gate calculations must use
+ * `reserveUtilization` with exact reserve and capacity inputs.
  */
-export function utilization(marketData: MarketData, vaultBalance: bigint): bigint {
+export function utilization(
+    marketData: MarketData,
+    vaultBalance: bigint,
+): bigint {
     if (vaultBalance <= 0n) {
         return 0n;
     }
@@ -129,7 +151,7 @@ export function skewSplitFees(
 
     let worseningTokens: bigint;
     let improvingTokens: bigint;
-    if (imbPre !== 0n && imbPost !== 0n && (imbPre < 0n) !== (imbPost < 0n)) {
+    if (imbPre !== 0n && imbPost !== 0n && imbPre < 0n !== imbPost < 0n) {
         // The change crosses the balance point: the run to zero improves, the overshoot worsens.
         worseningTokens = abs(imbPost);
         improvingTokens = abs(imbPre);
@@ -144,11 +166,15 @@ export function skewSplitFees(
     // --- trade_fees: map the token split onto the notional pro-rata ---
     const notional = abs(signedNotional);
     // Worsening notional rounds up (dominant fee errs high); improving takes the remainder.
-    const worsening = deltaTokens === 0n ? 0n : mulCeil(notional, worseningTokens, deltaTokens);
+    const worsening =
+        deltaTokens === 0n
+            ? 0n
+            : mulCeil(notional, worseningTokens, deltaTokens);
     const improving = notional - worsening;
 
     const base =
-        mulCeil(worsening, config.feeDom, SCALAR_18) + mulCeil(improving, config.feeNonDom, SCALAR_18);
+        mulCeil(worsening, config.feeDom, SCALAR_18) +
+        mulCeil(improving, config.feeNonDom, SCALAR_18);
     // Size-quadratic impact fee on the full notional (math.rs::impact_fee).
     const impact = impactFee(notional, config.impactScalar);
 
@@ -169,14 +195,21 @@ export class MarketView {
      * Load the market singleton (`DataKey::MarketData`) from persistent
      * storage. Returns `null` when the entry is absent.
      */
-    public static async load(network: Network, contractId: string): Promise<MarketView | null> {
+    public static async load(
+        network: Network,
+        contractId: string,
+    ): Promise<MarketView | null> {
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
-        const key = persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('MarketData')]);
+        const key = persistentLedgerKey(contractId, [
+            xdr.ScVal.scvSymbol('MarketData'),
+        ]);
 
         try {
             const response = await stellarRpc.getLedgerEntries(key);
             if (response.entries.length === 0) return null;
-            const native = scValToNative(response.entries[0].val.contractData().val());
+            const native = scValToNative(
+                response.entries[0].val.contractData().val(),
+            );
             return new MarketView(parseMarketData(native));
         } catch {
             return null;
@@ -184,7 +217,11 @@ export class MarketView {
     }
 
     /** Signed pending PnL of `isLong`'s side (`priceScalar` = SCALAR_18 for v2). */
-    sidePnl(price: bigint, isLong: boolean, priceScalar: bigint = SCALAR_18): bigint {
+    sidePnl(
+        price: bigint,
+        isLong: boolean,
+        priceScalar: bigint = SCALAR_18,
+    ): bigint {
         return sidePnl(this.data, price, priceScalar, isLong);
     }
 
@@ -193,13 +230,27 @@ export class MarketView {
         return netPnl(this.data, price, priceScalar);
     }
 
-    /** Open interest / vault balance as a SCALAR_18 ratio. */
+    /**
+     * Display-only open interest / vault balance estimate. Use
+     * `reserveUtilization` for contract gate calculations.
+     */
     utilization(vaultBalance: bigint): bigint {
         return utilization(this.data, vaultBalance);
     }
 
     /** Trade fees for a fill on `isLong`'s side (skew-split base fee + size-quadratic impact fee). */
-    skewSplitFees(config: TradingConfig, isLong: boolean, signedNotional: bigint, signedTokens: bigint): SkewSplitFees {
-        return skewSplitFees(config, this.data, isLong, signedNotional, signedTokens);
+    skewSplitFees(
+        config: TradingConfig,
+        isLong: boolean,
+        signedNotional: bigint,
+        signedTokens: bigint,
+    ): SkewSplitFees {
+        return skewSplitFees(
+            config,
+            this.data,
+            isLong,
+            signedNotional,
+            signedTokens,
+        );
     }
 }

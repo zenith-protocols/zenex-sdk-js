@@ -4,8 +4,10 @@ import {
     StrKey,
     Transaction,
     hash,
+    nativeToScVal,
     xdr,
 } from '@stellar/stellar-sdk';
+import { MAX_SIGNED_PRICE_UPDATE_BYTES } from '../data/price.js';
 import {
     decodeCreateOrderCall,
     validateFillOrKillCalls,
@@ -33,7 +35,6 @@ const UUID =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RULE_NAME = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const POSITIVE_ATOMIC = /^[1-9][0-9]*$/;
 const P256_PRIME = BigInt(
     '0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff',
 );
@@ -62,6 +63,7 @@ export const SESSION_POLICY_WASM_SHA256 =
     'a98d1317f918b03af4e23f407eb99711eabda9c64629ae413427e7fa1c4f2135';
 export const SESSION_POLICY_SPEC_SHA256 =
     '66bb3c60cb65f33fbc680b45133cb0154654dfb72c18a7990c0068a535a44bf1';
+export const SMART_ACCOUNT_DEPLOYMENT_MAX_TIMEOUT_SECONDS = 30;
 
 export { RELAY_REQUEST_STATES };
 
@@ -69,6 +71,15 @@ function requireUuid(value: string): void {
     if (typeof value !== 'string' || !UUID.test(value)) {
         throw new TypeError('requestId must be an RFC 4122 UUID');
     }
+}
+
+function validU32Number(value: unknown): value is number {
+    return (
+        typeof value === 'number' &&
+        Number.isSafeInteger(value) &&
+        value >= 0 &&
+        value <= U32_MAX
+    );
 }
 
 function unsignedBigEndian(bytes: Uint8Array): bigint {
@@ -114,7 +125,10 @@ function canonicalHostFunction(value: string): xdr.HostFunction {
     }
 }
 
-function canonicalAuth(value: string, index: number): void {
+function canonicalAuth(
+    value: string,
+    index: number,
+): xdr.SorobanAuthorizationEntry {
     if (typeof value !== 'string' || value.length === 0) {
         throw new TypeError(
             `auth[${index}] must contain authorization-entry XDR`,
@@ -127,6 +141,7 @@ function canonicalAuth(value: string, index: number): void {
                 `auth[${index}] is not canonical authorization-entry XDR`,
             );
         }
+        return decoded;
     } catch (error) {
         if (
             error instanceof TypeError &&
@@ -136,6 +151,149 @@ function canonicalAuth(value: string, index: number): void {
         }
         throw new TypeError(
             `auth[${index}] must contain authorization-entry XDR`,
+        );
+    }
+}
+
+function exactScVal(left: xdr.ScVal, right: xdr.ScVal): boolean {
+    return left.toXDR('raw').equals(right.toXDR('raw'));
+}
+
+function exactContractInvocation(
+    invocation: xdr.SorobanAuthorizedInvocation,
+    contractId: string,
+    functionName: string,
+    args: readonly xdr.ScVal[],
+): boolean {
+    const authorized = invocation.function();
+    if (
+        authorized.switch().name !== 'sorobanAuthorizedFunctionTypeContractFn'
+    ) {
+        return false;
+    }
+    const contractFunction = authorized.contractFn();
+    const actualArgs = contractFunction.args();
+    return (
+        Address.fromScAddress(contractFunction.contractAddress()).toString() ===
+            contractId &&
+        contractFunction.functionName().toString() === functionName &&
+        actualArgs.length === args.length &&
+        actualArgs.every((value, index) => exactScVal(value, args[index])) &&
+        invocation.subInvocations().length === 0
+    );
+}
+
+function validateRelayAuthorizations(
+    entries: readonly xdr.SorobanAuthorizationEntry[],
+    user: string,
+    invoke: xdr.InvokeContractArgs,
+): void {
+    const signedPrefix = [
+        invoke.args()[0],
+        invoke.args()[2],
+        invoke.args()[3],
+        invoke.args()[4],
+    ] as const;
+    const router = Address.fromScAddress(invoke.contractAddress()).toString();
+    const feeToken = Address.fromScVal(invoke.args()[2]).toString();
+    const approvalPrefix = [
+        invoke.args()[1],
+        Address.fromString(router).toScVal(),
+    ] as const;
+    const maximumApproval = [
+        ...approvalPrefix,
+        invoke.args()[3],
+        invoke.args()[4],
+    ] as const;
+    const zeroApproval = [
+        ...approvalPrefix,
+        nativeToScVal(0n, { type: 'i128' }),
+        invoke.args()[4],
+    ] as const;
+    let exactSignedPrefixFound = false;
+    let exactRouterRootFound = false;
+
+    for (const entry of entries) {
+        if (entry.credentials().switch().name !== 'sorobanCredentialsAddress') {
+            throw new TypeError(
+                'relay auth entries must use address credentials',
+            );
+        }
+        const credentials = entry.credentials().address();
+        if (Address.fromScAddress(credentials.address()).toString() !== user) {
+            throw new TypeError(
+                'every relay authorization credential must belong to the outer user',
+            );
+        }
+        if (credentials.signatureExpirationLedger() === 0) {
+            throw new TypeError(
+                'relay authorization expiration must be a positive ledger',
+            );
+        }
+
+        const root = entry.rootInvocation().function();
+        if (root.switch().name !== 'sorobanAuthorizedFunctionTypeContractFn') {
+            continue;
+        }
+        const contractFunction = root.contractFn();
+        const rootArgs = contractFunction.args();
+        if (
+            Address.fromScAddress(
+                contractFunction.contractAddress(),
+            ).toString() === router &&
+            contractFunction.functionName().toString() ===
+                invoke.functionName().toString() &&
+            rootArgs.length === signedPrefix.length &&
+            rootArgs.every((value, index) =>
+                exactScVal(value, signedPrefix[index]),
+            )
+        ) {
+            exactSignedPrefixFound = true;
+            let maximumIndex = -1;
+            let zeroIndex = -1;
+            for (const [index, child] of entry
+                .rootInvocation()
+                .subInvocations()
+                .entries()) {
+                if (
+                    exactContractInvocation(
+                        child,
+                        feeToken,
+                        'approve',
+                        maximumApproval,
+                    )
+                ) {
+                    maximumIndex = index;
+                }
+                if (
+                    exactContractInvocation(
+                        child,
+                        feeToken,
+                        'approve',
+                        zeroApproval,
+                    )
+                ) {
+                    zeroIndex = index;
+                }
+            }
+            if (
+                maximumIndex !== -1 &&
+                zeroIndex !== -1 &&
+                maximumIndex < zeroIndex
+            ) {
+                exactRouterRootFound = true;
+            }
+        }
+    }
+
+    if (!exactSignedPrefixFound) {
+        throw new TypeError(
+            'relay auth is missing the exact Router signed prefix root',
+        );
+    }
+    if (!exactRouterRootFound) {
+        throw new TypeError(
+            'relay auth is missing the exact fee-token approve maximum and wipe children',
         );
     }
 }
@@ -172,6 +330,51 @@ function validateRelayContractIdentities(
         throw new TypeError(
             'trusted fee-token identities must be unique contract IDs',
         );
+    }
+    if (
+        contracts.referral !== undefined &&
+        !StrKey.isValidContract(contracts.referral)
+    ) {
+        throw new TypeError('trusted Referral must be a valid contract ID');
+    }
+    if (contracts.markets !== undefined) {
+        if (
+            !Array.isArray(contracts.markets) ||
+            contracts.markets.length !== contracts.trading.length ||
+            contracts.markets.some(
+                (market) =>
+                    !StrKey.isValidContract(market.trading) ||
+                    !StrKey.isValidContract(market.collateral) ||
+                    !contracts.trading.includes(market.trading) ||
+                    new Set([
+                        market.trading,
+                        contracts.router,
+                        market.collateral,
+                    ]).size !== 3,
+            ) ||
+            new Set(contracts.markets.map((market) => market.trading)).size !==
+                contracts.markets.length
+        ) {
+            throw new TypeError(
+                'trusted market-to-collateral identities are invalid',
+            );
+        }
+    }
+    if (contracts.sessionPolicy !== undefined) {
+        if (
+            !StrKey.isValidContract(contracts.sessionPolicy.contractId) ||
+            !StrKey.isValidContract(contracts.sessionPolicy.ed25519Verifier) ||
+            typeof contracts.sessionPolicy.ruleName !== 'string' ||
+            !RULE_NAME.test(contracts.sessionPolicy.ruleName) ||
+            typeof contracts.sessionPolicy.maximumDurationLedgers !==
+                'bigint' ||
+            contracts.sessionPolicy.maximumDurationLedgers <= 0n ||
+            contracts.sessionPolicy.maximumDurationLedgers > BigInt(U32_MAX)
+        ) {
+            throw new TypeError(
+                'trusted session-policy identities are invalid',
+            );
+        }
     }
 }
 
@@ -308,9 +511,14 @@ function validateFeeEnvelope(
     const maximum = scI128(args[3], 'maximum relay fee');
     const expiration = requireU32(args[4], 'relay fee expiration');
     const amount = scI128(args[5], 'relay fee amount');
-    scAddress(args[6], 'relay fee recipient');
-    if (maximum <= 0n || expiration === 0 || amount < 0n || amount > maximum) {
+    const recipient = scAddress(args[6], 'relay fee recipient');
+    if (maximum <= 0n || expiration === 0) {
         throw new TypeError('relay fee envelope values are invalid');
+    }
+    if (amount !== 1n || recipient !== user) {
+        throw new TypeError(
+            'relay unsigned fee tail must use the canonical SDK placeholders',
+        );
     }
     return user;
 }
@@ -330,6 +538,191 @@ function validateCancellationCall(
     ) {
         throw new TypeError(
             'priceFree batches may contain only same-user Trading cancellations',
+        );
+    }
+}
+
+function validStellarAddress(value: string): boolean {
+    return (
+        StrKey.isValidEd25519PublicKey(value) || StrKey.isValidContract(value)
+    );
+}
+
+function requireCallShape(
+    call: Call,
+    expected: readonly string[],
+    label: string,
+): void {
+    if (
+        call.args.length !== expected.length ||
+        call.args.some(
+            (argument, index) => argument.switch().name !== expected[index],
+        )
+    ) {
+        throw new TypeError(`${label} does not match its exact ABI`);
+    }
+}
+
+function validatePriceFreeTransfer(
+    call: Call,
+    user: string,
+    contracts: RelayContractIdentities,
+): void {
+    requireCallShape(call, ['scvAddress', 'scvAddress', 'scvI128'], 'transfer');
+    const sender = scAddress(call.args[0], 'transfer sender');
+    const recipient = scAddress(call.args[1], 'transfer recipient');
+    if (
+        !contracts.feeTokens.includes(call.contract) ||
+        sender !== user ||
+        !validStellarAddress(recipient) ||
+        recipient === user ||
+        scI128(call.args[2], 'transfer amount') <= 0n
+    ) {
+        throw new TypeError(
+            'priceFree transfer must use configured collateral for a non-self recipient',
+        );
+    }
+}
+
+function validatePriceFreeReferral(
+    call: Call,
+    user: string,
+    contracts: RelayContractIdentities,
+): void {
+    requireCallShape(call, ['scvAddress', 'scvAddress'], 'attribute');
+    const caller = scAddress(call.args[0], 'referral caller');
+    const referrer = scAddress(call.args[1], 'referrer');
+    if (
+        contracts.referral === undefined ||
+        call.contract !== contracts.referral ||
+        caller !== user ||
+        !validStellarAddress(referrer) ||
+        referrer === user
+    ) {
+        throw new TypeError(
+            'priceFree referral attribution must use the configured contract and a non-self referrer',
+        );
+    }
+}
+
+function symbolMap(value: xdr.ScVal, label: string): Map<string, xdr.ScVal> {
+    if (value.switch().name !== 'scvMap') {
+        throw new TypeError(`${label} must be a map`);
+    }
+    const fields = new Map<string, xdr.ScVal>();
+    for (const entry of value.map() ?? []) {
+        if (entry.key().switch().name !== 'scvSymbol') {
+            throw new TypeError(`${label} keys must be symbols`);
+        }
+        const key = entry.key().sym().toString();
+        if (fields.has(key)) {
+            throw new TypeError(`${label} keys must be unique`);
+        }
+        fields.set(key, entry.val());
+    }
+    return fields;
+}
+
+function validatePriceFreeSessionAdd(
+    call: Call,
+    user: string,
+    contracts: RelayContractIdentities,
+    currentLedger: number | undefined,
+): void {
+    const configured = contracts.sessionPolicy;
+    if (
+        call.contract !== user ||
+        !StrKey.isValidContract(user) ||
+        configured === undefined ||
+        contracts.markets === undefined
+    ) {
+        throw new TypeError(
+            'priceFree session rules require the configured user smart account capability',
+        );
+    }
+    requireCallShape(
+        call,
+        ['scvVec', 'scvString', 'scvU32', 'scvVec', 'scvMap'],
+        'add_context_rule',
+    );
+    const context = call.args[0].vec() ?? [];
+    const validUntil = requireU32(call.args[2], 'session expiry');
+    if (
+        context.length !== 1 ||
+        context[0]?.switch().name !== 'scvSymbol' ||
+        context[0].sym().toString() !== 'Default' ||
+        call.args[1].str().toString() !== configured.ruleName
+    ) {
+        throw new TypeError(
+            'priceFree session context, name, or expiry is invalid',
+        );
+    }
+    if (
+        !validU32Number(currentLedger) ||
+        validUntil <= currentLedger ||
+        BigInt(validUntil - currentLedger) > configured.maximumDurationLedgers
+    ) {
+        throw new TypeError(
+            'priceFree session expiry must be live and within the trusted duration',
+        );
+    }
+    const signers = call.args[3].vec() ?? [];
+    const signer =
+        signers[0]?.switch().name === 'scvVec' ? (signers[0].vec() ?? []) : [];
+    if (
+        signers.length !== 1 ||
+        signer.length !== 3 ||
+        signer[0]?.switch().name !== 'scvSymbol' ||
+        signer[0].sym().toString() !== 'External' ||
+        signer[1]?.switch().name !== 'scvAddress' ||
+        scAddress(signer[1], 'session signer verifier') !==
+            configured.ed25519Verifier ||
+        signer[2]?.switch().name !== 'scvBytes' ||
+        signer[2].bytes().byteLength !== 32
+    ) {
+        throw new TypeError(
+            'priceFree session signer must be the configured External Ed25519 signer',
+        );
+    }
+    const policies = call.args[4].map() ?? [];
+    if (
+        policies.length !== 1 ||
+        policies[0].key().switch().name !== 'scvAddress' ||
+        scAddress(policies[0].key(), 'session policy') !== configured.contractId
+    ) {
+        throw new TypeError(
+            'priceFree session rule must install exactly the configured policy',
+        );
+    }
+    const session = symbolMap(policies[0].val(), 'SessionConfig');
+    const allowed = session.get('allowed_contracts');
+    const destination = session.get('allowed_transfer_to');
+    const allowedContracts = allowed?.vec() ?? [];
+    if (
+        session.size !== 2 ||
+        allowed?.switch().name !== 'scvVec' ||
+        destination?.switch().name !== 'scvAddress' ||
+        allowedContracts.length !== 3
+    ) {
+        throw new TypeError(
+            'priceFree session policy parameters do not match SessionConfig',
+        );
+    }
+    const identities = allowedContracts.map((value) =>
+        scAddress(value, 'session allowed contract'),
+    );
+    const market = contracts.markets.find(
+        (candidate) => candidate.trading === identities[0],
+    );
+    if (
+        market === undefined ||
+        identities[1] !== contracts.router ||
+        identities[2] !== market.collateral ||
+        scAddress(destination, 'session transfer destination') !==
+            market.trading
+    ) {
+        throw new TypeError(
+            'priceFree session rule must encode exactly one configured market capability',
         );
     }
 }
@@ -357,12 +750,20 @@ function validateFillOrKillArguments(
     if (grammarIssues.length > 0) {
         throw new TypeError(grammarIssues[0].reason);
     }
-    scAddress(args[7], 'fill keeper');
+    const keeper = scAddress(args[7], 'fill keeper');
+    if (keeper !== user) {
+        throw new TypeError(
+            'relay unsigned fill tail must use the canonical SDK placeholders',
+        );
+    }
     if (
         args[8].switch().name !== 'scvBytes' ||
-        args[8].bytes().byteLength === 0
+        args[8].bytes().byteLength === 0 ||
+        args[8].bytes().byteLength > MAX_SIGNED_PRICE_UPDATE_BYTES
     ) {
-        throw new TypeError('fillOrKill price update must be nonempty bytes');
+        throw new TypeError(
+            'relay auth-discovery price update must contain 1 byte through 32 KiB',
+        );
     }
 }
 
@@ -437,17 +838,59 @@ function validateRestOnlyArguments(
 function validatePriceFreeArguments(
     args: xdr.ScVal[],
     contracts: RelayContractIdentities,
+    currentLedger: number | undefined,
 ): void {
     const calls = callVector(args[0]);
+    if (calls.length > 64) {
+        throw new TypeError('priceFree supports at most 64 calls');
+    }
     const user = validateFeeEnvelope(args, contracts);
-    calls.forEach((call) => validateCancellationCall(call, user, contracts));
+    for (const call of calls) {
+        if (
+            call.func === 'cancel_order' ||
+            call.func === 'cancel_vault_order'
+        ) {
+            validateCancellationCall(call, user, contracts);
+        } else if (call.func === 'claim_funding') {
+            requireCallShape(call, ['scvAddress'], 'claim_funding');
+            if (
+                !contracts.trading.includes(call.contract) ||
+                scAddress(call.args[0], 'funding user') !== user
+            ) {
+                throw new TypeError(
+                    'priceFree claim_funding must use a configured same-user market',
+                );
+            }
+        } else if (call.func === 'transfer') {
+            validatePriceFreeTransfer(call, user, contracts);
+        } else if (call.func === 'attribute') {
+            validatePriceFreeReferral(call, user, contracts);
+        } else if (call.func === 'add_context_rule') {
+            validatePriceFreeSessionAdd(call, user, contracts, currentLedger);
+        } else if (call.func === 'remove_context_rule') {
+            if (call.contract !== user || !StrKey.isValidContract(user)) {
+                throw new TypeError(
+                    'priceFree session removal must target the user smart account',
+                );
+            }
+            requireCallShape(call, ['scvU32'], 'remove_context_rule');
+            if (requireU32(call.args[0], 'context rule id') === 0) {
+                throw new TypeError('context rule id must be positive');
+            }
+        } else {
+            throw new TypeError(
+                'priceFree function is outside the explicit allowlist',
+            );
+        }
+    }
 }
 
 function validateRelayFunction(
     policy: RelayCallPolicy,
     hostFunction: xdr.HostFunction,
     contracts: RelayContractIdentities,
-): void {
+    currentLedger: number | undefined,
+): xdr.InvokeContractArgs {
     if (hostFunction.switch().name !== 'hostFunctionTypeInvokeContract') {
         throw new TypeError(
             `${policy} requires an invoke-contract host function`,
@@ -495,8 +938,9 @@ function validateRelayFunction(
     } else if (policy === 'restOnly') {
         validateRestOnlyArguments(invoke.args(), contracts);
     } else {
-        validatePriceFreeArguments(invoke.args(), contracts);
+        validatePriceFreeArguments(invoke.args(), contracts, currentLedger);
     }
+    return invoke;
 }
 
 /** Validate and package a route-safe relay call without performing transport. */
@@ -506,6 +950,8 @@ export function buildRelayCallRequest(input: {
     func: string;
     auth: string[];
     contracts: RelayContractIdentities;
+    /** Trusted ledger snapshot, required when priceFree adds a session rule. */
+    currentLedger?: number;
 }): RelayRequest {
     requireUuid(input.requestId);
     if (
@@ -517,7 +963,12 @@ export function buildRelayCallRequest(input: {
     }
     validateRelayContractIdentities(input.contracts);
     const hostFunction = canonicalHostFunction(input.func);
-    validateRelayFunction(input.policy, hostFunction, input.contracts);
+    const invoke = validateRelayFunction(
+        input.policy,
+        hostFunction,
+        input.contracts,
+        input.currentLedger,
+    );
     if (
         !Array.isArray(input.auth) ||
         input.auth.length === 0 ||
@@ -527,7 +978,12 @@ export function buildRelayCallRequest(input: {
             'auth must contain between one and 64 ordered entries',
         );
     }
-    input.auth.forEach(canonicalAuth);
+    const auth = input.auth.map(canonicalAuth);
+    validateRelayAuthorizations(
+        auth,
+        scAddress(invoke.args()[1], 'relay user'),
+        invoke,
+    );
     return Object.freeze({
         requestId: input.requestId,
         policy: input.policy,
@@ -614,6 +1070,25 @@ function validateDeploymentEnvelope(
     const deploymentSignature = inner.signatures()[0];
     const deployer = Keypair.fromPublicKey(deployment.deployer);
     const transaction = new Transaction(envelope, deployment.networkPassphrase);
+    const timeBounds = transaction.timeBounds;
+    if (timeBounds === undefined || timeBounds.maxTime === '0') {
+        throw new TypeError(
+            'smart-account deployment requires a bounded time bound',
+        );
+    }
+    const now = BigInt(Math.floor(Date.now() / 1_000));
+    const minTime = BigInt(timeBounds.minTime);
+    const maxTime = BigInt(timeBounds.maxTime);
+    if (minTime > now || maxTime <= now) {
+        throw new TypeError(
+            'smart-account deployment time bound is not currently valid',
+        );
+    }
+    if (maxTime - now > BigInt(SMART_ACCOUNT_DEPLOYMENT_MAX_TIMEOUT_SECONDS)) {
+        throw new TypeError(
+            `smart-account deployment must expire within ${SMART_ACCOUNT_DEPLOYMENT_MAX_TIMEOUT_SECONDS} seconds`,
+        );
+    }
     if (
         !deploymentSignature.hint().equals(deployer.signatureHint()) ||
         !deployer.verify(transaction.hash(), deploymentSignature.signature())
@@ -802,8 +1277,9 @@ function verifiedDeploymentIssue(
     }
     if (
         !SHA256.test(evidence.deploymentTransactionHash) ||
-        !POSITIVE_ATOMIC.test(evidence.ledger) ||
-        BigInt(evidence.ledger) > BigInt(U32_MAX) ||
+        typeof evidence.ledger !== 'bigint' ||
+        evidence.ledger <= 0n ||
+        evidence.ledger > BigInt(U32_MAX) ||
         evidence.instanceExecutableHash !== expectedWasmHash ||
         evidence.uploadedWasmHash !== expectedWasmHash ||
         evidence.specHash !== expectedSpecHash
@@ -923,6 +1399,21 @@ export function buildSingleMarketSessionRule(
     ) {
         return sessionUnavailable(
             'session expiry must be a positive u32 ledger',
+        );
+    }
+    if (
+        !Number.isSafeInteger(input.currentLedger) ||
+        input.currentLedger < 0 ||
+        input.currentLedger > U32_MAX ||
+        typeof input.maximumDurationLedgers !== 'bigint' ||
+        input.maximumDurationLedgers <= 0n ||
+        input.maximumDurationLedgers > BigInt(U32_MAX) ||
+        input.validUntil <= input.currentLedger ||
+        BigInt(input.validUntil - input.currentLedger) >
+            input.maximumDurationLedgers
+    ) {
+        return sessionUnavailable(
+            'session expiry must be live and within the configured duration',
         );
     }
 

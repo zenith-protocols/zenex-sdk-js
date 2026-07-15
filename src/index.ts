@@ -24,11 +24,31 @@ export interface Network {
 
 // Types - Asset
 export type { Asset } from './asset.js';
-export { getAssetKey, getAssetName, assetsEqual, assetToScVal, assetFromScVal, assetFromKey } from './asset.js';
+export {
+    getAssetKey,
+    getAssetName,
+    assetsEqual,
+    assetToScVal,
+    assetFromScVal,
+    assetFromKey,
+} from './asset.js';
 
 // Base Event types, normalizers, and unified decoder
-export { ZenexContractType, normalizeRpc, normalizeMercury, normalizeGoldsky, decodeEvent } from './base_event.js';
-export type { BaseZenexEvent, NormalizedEvent, MercuryWebhookEvent, MercuryScVal, GoldskyWebhookEvent, ZenexEvent } from './base_event.js';
+export {
+    ZenexContractType,
+    normalizeRpc,
+    normalizeMercury,
+    normalizeGoldsky,
+    decodeEvent,
+} from './base_event.js';
+export type {
+    BaseZenexEvent,
+    NormalizedEvent,
+    MercuryWebhookEvent,
+    MercuryScVal,
+    GoldskyWebhookEvent,
+    ZenexEvent,
+} from './base_event.js';
 
 // =============================================================================
 // Trading Module (v2 order -> keeper-execute contract)
@@ -112,7 +132,12 @@ export type {
     TradingCloseFillEvent,
     TradingLiquidationEvent,
     TradingEvent,
+    TradingDeployment,
+    TradingSnapshot,
+    TradingSnapshotRequest,
 } from './trading/index.js';
+
+export { loadTradingSnapshot } from './trading/index.js';
 
 // =============================================================================
 // Trading Router Module (stateless batching + create-and-fill flows)
@@ -138,9 +163,7 @@ export type {
 // Factory Module
 // =============================================================================
 
-export {
-    FactoryContract,
-} from './factory/index.js';
+export { FactoryContract } from './factory/index.js';
 
 export type {
     FactoryInitMeta,
@@ -173,9 +196,7 @@ export type {
 // Price Verifier Module
 // =============================================================================
 
-export {
-    PriceVerifierContract,
-} from './price-verifier/index.js';
+export { PriceVerifierContract } from './price-verifier/index.js';
 
 export type {
     PriceVerifierPriceData,
@@ -186,13 +207,9 @@ export type {
 // Treasury Module
 // =============================================================================
 
-export {
-    TreasuryContract,
-} from './treasury/index.js';
+export { TreasuryContract } from './treasury/index.js';
 
-export type {
-    TreasuryConstructorArgs,
-} from './treasury/index.js';
+export type { TreasuryConstructorArgs } from './treasury/index.js';
 
 // =============================================================================
 // Smart Account Module
@@ -283,6 +300,140 @@ export * as FixedMath from './math.js';
 
 // Simulation
 export { simulateAndParse } from './simulate.js';
+
+// =============================================================================
+// Exact quote, order, relay, and data boundaries
+// =============================================================================
+
+export * from './math/index.js';
+export * from './quote/index.js';
+export * from './market/index.js';
+export * from './position/index.js';
+export * from './order/index.js';
+export * from './relay/index.js';
+
+export {
+    convertVaultAssetsToShares,
+    convertVaultSharesToAssets,
+    quoteVaultDeposit,
+    quoteVaultRedeem,
+} from './vault/quote.js';
+export {
+    checkVaultWithdrawGates,
+    evaluateVaultWithdrawGates,
+    VaultProtocolGateError,
+} from './vault/gates.js';
+export type {
+    VaultAtomicState,
+    VaultQuoteOutcome,
+    VaultQuoteContext,
+    VaultDepositQuoteInput,
+    VaultRedeemQuoteInput,
+    VaultGateInput,
+} from './vault/quote.js';
+export type { VaultWithdrawHeadroom } from './vault/gates.js';
+
+export * from './data/client.js';
+export * from './data/events.js';
+export * from './data/price.js';
+export * from './data/resync.js';
+export * from './data/trust.js';
+export { decodeApiSchema, ZenexDataDecodeError } from './data/codec.js';
+export {
+    API_CONTRACT_PACKAGE_VERSION,
+    API_CONTRACT_SOURCE_COMMIT,
+    API_OPENAPI_SHA256,
+    API_PACKAGE_CONTENT_SHA256,
+    API_VERSION,
+    API_PUBLIC_PATHS,
+    ATOMIC_FIELD_POINTERS,
+} from './data/generated.js';
+export type {
+    AccountFill,
+    AccountFillsResponse,
+    AccountLifecycle,
+    AccountLifecyclesResponse,
+    AccountOrder,
+    AccountOrdersResponse,
+    AccountVaultOrdersResponse,
+    AtomicString,
+    BaseMetadata,
+    Candle,
+    CandleMetadata,
+    CandleQuery,
+    CandlesResponse,
+    Competition,
+    CompetitionDetailResponse,
+    CompetitionLifecycle,
+    CompetitionLifecyclesResponse,
+    CompetitionListQuery,
+    CompetitionListResponse,
+    CompetitionResponse,
+    CompetitionStanding,
+    CompetitionStandingsResponse,
+    CompetitionState,
+    ConfigMetadata,
+    ConfigResponse,
+    ErrorEnvelope,
+    FaucetClaimResponse,
+    FaucetClaimStatus,
+    FaucetStatusResponse,
+    FillFees,
+    IndexedMetadata,
+    LatestPrice,
+    LatestPriceResponse,
+    LeaderboardResponse,
+    LifecycleFees,
+    LifecyclePageQuery,
+    LifecyclePageResponse,
+    MarketSnapshot,
+    MarketSnapshotQuery,
+    MarketSnapshotsResponse,
+    MarketTrade,
+    MarketTradeQuery,
+    MarketTradesResponse,
+    OrderStatus,
+    PageQuery,
+    PriceMetadata,
+    PriceResponse,
+    PriceTickData,
+    ProductMetadata,
+    PublicConfig,
+    PublicConfigResponse,
+    RankedLifecycle,
+    RankedMetadata,
+    RankedStanding,
+    ReferralCodeResponse,
+    ReferralLookupResponse,
+    ReferralStatsResponse,
+    RelayMetadata,
+    RelayRequestStatus,
+    RelayRequestStatusResponse,
+    RelayStatusResponse,
+    RelaySubmitResponse,
+    Resolution,
+    RollingLifecyclesResponse,
+    RollingStandingsResponse,
+    RollingWindow,
+    RouterFeeMethods,
+    Side,
+    StreamEvent as ZenexStreamEvent,
+    UdfConfigResponse,
+    UdfHistoryResponse,
+    UdfQuery,
+    UdfResponse,
+    UdfRoute,
+    UdfSearchResponse,
+    UdfSymbolResponse,
+    VaultOrder as IndexedVaultOrder,
+    VaultOrderStatus,
+    VaultOrdersResponse,
+    VaultPerformance,
+    VaultPerformanceQuery,
+    VaultPerformanceResponse,
+    RelayExecutionPolicy as ApiRelayExecutionPolicy,
+    RelayRequest as ApiRelayRequest,
+} from './data/generated.js';
 
 // =============================================================================
 // Browser compatibility

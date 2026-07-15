@@ -20,7 +20,6 @@ const ROUTER = StrKey.encodeContract(Buffer.alloc(32, 10));
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 11));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 12));
 const KEEPER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 13));
-const RECIPIENT = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 14));
 const FEE_TOKEN = StrKey.encodeContract(Buffer.alloc(32, 15));
 
 function config(): TradingConfig {
@@ -128,10 +127,6 @@ const relayPolicy: ContractExecutionPolicy = {
     feeToken,
     maxFeeAmount: 9_007_199_254_740_999n,
     feeExpiration: 10_010,
-    feeAmount: 123_456_789_012_345n,
-    feeRecipient: RECIPIENT,
-    keeper: KEEPER,
-    price: new Uint8Array([4, 5, 6]),
 };
 
 const restRelayPolicy = {
@@ -140,8 +135,6 @@ const restRelayPolicy = {
     feeToken,
     maxFeeAmount: 9_007_199_254_740_999n,
     feeExpiration: 10_010,
-    feeAmount: 123_456_789_012_345n,
-    feeRecipient: RECIPIENT,
 };
 
 describe('buildOrderOperation', () => {
@@ -175,17 +168,14 @@ describe('buildOrderOperation', () => {
         expect(invoke.args[0]).toHaveLength(2);
     });
 
-    it('maps relay fill-or-kill exactly to the generated nine-argument router binding', () => {
+    it('uses the verified public update for strict relay auth discovery', () => {
         const result = buildOrderOperation({
             tradingAddress: TRADING,
             routerAddress: ROUTER,
             user: USER,
             order: order(),
             policy: relayPolicy,
-            validation: {
-                ...validation,
-                priceUpdate: new Uint8Array([4, 5, 6]),
-            },
+            validation,
         });
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
@@ -197,11 +187,34 @@ describe('buildOrderOperation', () => {
             FEE_TOKEN,
             9_007_199_254_740_999n,
             10_010,
-            123_456_789_012_345n,
-            RECIPIENT,
-            KEEPER,
+            1n,
+            USER,
+            USER,
         ]);
+        expect(invoke.args[8]).toEqual(Buffer.from(validation.priceUpdate));
     });
+
+    it.each([
+        ['missing', undefined],
+        ['empty', new Uint8Array()],
+        ['oversized', new Uint8Array(32 * 1024 + 1)],
+    ])(
+        'rejects a %s relay auth-discovery price update',
+        (_label, priceUpdate) => {
+            const result = buildOrderOperation({
+                tradingAddress: TRADING,
+                routerAddress: ROUTER,
+                user: USER,
+                order: order(),
+                policy: relayPolicy,
+                validation: { ...validation, priceUpdate },
+            });
+            expect(result).toMatchObject({
+                kind: 'unavailable',
+                code: 'INVALID_INPUT',
+            });
+        },
+    );
 
     it('maps explicit rest-only directly to trading create_order', () => {
         const result = buildOrderOperation({
@@ -248,8 +261,8 @@ describe('buildOrderOperation', () => {
             FEE_TOKEN,
             9_007_199_254_740_999n,
             10_010,
-            123_456_789_012_345n,
-            RECIPIENT,
+            1n,
+            USER,
         ]);
     });
 

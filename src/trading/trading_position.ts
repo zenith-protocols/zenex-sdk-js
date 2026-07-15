@@ -2,7 +2,12 @@ import { Address, rpc, xdr, scValToNative } from '@stellar/stellar-sdk';
 import { Network } from '../index.js';
 import { SCALAR_18, mulFloor, mulCeil } from '../math.js';
 import { persistentLedgerKey } from '../ledger-keys.js';
-import { Position, MarketData, TradingConfig, parsePosition } from './trading_types.js';
+import {
+    Position,
+    MarketData,
+    TradingConfig,
+    parsePosition,
+} from './trading_types.js';
 
 // =============================================================================
 // v2 position math and loader.
@@ -34,9 +39,16 @@ import { Position, MarketData, TradingConfig, parsePosition } from './trading_ty
  * the contract's conservative-for-the-vault rounding. `price` is the exit price
  * (`price.exit(is_long)` on-chain); `priceScalar` is `SCALAR_18` for v2.
  */
-export function positionPnl(position: Position, price: bigint, priceScalar: bigint, isLong: boolean): bigint {
+export function positionPnl(
+    position: Position,
+    price: bigint,
+    priceScalar: bigint,
+    isLong: boolean,
+): bigint {
     if (isLong) {
-        return mulFloor(position.tokens, price, priceScalar) - position.notional;
+        return (
+            mulFloor(position.tokens, price, priceScalar) - position.notional
+        );
     }
     return position.notional - mulCeil(position.tokens, price, priceScalar);
 }
@@ -50,9 +62,19 @@ export function positionPnl(position: Position, price: bigint, priceScalar: bigi
  * The ceil rounds toward +inf for both signs so a payer never underpays and a
  * receiver (negative delta) never over-claims.
  */
-export function pendingFunding(position: Position, marketData: MarketData, isLong: boolean): bigint {
-    const marketIdx = isLong ? marketData.fundingIdx.long : marketData.fundingIdx.short;
-    return mulCeil(position.notional, marketIdx - position.fundingIdx, SCALAR_18);
+export function pendingFunding(
+    position: Position,
+    marketData: MarketData,
+    isLong: boolean,
+): bigint {
+    const marketIdx = isLong
+        ? marketData.fundingIdx.long
+        : marketData.fundingIdx.short;
+    return mulCeil(
+        position.notional,
+        marketIdx - position.fundingIdx,
+        SCALAR_18,
+    );
 }
 
 /**
@@ -62,9 +84,19 @@ export function pendingFunding(position: Position, marketData: MarketData, isLon
  * Ports `Position::calculate_fees` / `math::accrued_amount`:
  * `ceil(notional * (marketBorrowingIdx[side] - position.borrowingIdx) / SCALAR_18)`.
  */
-export function pendingBorrowing(position: Position, marketData: MarketData, isLong: boolean): bigint {
-    const marketIdx = isLong ? marketData.borrowingIdx.long : marketData.borrowingIdx.short;
-    return mulCeil(position.notional, marketIdx - position.borrowingIdx, SCALAR_18);
+export function pendingBorrowing(
+    position: Position,
+    marketData: MarketData,
+    isLong: boolean,
+): bigint {
+    const marketIdx = isLong
+        ? marketData.borrowingIdx.long
+        : marketData.borrowingIdx.short;
+    return mulCeil(
+        position.notional,
+        marketIdx - position.borrowingIdx,
+        SCALAR_18,
+    );
 }
 
 /**
@@ -83,6 +115,9 @@ export function pendingBorrowing(position: Position, marketData: MarketData, isL
  * current rates over the seconds since, whereas the contract advances both
  * indices to `now` before any equity check. Between keeper touches the result
  * slightly overstates equity.
+ *
+ * @remarks Display estimate only. Transaction code must use
+ * `quotePositionAction` with one coherent `TradingSnapshot`.
  */
 export function positionEquity(
     position: Position,
@@ -133,6 +168,9 @@ export function unlockedNotional(position: Position, nowSecs: bigint): bigint {
  * whereas the contract advances both indices to `now` before a liquidation
  * check. Between keeper touches the estimate sits slightly further from the
  * mark than the true threshold.
+ *
+ * @remarks Display estimate only. Use `liquidationState` for an exact checked
+ * result at a declared ledger and authenticated price.
  */
 export function liquidationPrice(
     position: Position,
@@ -154,10 +192,20 @@ export function liquidationPrice(
     let target: bigint;
     if (isLong) {
         // floor(tokens*price/SCALAR_18) = mm + notional - collateral + paidFunding + borrowing
-        target = mm + position.notional - position.collateral + paidFunding + borrowing;
+        target =
+            mm +
+            position.notional -
+            position.collateral +
+            paidFunding +
+            borrowing;
     } else {
         // ceil(tokens*price/SCALAR_18) = notional + collateral - paidFunding - borrowing - mm
-        target = position.notional + position.collateral - paidFunding - borrowing - mm;
+        target =
+            position.notional +
+            position.collateral -
+            paidFunding -
+            borrowing -
+            mm;
     }
     const price = mulFloor(target, SCALAR_18, position.tokens);
     return price < 0n ? 0n : price;
@@ -198,7 +246,9 @@ export class PositionView {
         try {
             const response = await stellarRpc.getLedgerEntries(key);
             if (response.entries.length === 0) return null;
-            const native = scValToNative(response.entries[0].val.contractData().val());
+            const native = scValToNative(
+                response.entries[0].val.contractData().val(),
+            );
             return new PositionView(parsePosition(native), user, isLong);
         } catch {
             return null;
@@ -221,8 +271,18 @@ export class PositionView {
     }
 
     /** Equity: collateral + PnL less pending paid funding and borrowing. */
-    equity(marketData: MarketData, price: bigint, priceScalar: bigint = SCALAR_18): bigint {
-        return positionEquity(this.position, marketData, price, priceScalar, this.isLong);
+    equity(
+        marketData: MarketData,
+        price: bigint,
+        priceScalar: bigint = SCALAR_18,
+    ): bigint {
+        return positionEquity(
+            this.position,
+            marketData,
+            price,
+            priceScalar,
+            this.isLong,
+        );
     }
 
     /** Estimated liquidation price in price_scalar units. */

@@ -41,7 +41,10 @@ function extractBalanceAmount(val: xdr.ScVal): bigint {
             for (const entry of map) {
                 const key = entry.key();
                 // Check for 'amount' key (stored as symbol)
-                if (key.switch() === xdr.ScValType.scvSymbol() && key.sym().toString() === 'amount') {
+                if (
+                    key.switch() === xdr.ScValType.scvSymbol() &&
+                    key.sym().toString() === 'amount'
+                ) {
                     return scValToBigInt(entry.val());
                 }
             }
@@ -66,7 +69,10 @@ function extractMetaDecimals(val: xdr.ScVal): number | undefined {
     if (!map) return undefined;
     for (const entry of map) {
         const key = entry.key();
-        if (key.switch() === xdr.ScValType.scvSymbol() && key.sym().toString() === 'decimals') {
+        if (
+            key.switch() === xdr.ScValType.scvSymbol() &&
+            key.sym().toString() === 'decimals'
+        ) {
             return Number(scValToBigInt(entry.val()));
         }
     }
@@ -76,14 +82,14 @@ function extractMetaDecimals(val: xdr.ScVal): number | undefined {
 /**
  * VaultState - Loader class for vault state data
  *
- * Strategy-vault state with computed properties for share price estimates.
+ * Strategy-vault state with lossy numeric properties for display estimates.
  * Reads directly from contract instance storage (OpenZeppelin stellar-tokens
  * keys: `Meta`, `TotalSupply`, `AssetAddress`, `VirtualDecimalsOffset`).
  *
  * Note: the on-chain share price marks the backing with the trading market's
  * pending trader PnL (`net_pnl`); the raw ratios here ignore that mark. For
- * accurate quotes, simulate `preview_deposit(assets, net_pnl)` /
- * `preview_redeem(shares, net_pnl)`.
+ * transaction values, keep atomic state as bigint and use `quoteVaultDeposit`
+ * or `quoteVaultRedeem`.
  */
 export class VaultState implements VaultStateData {
     /** Underlying asset token address */
@@ -122,7 +128,7 @@ export class VaultState implements VaultStateData {
      */
     public static async load(
         network: Network,
-        contractId: string
+        contractId: string,
     ): Promise<VaultState> {
         const stellarRpc = new rpc.Server(network.rpc, network.opts);
 
@@ -169,12 +175,15 @@ export class VaultState implements VaultStateData {
             }
         });
 
-
         if (!asset) {
-            throw new Error('Vault asset address not found in instance storage');
+            throw new Error(
+                'Vault asset address not found in instance storage',
+            );
         }
         if (shareDecimals === undefined) {
-            throw new Error('Vault share metadata not found in instance storage');
+            throw new Error(
+                'Vault share metadata not found in instance storage',
+            );
         }
 
         // The constructor sets the share token's metadata decimals to
@@ -188,7 +197,8 @@ export class VaultState implements VaultStateData {
         let totalAssets: bigint = 0n;
 
         try {
-            const balanceResponse = await stellarRpc.getLedgerEntries(balanceKey);
+            const balanceResponse =
+                await stellarRpc.getLedgerEntries(balanceKey);
             if (balanceResponse.entries.length > 0) {
                 const val = balanceResponse.entries[0].val.contractData().val();
                 totalAssets = extractBalanceAmount(val);
@@ -207,14 +217,14 @@ export class VaultState implements VaultStateData {
                 assetDecimals,
             },
             network,
-            contractId
+            contractId,
         );
     }
 
     // === Computed Properties ===
 
     /**
-     * Calculate the current share price (assets per share)
+     * Calculate the display-only share price estimate (assets per share).
      * This returns the simple ratio for display purposes; it ignores the
      * pending-PnL mark and the virtual offset the contract's preview
      * functions apply.
@@ -226,8 +236,8 @@ export class VaultState implements VaultStateData {
     }
 
     /**
-     * Convert asset amount to shares (simple ratio for estimates)
-     * For accurate values, simulate the contract's preview_deposit(assets, net_pnl)
+     * Convert asset amount to a display-only share estimate.
+     * Transaction code must use `quoteVaultDeposit` with bigint atomic state.
      * @param assets - Amount of assets
      * @returns Equivalent shares
      */
@@ -237,8 +247,8 @@ export class VaultState implements VaultStateData {
     }
 
     /**
-     * Convert shares to asset amount (simple ratio for estimates)
-     * For accurate values, simulate the contract's preview_redeem(shares, net_pnl)
+     * Convert shares to a display-only asset estimate.
+     * Transaction code must use `quoteVaultRedeem` with bigint atomic state.
      * @param shares - Amount of shares
      * @returns Equivalent assets
      */

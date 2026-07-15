@@ -1,4 +1,5 @@
 import { Address, StrKey } from '@stellar/stellar-sdk';
+import { MAX_SIGNED_PRICE_UPDATE_BYTES } from '../data/price.js';
 import { checkedI128 } from '../math/fixed.js';
 import type { MarginAdjustmentQuote } from '../position/margin.js';
 import type { PositionActionOutcome } from '../position/quote.js';
@@ -51,10 +52,6 @@ export type ContractExecutionPolicy =
           feeToken: ExactRelayFeeToken;
           maxFeeAmount: bigint;
           feeExpiration: number;
-          feeAmount: bigint;
-          feeRecipient: string;
-          keeper: string;
-          price: Uint8Array;
       }
     | { kind: 'restOnly'; transport: 'direct' }
     | {
@@ -63,8 +60,6 @@ export type ContractExecutionPolicy =
           feeToken: ExactRelayFeeToken;
           maxFeeAmount: bigint;
           feeExpiration: number;
-          feeAmount: bigint;
-          feeRecipient: string;
       };
 
 export interface PreparedExecution {
@@ -124,7 +119,11 @@ function validU32(value: number): boolean {
 }
 
 function priceBytes(value: unknown): value is Uint8Array {
-    return value instanceof Uint8Array && value.byteLength > 0;
+    return (
+        value instanceof Uint8Array &&
+        value.byteLength > 0 &&
+        value.byteLength <= MAX_SIGNED_PRICE_UPDATE_BYTES
+    );
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -187,12 +186,10 @@ function validateRelayFeePolicy(
     let minimum: bigint;
     let maximum: bigint;
     let signedMaximum: bigint;
-    let feeAmount: bigint;
     try {
         minimum = checkedI128(token.minForwardChargeAtomic);
         maximum = checkedI128(token.maxSignedFeeAtomic);
         signedMaximum = checkedI128(policy.maxFeeAmount);
-        feeAmount = checkedI128(policy.feeAmount);
     } catch (error) {
         return error instanceof Error
             ? error.message
@@ -208,18 +205,8 @@ function validateRelayFeePolicy(
     ) {
         return 'signed relay fee maximum is outside configured token bounds';
     }
-    if (
-        feeAmount < 0n ||
-        feeAmount > signedMaximum ||
-        (feeAmount > 0n && feeAmount < minimum)
-    ) {
-        return 'relay fee amount is outside the signed maximum and configured minimum';
-    }
-    if (!validU32(policy.feeExpiration) || policy.feeExpiration < ledger) {
+    if (!validU32(policy.feeExpiration) || policy.feeExpiration <= ledger) {
         return 'relay fee expiration must be a live u32 ledger';
-    }
-    if (!validAddress(policy.feeRecipient)) {
-        return 'relay fee recipient is not a valid Stellar address';
     }
     return undefined;
 }
@@ -238,11 +225,23 @@ function validatePolicy(
     if (policy.kind !== 'fillOrKill') {
         return 'unsupported contract execution policy';
     }
+    if (policy.transport === 'relay') {
+        if (context.price === undefined) {
+            return 'fill-or-kill requires a verified market price in the validation snapshot';
+        }
+        if (!priceBytes(context.priceUpdate)) {
+            return 'fill-or-kill requires a nonempty verified price update no larger than 32 KiB';
+        }
+        return validateRelayFeePolicy(policy, context.ledger);
+    }
+    if (policy.transport !== 'direct') {
+        return 'unsupported contract execution transport';
+    }
     if (!validAddress(policy.keeper)) {
         return 'keeper is not a valid Stellar address';
     }
     if (!priceBytes(policy.price)) {
-        return 'fill-or-kill requires a nonempty serialized price update';
+        return 'fill-or-kill requires a nonempty serialized price update no larger than 32 KiB';
     }
     if (context.price === undefined) {
         return 'fill-or-kill requires a verified market price in the validation snapshot';
@@ -252,12 +251,6 @@ function validatePolicy(
         !sameBytes(policy.price, context.priceUpdate)
     ) {
         return 'serialized price update does not match the verified validation snapshot';
-    }
-    if (policy.transport === 'relay') {
-        return validateRelayFeePolicy(policy, context.ledger);
-    }
-    if (policy.transport !== 'direct') {
-        return 'unsupported contract execution transport';
     }
     return undefined;
 }
@@ -354,8 +347,8 @@ export function buildOrderOperation(
                     feeToken: input.policy.feeToken.contractId,
                     maxFeeAmount: input.policy.maxFeeAmount,
                     feeExpiration: input.policy.feeExpiration,
-                    feeAmount: input.policy.feeAmount,
-                    feeRecipient: input.policy.feeRecipient,
+                    feeAmount: 1n,
+                    feeRecipient: input.user,
                 });
             }
             return exact(
@@ -410,16 +403,22 @@ export function buildOrderOperation(
                 input.policy.price,
             );
         } else if (input.policy.transport === 'relay') {
+            const priceUpdate = input.validation.priceUpdate;
+            if (!priceBytes(priceUpdate)) {
+                return invalid(
+                    'fill-or-kill requires a nonempty verified price update no larger than 32 KiB',
+                );
+            }
             operationXdr = router.createAndFillWithFee({
                 calls,
                 user: input.user,
                 feeToken: input.policy.feeToken.contractId,
                 maxFeeAmount: input.policy.maxFeeAmount,
                 feeExpiration: input.policy.feeExpiration,
-                feeAmount: input.policy.feeAmount,
-                feeRecipient: input.policy.feeRecipient,
-                keeper: input.policy.keeper,
-                price: input.policy.price,
+                feeAmount: 1n,
+                feeRecipient: input.user,
+                keeper: input.user,
+                price: priceUpdate,
             });
         } else {
             return invalid('unsupported contract execution policy');

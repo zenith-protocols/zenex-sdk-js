@@ -49,6 +49,20 @@ export interface RelayContractIdentities {
     trading: readonly string[];
     /** Deployment metadata: enabled collateral fee-token contract IDs. */
     feeTokens: readonly string[];
+    /** Deployment metadata: the configured Referral contract ID. */
+    referral?: string;
+    /** Exact Trading-to-collateral relationships used by session rules. */
+    markets?: readonly {
+        readonly trading: string;
+        readonly collateral: string;
+    }[];
+    /** Exact deployed identities and name accepted for session rule calls. */
+    sessionPolicy?: {
+        readonly contractId: string;
+        readonly ed25519Verifier: string;
+        readonly ruleName: string;
+        readonly maximumDurationLedgers: bigint;
+    };
 }
 
 /**
@@ -62,7 +76,7 @@ export interface RelayContractIdentities {
 export interface VerifiedInstanceEvidence {
     state: 'verified';
     deploymentTransactionHash: string;
-    ledger: string;
+    ledger: bigint;
     instanceExecutableHash: string;
     uploadedWasmHash: string;
     specHash: string;
@@ -114,6 +128,10 @@ export interface SingleMarketSessionInput {
         keyData: Uint8Array;
     };
     name: string;
+    /** Ledger of the snapshot used to construct this rule. */
+    currentLedger: number;
+    /** Configured maximum session lifetime from the snapshot. */
+    maximumDurationLedgers: bigint;
     validUntil: number;
 }
 

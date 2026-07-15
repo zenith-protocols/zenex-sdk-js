@@ -7,6 +7,7 @@ import {
     StrKey,
     TransactionBuilder,
     hash,
+    nativeToScVal,
     scValToNative,
     xdr,
 } from '@stellar/stellar-sdk';
@@ -38,7 +39,6 @@ const SMART_ACCOUNT = StrKey.encodeContract(Buffer.alloc(32, 24));
 const VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 25));
 const ED25519_VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 30));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 26));
-const KEEPER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 27));
 const RECIPIENT = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 28));
 const OTHER_ROUTER = StrKey.encodeContract(Buffer.alloc(32, 29));
 const TRUSTED_CONTRACTS = {
@@ -61,7 +61,7 @@ function verifiedEvidence(uploadedWasmHash: string, specHash: string) {
     return {
         state: 'verified' as const,
         deploymentTransactionHash: '11'.repeat(32),
-        ledger: '99',
+        ledger: 99n,
         instanceExecutableHash: uploadedWasmHash,
         uploadedWasmHash,
         specHash,
@@ -128,25 +128,80 @@ function hostFunction(operationXdr: string): string {
         .toXDR('base64');
 }
 
-function authEntry(functionName = 'create_order'): string {
+function authEntry(
+    func = fillOrKillFunc(),
+    options: {
+        source?: boolean;
+        wrongPrefix?: boolean;
+        omitFeeApprovals?: boolean;
+        wrongFeeApproval?: boolean;
+    } = {},
+): string {
+    const invoke = xdr.HostFunction.fromXDR(func, 'base64').invokeContract();
+    const args = invoke.args();
+    const signedPrefix = [args[0], args[2], args[3], args[4]] as xdr.ScVal[];
+    if (options.wrongPrefix) signedPrefix[3] = args[5];
+    const approveInvocation = (amount: xdr.ScVal) =>
+        new xdr.SorobanAuthorizedInvocation({
+            function:
+                xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+                    new xdr.InvokeContractArgs({
+                        contractAddress: Address.fromScVal(
+                            args[2],
+                        ).toScAddress(),
+                        functionName: 'approve',
+                        args: [
+                            args[1],
+                            Address.fromScAddress(
+                                invoke.contractAddress(),
+                            ).toScVal(),
+                            amount,
+                            args[4],
+                        ],
+                    }),
+                ),
+            subInvocations: [],
+        });
+    const approvals = options.omitFeeApprovals
+        ? []
+        : [
+              approveInvocation(options.wrongFeeApproval ? args[5] : args[3]),
+              approveInvocation(nativeToScVal(0n, { type: 'i128' })),
+          ];
     const rootInvocation = new xdr.SorobanAuthorizedInvocation({
         function:
             xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
                 new xdr.InvokeContractArgs({
-                    contractAddress: Address.fromString(TRADING).toScAddress(),
-                    functionName,
-                    args: [],
+                    contractAddress: invoke.contractAddress(),
+                    functionName: invoke.functionName(),
+                    args: signedPrefix,
                 }),
             ),
-        subInvocations: [],
+        subInvocations: approvals,
     });
     return new xdr.SorobanAuthorizationEntry({
-        credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(),
+        credentials: options.source
+            ? xdr.SorobanCredentials.sorobanCredentialsSourceAccount()
+            : xdr.SorobanCredentials.sorobanCredentialsAddress(
+                  new xdr.SorobanAddressCredentials({
+                      address: Address.fromString(USER).toScAddress(),
+                      nonce: xdr.Int64.fromString('1'),
+                      signatureExpirationLedger: 1_050,
+                      signature: xdr.ScVal.scvBytes(Buffer.from([1])),
+                  }),
+              ),
         rootInvocation,
     }).toXDR('base64');
 }
 
-function fillOrKillFunc(): string {
+function fillOrKillFunc(
+    tail: {
+        feeAmount?: bigint;
+        feeRecipient?: string;
+        keeper?: string;
+        price?: Uint8Array;
+    } = {},
+): string {
     return hostFunction(
         new TradingRouterContract(ROUTER).createAndFillWithFee({
             calls: [primaryCall()],
@@ -154,10 +209,10 @@ function fillOrKillFunc(): string {
             feeToken: COLLATERAL,
             maxFeeAmount: 1_000n,
             feeExpiration: 1_000,
-            feeAmount: 100n,
-            feeRecipient: RECIPIENT,
-            keeper: KEEPER,
-            price: new Uint8Array([1, 2, 3]),
+            feeAmount: tail.feeAmount ?? 1n,
+            feeRecipient: tail.feeRecipient ?? USER,
+            keeper: tail.keeper ?? USER,
+            price: tail.price ?? new Uint8Array([1, 2, 3]),
         }),
     );
 }
@@ -182,8 +237,8 @@ function restOnlyFunc(): string {
             feeToken: COLLATERAL,
             maxFeeAmount: 1_000n,
             feeExpiration: 1_000,
-            feeAmount: 100n,
-            feeRecipient: RECIPIENT,
+            feeAmount: 1n,
+            feeRecipient: USER,
         }),
     );
 }
@@ -211,8 +266,8 @@ function priceFreeFunc(): string {
             feeToken: COLLATERAL,
             maxFeeAmount: 1_000n,
             feeExpiration: 1_000,
-            feeAmount: 100n,
-            feeRecipient: RECIPIENT,
+            feeAmount: 1n,
+            feeRecipient: USER,
         }),
     );
 }
@@ -225,18 +280,19 @@ describe('buildRelayCallRequest', () => {
     ])(
         'accepts canonical %s host-function and ordered auth XDR',
         (policy, makeFunc) => {
-            const auth = [authEntry('first'), authEntry('second')];
+            const func = makeFunc();
+            const auth = [authEntry(func), authEntry(func)];
             const request = buildRelayCallRequest({
                 requestId: REQUEST_ID,
                 policy,
-                func: makeFunc(),
+                func,
                 auth,
                 contracts: TRUSTED_CONTRACTS,
             });
             expect(request).toEqual({
                 requestId: REQUEST_ID,
                 policy,
-                func: makeFunc(),
+                func,
                 auth,
             });
             expect(Object.isFrozen(request)).toBe(true);
@@ -268,6 +324,50 @@ describe('buildRelayCallRequest', () => {
                 requestId: REQUEST_ID,
                 policy: 'fillOrKill',
                 func: fillOrKillFunc(),
+                auth: [authEntry(fillOrKillFunc(), { source: true })],
+                contracts: TRUSTED_CONTRACTS,
+            }),
+        ).toThrow(/address credentials/);
+        expect(() =>
+            buildRelayCallRequest({
+                requestId: REQUEST_ID,
+                policy: 'fillOrKill',
+                func: fillOrKillFunc(),
+                auth: [authEntry(fillOrKillFunc(), { wrongPrefix: true })],
+                contracts: TRUSTED_CONTRACTS,
+            }),
+        ).toThrow(/signed prefix/);
+        expect(() =>
+            buildRelayCallRequest({
+                requestId: REQUEST_ID,
+                policy: 'fillOrKill',
+                func: fillOrKillFunc(),
+                auth: [
+                    authEntry(fillOrKillFunc(), {
+                        omitFeeApprovals: true,
+                    }),
+                ],
+                contracts: TRUSTED_CONTRACTS,
+            }),
+        ).toThrow(/approve/);
+        expect(() =>
+            buildRelayCallRequest({
+                requestId: REQUEST_ID,
+                policy: 'fillOrKill',
+                func: fillOrKillFunc(),
+                auth: [
+                    authEntry(fillOrKillFunc(), {
+                        wrongFeeApproval: true,
+                    }),
+                ],
+                contracts: TRUSTED_CONTRACTS,
+            }),
+        ).toThrow(/approve/);
+        expect(() =>
+            buildRelayCallRequest({
+                requestId: REQUEST_ID,
+                policy: 'fillOrKill',
+                func: fillOrKillFunc(),
                 auth: ['AAAA'],
                 contracts: TRUSTED_CONTRACTS,
             }),
@@ -283,10 +383,10 @@ describe('buildRelayCallRequest', () => {
                         feeToken: COLLATERAL,
                         maxFeeAmount: 1_000n,
                         feeExpiration: 1_000,
-                        feeAmount: 100n,
-                        feeRecipient: RECIPIENT,
-                        keeper: KEEPER,
-                        price: new Uint8Array([1]),
+                        feeAmount: 1n,
+                        feeRecipient: USER,
+                        keeper: USER,
+                        price: new Uint8Array([1, 2, 3]),
                     }),
                     'base64',
                 ).toXDR('base64'),
@@ -294,6 +394,28 @@ describe('buildRelayCallRequest', () => {
                 contracts: TRUSTED_CONTRACTS,
             }),
         ).toThrow(/host-function/);
+    });
+
+    it('requires canonical fee placeholders and a bounded discovery update', () => {
+        for (const tail of [
+            { feeAmount: 0n },
+            { feeAmount: 2n },
+            { feeRecipient: RECIPIENT },
+            { keeper: RECIPIENT },
+            { price: new Uint8Array() },
+            { price: new Uint8Array(32 * 1024 + 1) },
+        ]) {
+            const func = fillOrKillFunc(tail);
+            expect(() =>
+                buildRelayCallRequest({
+                    requestId: REQUEST_ID,
+                    policy: 'fillOrKill',
+                    func,
+                    auth: [authEntry(func)],
+                    contracts: TRUSTED_CONTRACTS,
+                }),
+            ).toThrow(/placeholder|price update/);
+        }
     });
 
     it('rejects policy downgrade or cross-route function names', () => {
@@ -334,8 +456,8 @@ describe('buildRelayCallRequest', () => {
                 feeToken: COLLATERAL,
                 maxFeeAmount: 1_000n,
                 feeExpiration: 1_000,
-                feeAmount: 100n,
-                feeRecipient: RECIPIENT,
+                feeAmount: 1n,
+                feeRecipient: USER,
             }),
         );
         expect(() =>
@@ -355,7 +477,7 @@ describe('buildRelayCallRequest', () => {
                 auth: [authEntry()],
                 contracts: TRUSTED_CONTRACTS,
             }),
-        ).toThrow(/cancellations/);
+        ).toThrow(/allowlist/);
     });
 
     it('rejects a lookalike function on an untrusted contract', () => {
@@ -366,9 +488,9 @@ describe('buildRelayCallRequest', () => {
                 feeToken: COLLATERAL,
                 maxFeeAmount: 1_000n,
                 feeExpiration: 1_000,
-                feeAmount: 100n,
-                feeRecipient: RECIPIENT,
-                keeper: KEEPER,
+                feeAmount: 1n,
+                feeRecipient: USER,
+                keeper: USER,
                 price: new Uint8Array([1, 2, 3]),
             }),
         );
@@ -392,9 +514,9 @@ describe('buildRelayCallRequest', () => {
                     feeToken,
                     maxFeeAmount: 1_000n,
                     feeExpiration: 1_000,
-                    feeAmount: 100n,
-                    feeRecipient: RECIPIENT,
-                    keeper: KEEPER,
+                    feeAmount: 1n,
+                    feeRecipient: USER,
+                    keeper: USER,
                     price: new Uint8Array([1, 2, 3]),
                 }),
             );
@@ -418,7 +540,7 @@ describe('buildRelayCallRequest', () => {
         ).toThrow(/primary|trailing/);
     });
 
-    it('keeps priceFree Router batches cancellation-only', () => {
+    it('keeps priceFree Router batches inside the explicit allowlist', () => {
         const func = hostFunction(
             new TradingRouterContract(ROUTER).multicallWithFee({
                 calls: [{ contract: TRADING, func: 'set_config', args: [] }],
@@ -426,8 +548,8 @@ describe('buildRelayCallRequest', () => {
                 feeToken: COLLATERAL,
                 maxFeeAmount: 1_000n,
                 feeExpiration: 1_000,
-                feeAmount: 100n,
-                feeRecipient: RECIPIENT,
+                feeAmount: 1n,
+                feeRecipient: USER,
             }),
         );
         expect(() =>
@@ -438,7 +560,7 @@ describe('buildRelayCallRequest', () => {
                 auth: [authEntry()],
                 contracts: TRUSTED_CONTRACTS,
             }),
-        ).toThrow(/cancellation/);
+        ).toThrow(/allowlist/);
     });
 
     it('pins the durable relay lifecycle states', () => {
@@ -464,6 +586,8 @@ function deploymentEnvelope(
         wrongSalt?: boolean;
         wrongSigner?: boolean;
         extraSignature?: boolean;
+        timeoutSeconds?: number;
+        unboundedTime?: boolean;
     } = {},
 ): string {
     const keypair = DEPLOYER_KEYPAIR;
@@ -500,7 +624,7 @@ function deploymentEnvelope(
         networkPassphrase: Networks.TESTNET,
     })
         .addOperation(operation)
-        .setTimeout(0)
+        .setTimeout(options.unboundedTime ? 0 : (options.timeoutSeconds ?? 30))
         .build();
     if (options.signed !== false) {
         transaction.sign(
@@ -533,6 +657,22 @@ describe('buildSmartAccountDeploymentRequest', () => {
     });
 
     it('rejects unsigned or wrong-WASM deployment envelopes', () => {
+        expect(() =>
+            buildSmartAccountDeploymentRequest({
+                requestId: REQUEST_ID,
+                envelopeXdr: deploymentEnvelope({ unboundedTime: true }),
+                deployment: SMART_ACCOUNT_DEPLOYMENT,
+                deployments: DEPLOYMENT_REGISTRY,
+            }),
+        ).toThrow(/time bound/);
+        expect(() =>
+            buildSmartAccountDeploymentRequest({
+                requestId: REQUEST_ID,
+                envelopeXdr: deploymentEnvelope({ timeoutSeconds: 60 }),
+                deployment: SMART_ACCOUNT_DEPLOYMENT,
+                deployments: DEPLOYMENT_REGISTRY,
+            }),
+        ).toThrow(/30 seconds/);
         expect(() =>
             buildSmartAccountDeploymentRequest({
                 requestId: REQUEST_ID,
@@ -668,6 +808,8 @@ describe('buildSingleMarketSessionRule', () => {
             keyData: new Uint8Array(32).fill(9),
         },
         name: 'zenex-session',
+        currentLedger: 49_000,
+        maximumDurationLedgers: 2_000n,
         validUntil: 50_000,
     };
 
