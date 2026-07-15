@@ -202,9 +202,13 @@ describe('package root exports', () => {
         expect(SDK.quotePositionAction).toBeTypeOf('function');
         expect(SDK.quoteMarginAdjustment).toBeTypeOf('function');
         expect(SDK.quoteVaultDeposit).toBeTypeOf('function');
+        expect(SDK.quoteVaultDepositFill).toBeTypeOf('function');
+        expect(SDK.quoteVaultOrderCreation).toBeTypeOf('function');
         expect(SDK.quoteVaultRedeem).toBeTypeOf('function');
+        expect(SDK.quoteVaultRedeemFill).toBeTypeOf('function');
         expect(SDK.loadTradingSnapshot).toBeTypeOf('function');
         expect(SDK.buildOrderOperation).toBeTypeOf('function');
+        expect(SDK.buildVaultOrderOperation).toBeTypeOf('function');
         expect(SDK.buildPositionActionExecution).toBeTypeOf('function');
         expect(SDK.buildMarginAdjustmentExecution).toBeTypeOf('function');
         expect(SDK.isIncreaseOrderKind).toBeTypeOf('function');
@@ -215,6 +219,9 @@ describe('package root exports', () => {
         expect(SDK.orderKindCrossing).toBeTypeOf('function');
         expect(SDK.orderKindFiresAbove).toBeTypeOf('function');
         expect(SDK.buildRelayCallRequest).toBeTypeOf('function');
+        expect(SDK.prepareRelayAuthDiscovery).toBeTypeOf('function');
+        expect(SDK.extractRelayCallAuthorization).toBeTypeOf('function');
+        expect(SDK.buildRelayCallRequestFromTransaction).toBeTypeOf('function');
         expect(SDK.buildPriceFreeRelayOperation).toBeTypeOf('function');
         expect(SDK.buildSmartAccountDeploymentRequest).toBeTypeOf('function');
         expect(SDK.SMART_ACCOUNT_DEPLOYMENT_MAX_TIMEOUT_SECONDS).toBe(30);

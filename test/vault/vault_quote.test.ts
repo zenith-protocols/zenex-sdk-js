@@ -287,7 +287,7 @@ describe('strategy-vault share conversion', () => {
     it('rejects an impossible decimals offset before exponentiation', () => {
         expect(() =>
             convertVaultAssetsToShares(
-                { totalAssets: 0n, totalSupply: 0n, decimalsOffset: 11 },
+                { totalAssets: 0n, totalSupply: 0n, decimalsOffset: 39 },
                 1n,
                 0n,
             ),

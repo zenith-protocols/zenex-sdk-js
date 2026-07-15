@@ -316,7 +316,10 @@ export {
     convertVaultAssetsToShares,
     convertVaultSharesToAssets,
     quoteVaultDeposit,
+    quoteVaultDepositFill,
+    quoteVaultOrderCreation,
     quoteVaultRedeem,
+    quoteVaultRedeemFill,
 } from './vault/quote.js';
 export {
     checkVaultWithdrawGates,
@@ -324,7 +327,12 @@ export {
     VaultProtocolGateError,
 } from './vault/gates.js';
 export type {
+    ExactVaultRestingOrderCreationQuote,
     VaultAtomicState,
+    VaultOrderCreationOutcome,
+    VaultOrderCreationQuoteInput,
+    VaultRestingOrderCreation,
+    VaultRetiredImmediateRedeem,
     VaultQuoteOutcome,
     VaultQuoteContext,
     VaultDepositQuoteInput,

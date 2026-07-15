@@ -115,10 +115,12 @@ export class TradingRouterContract extends Contract {
         // `value`) when filled or `ok: false` (rested; `error` carries the
         // contract code) when the fill did not land. Every earlier element is
         // a strict success (`ok: true`).
+        /** @deprecated Low-level ABI compatibility only. */
         createAndTryFill: (result: string): CallOutcome[] =>
             (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
                 parseCallOutcome,
             ),
+        /** @deprecated Low-level ABI compatibility only. */
         createAndTryFillWithFee: (result: string): CallOutcome[] =>
             (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
                 parseCallOutcome,

@@ -10,16 +10,22 @@ import { advanceMarketAccruals } from '../market/rates.js';
 import type { VerifiedPrice } from '../market/types.js';
 import { decodeLedgerSequence, exact, unavailable } from '../quote/result.js';
 import type { QuoteResult } from '../quote/result.js';
-import type { MarketData, TradingConfig } from '../trading/trading_types.js';
+import {
+    Status,
+    type MarketData,
+    type TradingConfig,
+} from '../trading/trading_types.js';
 import { VaultProtocolGateError, evaluateVaultWithdrawGates } from './gates.js';
 
 const U64_MAX = 2n ** 64n - 1n;
-const MAX_DECIMALS_OFFSET = 10;
+const MAX_DECIMALS_OFFSET = 38;
 const MAX_FEE_RATE = SCALAR_18 / 100n;
 const MAX_SPLIT_RATE = SCALAR_18 / 2n;
 const OVERFLOW_MESSAGE = 'value is outside the i128 range';
 
 const GATE_REASONS: Readonly<Record<number, string>> = {
+    702: 'invalid market status',
+    704: 'market is frozen',
     710: 'negative value not allowed',
     732: 'invalid order',
     740: 'stale price',
@@ -41,6 +47,56 @@ export interface VaultAtomicState {
     totalAssets: bigint;
     totalSupply: bigint;
     decimalsOffset: number;
+}
+
+export interface VaultOrderCreationQuoteInput {
+    ledger: number;
+    now: bigint;
+    status: Status;
+    config: TradingConfig;
+    action: 'deposit' | 'redeem';
+    amount: bigint;
+    minOut: bigint;
+    /** Required only for a Retired market redeem, which executes directly. */
+    vault?: VaultAtomicState;
+}
+
+export interface VaultRestingOrderCreation {
+    kind: 'resting';
+    policy: 'restOnly';
+    action: 'deposit' | 'redeem';
+    amount: bigint;
+    minOut: bigint;
+    executionFee: bigint;
+    createdAt: bigint;
+    /** Earliest valid later price timestamp, or null at the u64 ceiling. */
+    fillAfter: bigint | null;
+    /** Contract cooldown boundary for a redeem, otherwise null. */
+    redeemUnlockAt: bigint | null;
+    /** Settlement token escrow, including executionFee. */
+    escrowedAssets: bigint;
+    escrowedShares: bigint;
+}
+
+export interface VaultRetiredImmediateRedeem {
+    kind: 'retiredImmediateRedeem';
+    policy: 'direct';
+    action: 'redeem';
+    shares: bigint;
+    assets: bigint;
+    minOutApplied: false;
+    executionFee: 0n;
+}
+
+export type VaultOrderCreationOutcome =
+    | VaultRestingOrderCreation
+    | VaultRetiredImmediateRedeem;
+
+export interface ExactVaultRestingOrderCreationQuote {
+    kind: 'exact';
+    value: VaultRestingOrderCreation;
+    ledger: number;
+    priceTime: bigint;
 }
 
 export interface VaultQuoteOutcome {
@@ -259,7 +315,116 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
     );
 }
 
-export function quoteVaultDeposit(
+function checkedStatus(value: Status): Status {
+    if (
+        value !== Status.Active &&
+        value !== Status.OnIce &&
+        value !== Status.Frozen &&
+        value !== Status.Delisted &&
+        value !== Status.Retired
+    ) {
+        throw new RangeError('market status is unknown');
+    }
+    return value;
+}
+
+/** Quote only the price-free creation leg of a vault order. */
+export function quoteVaultOrderCreation(
+    input: VaultOrderCreationQuoteInput,
+): QuoteResult<VaultOrderCreationOutcome> {
+    try {
+        const ledger = decodeLedgerSequence(input.ledger);
+        const createdAt = timestamp(
+            input.now,
+            'vault order creation timestamp',
+        );
+        const minOut = checkedI128(input.minOut);
+        if (minOut < 0n) throw new VaultQuoteGateError(710);
+        if (input.action !== 'deposit' && input.action !== 'redeem') {
+            throw new RangeError('vault order action is unknown');
+        }
+
+        const status = checkedStatus(input.status);
+        if (status === Status.Frozen) throw new VaultQuoteGateError(704);
+        if (status === Status.Retired) {
+            if (input.action === 'deposit') {
+                throw new VaultQuoteGateError(702);
+            }
+            if (input.vault === undefined) {
+                return unavailable(
+                    'MISSING_STATE',
+                    'exact vault state is required for a retired direct redeem',
+                );
+            }
+            const vault = checkedVaultState(input.vault);
+            const shares = checkedI128(input.amount);
+            if (shares <= 0n) throw new VaultQuoteGateError(800);
+            if (shares > vault.totalSupply) {
+                throw new RangeError('redeem shares exceed total supply');
+            }
+            const assets = convertVaultSharesToAssets(vault, shares, 0n);
+            return exact(
+                {
+                    kind: 'retiredImmediateRedeem',
+                    policy: 'direct',
+                    action: 'redeem',
+                    shares,
+                    assets,
+                    minOutApplied: false,
+                    executionFee: 0n,
+                },
+                ledger,
+                createdAt,
+            );
+        }
+
+        const amount = checkedI128(input.amount);
+        const executionFee = nonnegative(input.config.execFee, 'execution fee');
+        if (input.action === 'deposit') {
+            const minimum = nonnegative(
+                input.config.minDeposit,
+                'minimum deposit',
+            );
+            if (amount <= 0n || amount < minimum) {
+                throw new VaultQuoteGateError(732);
+            }
+        } else if (amount <= 0n) {
+            throw new VaultQuoteGateError(732);
+        }
+
+        const fillAfter = createdAt === U64_MAX ? null : createdAt + 1n;
+        const redeemUnlockAt =
+            input.action === 'redeem'
+                ? saturatingTimestampAdd(createdAt, input.config.redeemLock)
+                : null;
+        const escrowedAssets =
+            input.action === 'deposit'
+                ? addI128(amount, executionFee)
+                : executionFee;
+
+        return exact(
+            {
+                kind: 'resting',
+                policy: 'restOnly',
+                action: input.action,
+                amount,
+                minOut,
+                executionFee,
+                createdAt,
+                fillAfter,
+                redeemUnlockAt,
+                escrowedAssets,
+                escrowedShares: input.action === 'redeem' ? amount : 0n,
+            },
+            ledger,
+            createdAt,
+        );
+    } catch (error) {
+        return caughtUnavailable(error);
+    }
+}
+
+export function quoteVaultDepositFill(
     input: VaultDepositQuoteInput,
 ): QuoteResult<VaultQuoteOutcome> {
     try {
@@ -331,7 +496,7 @@ function saturatingTimestampAdd(left: bigint, right: bigint): bigint {
     return start > U64_MAX - delta ? U64_MAX : start + delta;
 }
 
-export function quoteVaultRedeem(
+export function quoteVaultRedeemFill(
     input: VaultRedeemQuoteInput,
 ): QuoteResult<VaultQuoteOutcome> {
     try {
@@ -414,4 +579,18 @@ export function quoteVaultRedeem(
     } catch (error) {
         return caughtUnavailable(error);
     }
+}
+
+/** @deprecated Use quoteVaultDepositFill for the keeper fill leg. */
+export function quoteVaultDeposit(
+    input: VaultDepositQuoteInput,
+): QuoteResult<VaultQuoteOutcome> {
+    return quoteVaultDepositFill(input);
+}
+
+/** @deprecated Use quoteVaultRedeemFill for the keeper fill leg. */
+export function quoteVaultRedeem(
+    input: VaultRedeemQuoteInput,
+): QuoteResult<VaultQuoteOutcome> {
+    return quoteVaultRedeemFill(input);
 }

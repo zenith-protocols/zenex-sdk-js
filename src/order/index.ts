@@ -24,16 +24,19 @@ export {
     buildMarginAdjustmentExecution,
     buildOrderOperation,
     buildPositionActionExecution,
+    buildVaultOrderOperation,
 } from './transactions.js';
 export { prepareStrictTransaction } from './simulation.js';
 export type {
     BuildMarginAdjustmentExecutionInput,
     BuildOrderOperationInput,
     BuildPositionActionExecutionInput,
+    BuildVaultOrderOperationInput,
     ContractExecutionPolicy,
     ExactRelayFeeToken,
     PreparedExecution,
     RelayFeeToken,
+    VaultRestOnlyExecutionPolicy,
 } from './transactions.js';
 export type {
     PrepareStrictTransactionInput,

@@ -3,15 +3,26 @@ import { MAX_SIGNED_PRICE_UPDATE_BYTES } from '../data/price.js';
 import { checkedI128 } from '../math/fixed.js';
 import type { MarginAdjustmentQuote } from '../position/margin.js';
 import type { PositionActionOutcome } from '../position/quote.js';
-import { exact, unavailable, type QuoteResult } from '../quote/result.js';
+import {
+    decodeLedgerSequence,
+    exact,
+    unavailable,
+    type QuoteResult,
+} from '../quote/result.js';
 import { TradingContract } from '../trading/trading_contract.js';
-import { FULL_CLOSE, OrderKind, Status } from '../trading/trading_types.js';
+import {
+    FULL_CLOSE,
+    OrderKind,
+    Status,
+    VaultOrderKind,
+} from '../trading/trading_types.js';
 import { TradingRouterContract } from '../trading-router/router_contract.js';
 import {
     createOrderCall,
     type Call,
     type OrderParams,
 } from '../trading-router/router_types.js';
+import type { ExactVaultRestingOrderCreationQuote } from '../vault/quote.js';
 import {
     decodeCreateOrderCall,
     orderExecutionPrice,
@@ -21,6 +32,7 @@ import {
 } from './validation.js';
 
 const U32_MAX = 4_294_967_295;
+const U64_MAX = 2n ** 64n - 1n;
 
 export interface RelayFeeToken {
     collateralAssetId: string;
@@ -101,6 +113,20 @@ export interface BuildMarginAdjustmentExecutionInput {
     validation: OrderValidationContext;
 }
 
+export type VaultRestOnlyExecutionPolicy = Extract<
+    ContractExecutionPolicy,
+    { kind: 'restOnly' }
+>;
+
+export interface BuildVaultOrderOperationInput {
+    tradingAddress: string;
+    /** Required only for relayed rest-only execution. */
+    routerAddress?: string;
+    user: string;
+    quote: ExactVaultRestingOrderCreationQuote;
+    policy: VaultRestOnlyExecutionPolicy;
+}
+
 function validContract(value: string): boolean {
     return StrKey.isValidContract(value);
 }
@@ -141,6 +167,96 @@ function priceTime(context: OrderValidationContext): bigint {
 
 function invalid(reason: string): QuoteResult<PreparedExecution> {
     return unavailable('INVALID_INPUT', reason);
+}
+
+function validU64(value: unknown): value is bigint {
+    return typeof value === 'bigint' && value >= 0n && value <= U64_MAX;
+}
+
+function validateVaultCreationQuote(
+    quote: ExactVaultRestingOrderCreationQuote,
+): string | undefined {
+    if (!quote || typeof quote !== 'object' || quote.kind !== 'exact') {
+        return 'an exact vault order creation quote is required';
+    }
+    try {
+        decodeLedgerSequence(quote.ledger);
+    } catch (error) {
+        return error instanceof Error
+            ? error.message
+            : 'quote ledger is invalid';
+    }
+    const value = quote.value;
+    if (
+        !value ||
+        typeof value !== 'object' ||
+        value.kind !== 'resting' ||
+        value.policy !== 'restOnly'
+    ) {
+        return 'vault order execution requires an exact resting creation quote';
+    }
+    if (
+        !validU64(value.createdAt) ||
+        !validU64(quote.priceTime) ||
+        quote.priceTime !== value.createdAt
+    ) {
+        return 'vault order quote timestamp does not match its creation boundary';
+    }
+    const expectedFillAfter =
+        value.createdAt === U64_MAX ? null : value.createdAt + 1n;
+    if (value.fillAfter !== expectedFillAfter) {
+        return 'vault order later price boundary is invalid';
+    }
+
+    let amount: bigint;
+    let minOut: bigint;
+    let executionFee: bigint;
+    let escrowedAssets: bigint;
+    let escrowedShares: bigint;
+    try {
+        amount = checkedI128(value.amount);
+        minOut = checkedI128(value.minOut);
+        executionFee = checkedI128(value.executionFee);
+        escrowedAssets = checkedI128(value.escrowedAssets);
+        escrowedShares = checkedI128(value.escrowedShares);
+    } catch (error) {
+        return error instanceof Error
+            ? error.message
+            : 'vault order quote atomics are invalid';
+    }
+    if (amount <= 0n || minOut < 0n || executionFee < 0n) {
+        return 'vault order quote contains invalid atomic values';
+    }
+    if (value.action === 'deposit') {
+        let expectedEscrow: bigint;
+        try {
+            expectedEscrow = checkedI128(amount + executionFee);
+        } catch (error) {
+            return error instanceof Error
+                ? error.message
+                : 'vault order escrow is invalid';
+        }
+        if (
+            escrowedAssets !== expectedEscrow ||
+            escrowedShares !== 0n ||
+            value.redeemUnlockAt !== null
+        ) {
+            return 'vault deposit quote escrow is inconsistent';
+        }
+        return undefined;
+    }
+    if (value.action !== 'redeem') {
+        return 'vault order action is unknown';
+    }
+    if (
+        escrowedAssets !== executionFee ||
+        escrowedShares !== amount ||
+        !validU64(value.redeemUnlockAt) ||
+        value.redeemUnlockAt < value.createdAt
+    ) {
+        return 'vault redeem quote escrow or cooldown is inconsistent';
+    }
+    return undefined;
 }
 
 function firstIssue(
@@ -433,6 +549,93 @@ export function buildOrderOperation(
             error instanceof Error
                 ? error.message
                 : 'could not build order operation',
+        );
+    }
+}
+
+/** Build exactly one price-free vault order from an exact creation quote. */
+export function buildVaultOrderOperation(
+    input: BuildVaultOrderOperationInput,
+): QuoteResult<PreparedExecution> {
+    try {
+        if (!validContract(input.tradingAddress)) {
+            return invalid('tradingAddress must be a valid contract ID');
+        }
+        if (!validAddress(input.user)) {
+            return invalid('user must be a valid Stellar address');
+        }
+        if (Object.prototype.hasOwnProperty.call(input, 'calls')) {
+            return invalid(
+                'vault rest-only execution does not accept a call batch',
+            );
+        }
+        if (!input.policy || input.policy.kind !== 'restOnly') {
+            return invalid('vault order creation requires rest-only execution');
+        }
+        const quoteError = validateVaultCreationQuote(input.quote);
+        if (quoteError !== undefined) return invalid(quoteError);
+
+        if (input.policy.transport === 'relay') {
+            const relayError = validateRelayFeePolicy(
+                input.policy,
+                input.quote.ledger,
+            );
+            if (relayError !== undefined) return invalid(relayError);
+        } else if (input.policy.transport !== 'direct') {
+            return invalid('unsupported vault order execution transport');
+        }
+
+        const trading = new TradingContract(input.tradingAddress);
+        const creation = input.quote.value;
+        const kind =
+            creation.action === 'deposit'
+                ? VaultOrderKind.Deposit
+                : VaultOrderKind.Redeem;
+        let operationXdr: string;
+        if (input.policy.transport === 'direct') {
+            operationXdr = trading.createVaultOrder(
+                input.user,
+                kind,
+                creation.amount,
+                creation.minOut,
+            );
+        } else {
+            if (
+                typeof input.routerAddress !== 'string' ||
+                !validContract(input.routerAddress)
+            ) {
+                return invalid('routerAddress must be a valid contract ID');
+            }
+            operationXdr = new TradingRouterContract(
+                input.routerAddress,
+            ).multicallWithFee({
+                calls: [
+                    trading.createVaultOrderCall(
+                        input.user,
+                        kind,
+                        creation.amount,
+                        creation.minOut,
+                    ),
+                ],
+                user: input.user,
+                feeToken: input.policy.feeToken.contractId,
+                maxFeeAmount: input.policy.maxFeeAmount,
+                feeExpiration: input.policy.feeExpiration,
+                feeAmount: 1n,
+                feeRecipient: input.user,
+            });
+        }
+
+        return exact(
+            { policy: 'restOnly', operationXdr },
+            input.quote.ledger,
+            input.quote.priceTime,
+        );
+    } catch (error) {
+        return invalid(
+            error instanceof Error
+                ? error.message
+                : 'could not build vault order operation',
         );
     }
 }

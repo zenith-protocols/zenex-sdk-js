@@ -15,6 +15,11 @@ export {
     buildSmartAccountDeploymentRequest,
 } from './policy.js';
 export { buildPriceFreeRelayOperation } from './price_free.js';
+export {
+    buildRelayCallRequestFromTransaction,
+    extractRelayCallAuthorization,
+    prepareRelayAuthDiscovery,
+} from './auth_discovery.js';
 export type {
     RelayCallPolicy,
     RelayContractIdentities,
@@ -28,6 +33,14 @@ export type {
     VerifiedContractDeployment,
     VerifiedInstanceEvidence,
 } from './types.js';
+export type {
+    BuildRelayCallRequestFromTransactionInput,
+    ExtractRelayCallAuthorizationInput,
+    PreparedRelayAuthDiscovery,
+    PrepareRelayAuthDiscoveryInput,
+    RelayAuthDiscoveryResult,
+    RelayCallAuthorization,
+} from './auth_discovery.js';
 export type {
     BuildPriceFreeRelayOperationInput,
     PreparedPriceFreeRelayOperation,

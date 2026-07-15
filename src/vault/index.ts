@@ -18,10 +18,21 @@ export type {
 } from './vault_events.js';
 
 // Exact transaction quote math
-export { quoteVaultDeposit, quoteVaultRedeem } from './quote.js';
+export {
+    quoteVaultDeposit,
+    quoteVaultDepositFill,
+    quoteVaultOrderCreation,
+    quoteVaultRedeem,
+    quoteVaultRedeemFill,
+} from './quote.js';
 
 export type {
+    ExactVaultRestingOrderCreationQuote,
     VaultAtomicState,
+    VaultOrderCreationOutcome,
+    VaultOrderCreationQuoteInput,
+    VaultRestingOrderCreation,
+    VaultRetiredImmediateRedeem,
     VaultQuoteOutcome,
     VaultQuoteContext,
     VaultDepositQuoteInput,
