@@ -30,7 +30,7 @@ describe('API type renderer', () => {
         ).toBe('string | null');
     });
 
-    it('finds and safely renders every nullable enum in API 1.1', async () => {
+    it('finds and safely renders every nullable enum in API 1.2', async () => {
         const openapi = JSON.parse(await readFile(OPENAPI_PATH, 'utf8'));
         const entries = findNullableEnums(openapi);
 

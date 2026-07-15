@@ -412,6 +412,7 @@ export type {
     ProductMetadata,
     PublicConfig,
     PublicConfigResponse,
+    RankingDenomination,
     RankedLifecycle,
     RankedMetadata,
     RankedStanding,

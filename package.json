@@ -1,6 +1,6 @@
 {
     "name": "@zenith-protocols/zenex-sdk",
-    "version": "3.2.0",
+    "version": "3.3.0",
     "description": "Javascript SDK for Zenex",
     "author": "Robeart",
     "keywords": [
@@ -62,7 +62,7 @@
         "@typescript-eslint/eslint-plugin": "^8.53.0",
         "@typescript-eslint/parser": "^8.53.0",
         "@vitest/coverage-v8": "^4.1.10",
-        "@zenith-protocols/zenex-api-contracts": "file:vendor/zenith-protocols-zenex-api-contracts-1.1.0.tgz",
+        "@zenith-protocols/zenex-api-contracts": "file:vendor/zenith-protocols-zenex-api-contracts-1.2.0.tgz",
         "eslint": "^9.39.0",
         "eslint-config-prettier": "^10.1.8",
         "eslint-plugin-prettier": "^5.5.5",

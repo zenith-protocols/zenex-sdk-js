@@ -13,6 +13,7 @@ describe('package root type exports', () => {
                 AccountFillQuery,
                 AccountVaultOrderQuery,
                 AccountLifecycleQuery,
+                RankingDenomination,
             } from '../src/index.js';
 
             export const queries: readonly [
@@ -21,6 +22,11 @@ describe('package root type exports', () => {
                 AccountVaultOrderQuery,
                 AccountLifecycleQuery,
             ] = [{}, {}, {}, {}];
+
+            export const denomination: RankingDenomination = {
+                collateralAssetId: 'xlm',
+                decimals: 7,
+            };
         `;
         const options: ts.CompilerOptions = {
             target: ts.ScriptTarget.ES2022,

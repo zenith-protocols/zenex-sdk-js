@@ -13,7 +13,7 @@ const PACKAGE_ROOT = resolve(
 const LOCK_PATH = join(ROOT, 'scripts/api-contract-lock.json');
 const VENDORED_PACKAGE_PATH = join(
     ROOT,
-    'vendor/zenith-protocols-zenex-api-contracts-1.1.0.tgz',
+    'vendor/zenith-protocols-zenex-api-contracts-1.2.0.tgz',
 );
 const OUTPUT_PATH = join(ROOT, 'src/data/generated.ts');
 const check = process.argv.includes('--check');
@@ -281,7 +281,7 @@ async function main() {
     }
     if (
         manifest.version !== lock.packageVersion ||
-        lock.packageVersion !== '1.1.0'
+        lock.packageVersion !== '1.2.0'
     ) {
         failures.push('package version');
     }

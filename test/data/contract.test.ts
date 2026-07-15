@@ -10,9 +10,9 @@ import {
 } from '../../src/data/generated.js';
 
 describe('generated immutable API contract', () => {
-    it('pins the exact API 1.1 package and its content hashes', () => {
+    it('pins the exact API 1.2 package and its content hashes', () => {
         expect(API_VERSION).toBe('v1');
-        expect(API_CONTRACT_PACKAGE_VERSION).toBe('1.1.0');
+        expect(API_CONTRACT_PACKAGE_VERSION).toBe('1.2.0');
         expect(API_OPENAPI_SHA256).toMatch(/^[0-9a-f]{64}$/);
         expect(API_PACKAGE_CONTENT_SHA256).toMatch(/^[0-9a-f]{64}$/);
     });
@@ -56,6 +56,31 @@ describe('generated immutable API contract', () => {
         expect(ATOMIC_FIELD_POINTERS.AccountOrdersResponse).toContain(
             '/meta/throughLedger',
         );
+        expect(API_SCHEMAS.RankedMetadata).toMatchObject({
+            additionalProperties: false,
+            properties: {
+                denomination: {
+                    additionalProperties: false,
+                    properties: {
+                        collateralAssetId: expect.any(Object),
+                        decimals: { minimum: 0, maximum: 38, type: 'integer' },
+                    },
+                    required: ['collateralAssetId', 'decimals'],
+                    type: 'object',
+                },
+                ruleHash: {
+                    pattern: '^[0-9a-f]{64}$',
+                    type: 'string',
+                },
+            },
+            required: expect.arrayContaining(['denomination', 'ruleHash']),
+        });
+        expect(API_SCHEMAS.Competition).toMatchObject({
+            properties: {
+                denomination: expect.any(Object),
+            },
+            required: expect.arrayContaining(['denomination']),
+        });
         expect(ATOMIC_FIELD_POINTERS.LatestPriceResponse).toEqual(
             expect.arrayContaining([
                 '/data/price',
