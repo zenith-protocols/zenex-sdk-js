@@ -1,4 +1,4 @@
-import { StrKey } from '@stellar/stellar-sdk';
+import { Address, StrKey } from '@stellar/stellar-sdk';
 import { MAX_SIGNED_PRICE_UPDATE_BYTES } from '../data/price.js';
 import { addI128, checkedI128, mulDivFloor, subI128 } from '../math/fixed.js';
 import { normalizeExactRatio, type ExactRatio } from '../math/ratio.js';
@@ -8,7 +8,7 @@ import {
     unavailable,
     type QuoteResult,
 } from '../quote/result.js';
-import type { TradingSnapshot } from '../trading/trading_snapshot.js';
+import type { SubjectBoundTradingSnapshot } from '../trading/trading_snapshot.js';
 import { Status } from '../trading/trading_types.js';
 import { positionDecreaseSnapshotBinding } from './decrease_identity.js';
 import {
@@ -45,7 +45,7 @@ export type PositionDecreaseExecutionIntent =
       };
 
 interface PositionDecreaseIntentBase {
-    readonly snapshot: TradingSnapshot;
+    readonly snapshot: SubjectBoundTradingSnapshot;
     readonly isLong: boolean;
     readonly execution: PositionDecreaseExecutionIntent;
     readonly maximumSlippage: ExactRatio;
@@ -114,7 +114,7 @@ interface ResolvedPositionDecreaseIntent {
 const U32_MAX = 4_294_967_295;
 const U64_MAX = 2n ** 64n - 1n;
 
-function validateSnapshotBoundary(snapshot: TradingSnapshot): void {
+function validateSnapshotBoundary(snapshot: SubjectBoundTradingSnapshot): void {
     decodeLedgerSequence(snapshot.ledger);
     if (
         typeof snapshot.ledgerTime !== 'bigint' ||
@@ -180,6 +180,33 @@ function validateSnapshotBoundary(snapshot: TradingSnapshot): void {
         throw new TypeError(
             'snapshot price update must contain no more than 32 KiB of bytes',
         );
+    }
+}
+
+function validateSnapshotSubject(
+    snapshot: SubjectBoundTradingSnapshot,
+    isLong: boolean,
+): void {
+    const subject = snapshot.subject;
+    if (!subject || typeof subject !== 'object') {
+        throw new TypeError('snapshot subject provenance is required');
+    }
+    let user: string;
+    try {
+        user = Address.fromString(subject.user).toString();
+    } catch {
+        throw new TypeError(
+            'snapshot subject user must be a valid Stellar address',
+        );
+    }
+    if (user !== subject.user) {
+        throw new TypeError('snapshot subject user must be canonical');
+    }
+    if (typeof subject.isLong !== 'boolean') {
+        throw new TypeError('snapshot subject side must be boolean');
+    }
+    if (subject.isLong !== isLong) {
+        throw new RangeError('position side must match snapshot subject');
     }
 }
 
@@ -295,6 +322,7 @@ function resolvePositionDecreaseIntent(
     if (typeof input.isLong !== 'boolean') {
         throw new TypeError('position side must be boolean');
     }
+    validateSnapshotSubject(input.snapshot, input.isLong);
     validateSnapshotBoundary(input.snapshot);
 
     const positionNotional = nonnegativeAtomic(

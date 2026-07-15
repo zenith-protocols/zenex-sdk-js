@@ -16,7 +16,7 @@ import {
     type QuoteResult,
 } from '../quote/result.js';
 import { TradingContract } from '../trading/trading_contract.js';
-import type { TradingSnapshot } from '../trading/trading_snapshot.js';
+import type { SubjectBoundTradingSnapshot } from '../trading/trading_snapshot.js';
 import {
     FULL_CLOSE,
     OrderKind,
@@ -122,7 +122,7 @@ export type PositionDecreaseFillOrKillPolicy = Extract<
 >;
 
 export interface BuildPositionDecreaseIntentExecutionInput {
-    snapshot: TradingSnapshot;
+    snapshot: SubjectBoundTradingSnapshot;
     user: string;
     quote: ExactPositionDecreaseIntentQuote;
     policy: PositionDecreaseFillOrKillPolicy;
@@ -773,7 +773,9 @@ export function buildVaultActionExecution(
             !quote.value ||
             typeof quote.value !== 'object'
         ) {
-            return invalidVaultAction('an exact vault action quote is required');
+            return invalidVaultAction(
+                'an exact vault action quote is required',
+            );
         }
 
         const creation = quote.value;
@@ -950,6 +952,17 @@ export function buildPositionDecreaseIntentExecution(
     try {
         if (!input || typeof input !== 'object') {
             return invalid('position decrease execution input is required');
+        }
+        if (
+            !input.snapshot ||
+            typeof input.snapshot !== 'object' ||
+            !input.snapshot.subject ||
+            typeof input.snapshot.subject !== 'object'
+        ) {
+            return invalid('snapshot subject provenance is required');
+        }
+        if (input.user !== input.snapshot.subject.user) {
+            return invalid('execution user must match snapshot subject');
         }
         const policyError = requireFillOrKill(input.policy);
         if (policyError !== undefined) return policyError;

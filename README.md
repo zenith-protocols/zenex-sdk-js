@@ -49,10 +49,13 @@ and vault quote APIs for transaction construction.
 
 ## Exact position decrease intent
 
-Quote a close or partial decrease from the same coherent `TradingSnapshot`
-that will be supplied to the execution builder. Size, collateral return,
-slippage, and absolute expiration stay in bigint and ledger arithmetic inside
-the SDK.
+Quote a close or partial decrease from the same coherent
+`SubjectBoundTradingSnapshot` that will be supplied to the execution builder.
+The snapshot records the canonical user and position side used by the view
+simulation. The explicit `isLong` quote input and `user` builder input must
+match that subject, so accidental cross-account or cross-side reuse fails
+closed. Size, collateral return, slippage, and absolute expiration stay in
+bigint and ledger arithmetic inside the SDK.
 
 ```ts
 import {
@@ -104,11 +107,11 @@ directs the caller to the full size form, so collateral intent is never
 silently ignored.
 
 Maximum slippage is an exact ratio below one. A long decrease gets a
-conservatively rounded lower bid bound; a short decrease gets a conservatively
-rounded upper ask bound. `validForLedgers` is from 1 through the exported
-`POSITION_DECREASE_MAX_VALIDITY_LEDGERS` value of 60, and the SDK derives the
-inclusive absolute expiration. The snapshot price update must be nonempty and
-no larger than 32 KiB.
+lower bid bound rounded up on the final price; a short decrease gets an upper
+ask bound rounded down on the final price. `validForLedgers` is from 1 through
+the exported `POSITION_DECREASE_MAX_VALIDITY_LEDGERS` value of 60, and the SDK
+derives the inclusive absolute expiration. The snapshot price update must be
+nonempty and no larger than 32 KiB.
 
 `executionFee` must equal `snapshot.config.execFee`. It is an upfront order
 escrow rather than a position-margin debit. An atomic direct fill pays it to

@@ -6,7 +6,10 @@ import {
     quotePositionDecreaseIntent,
     type QuotePositionDecreaseIntentInput,
 } from '../../src/position/decrease.js';
-import type { TradingSnapshot } from '../../src/trading/trading_snapshot.js';
+import type {
+    SubjectBoundTradingSnapshot,
+    TradingSnapshot,
+} from '../../src/trading/trading_snapshot.js';
 import {
     Status,
     type MarketData,
@@ -20,6 +23,7 @@ const TRADING = StrKey.encodeContract(Buffer.alloc(32, 2));
 const VAULT = StrKey.encodeContract(Buffer.alloc(32, 3));
 const VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 4));
 const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 5));
+const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -101,9 +105,10 @@ function market(open: Position, isLong: boolean): MarketData {
 function snapshot(
     overrides: Partial<TradingSnapshot> = {},
     isLong = true,
-): TradingSnapshot {
+): SubjectBoundTradingSnapshot {
     const open = overrides.position ?? position();
     return {
+        subject: { user: USER, isLong },
         ledger: 10_000,
         ledgerTime: 20_000n,
         deployment: {
@@ -348,32 +353,80 @@ describe('quotePositionDecreaseIntent', () => {
         });
     });
 
-    it('rounds a long lower price bound up conservatively', () => {
+    it('uses the ceiling of the final long lower bound by one atomic unit', () => {
         const result = quotePositionDecreaseIntent(directInput());
 
-        expect(result).toMatchObject({
-            kind: 'exact',
-            value: {
-                priceBound: 9_802n,
-                outcome: { executionPrice: 9_901n },
-            },
-        });
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        expect(result.value.outcome.executionPrice).toBe(9_901n);
+        expect(result.value.priceBound).toBe(9_802n);
+        expect(result.value.priceBound).toBe(9_801n + 1n);
     });
 
-    it('rounds a short upper price bound down conservatively', () => {
+    it('uses the floor of the final short upper bound by one atomic unit', () => {
         const shortSnapshot = snapshot({}, false);
         const result = quotePositionDecreaseIntent(
             directInput({ snapshot: shortSnapshot, isLong: false }),
         );
 
-        expect(result).toMatchObject({
-            kind: 'exact',
-            value: {
-                identity: { isLong: false },
-                priceBound: 10_199n,
-                outcome: { executionPrice: 10_099n },
-            },
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        expect(result.value.identity.isLong).toBe(false);
+        expect(result.value.outcome.executionPrice).toBe(10_099n);
+        expect(result.value.priceBound).toBe(10_199n);
+        expect(result.value.priceBound).toBe(10_200n - 1n);
+    });
+
+    it('rejects a snapshot without subject provenance at runtime', () => {
+        const source: TradingSnapshot = snapshot();
+        delete (source as { subject?: unknown }).subject;
+
+        expect(
+            quotePositionDecreaseIntent(
+                directInput({
+                    snapshot: source as SubjectBoundTradingSnapshot,
+                }),
+            ),
+        ).toMatchObject({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: 'snapshot subject provenance is required',
         });
+    });
+
+    it('rejects an explicit side that differs from the snapshot subject', () => {
+        expect(
+            quotePositionDecreaseIntent(
+                directInput({ snapshot: snapshot({}, false), isLong: true }),
+            ),
+        ).toMatchObject({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: 'position side must match snapshot subject',
+        });
+    });
+
+    it.each([
+        [
+            'user',
+            { user: 'not-an-address', isLong: true },
+            'snapshot subject user must be a valid Stellar address',
+        ],
+        [
+            'side',
+            { user: USER, isLong: 'long' },
+            'snapshot subject side must be boolean',
+        ],
+    ])('rejects a malformed snapshot subject %s', (_field, subject, reason) => {
+        expect(
+            quotePositionDecreaseIntent(
+                directInput({
+                    snapshot: snapshot({
+                        subject: subject as never,
+                    }),
+                }),
+            ),
+        ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT', reason });
     });
 
     it('uses the exact execution price for zero slippage', () => {

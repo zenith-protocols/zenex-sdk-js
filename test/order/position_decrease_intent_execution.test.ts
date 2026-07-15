@@ -11,7 +11,10 @@ import {
     type ExactPositionDecreaseIntentQuote,
     type QuotePositionDecreaseIntentInput,
 } from '../../src/position/decrease.js';
-import type { TradingSnapshot } from '../../src/trading/trading_snapshot.js';
+import type {
+    SubjectBoundTradingSnapshot,
+    TradingSnapshot,
+} from '../../src/trading/trading_snapshot.js';
 import {
     FULL_CLOSE,
     OrderKind,
@@ -32,6 +35,7 @@ const KEEPER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 16));
 const FEE_TOKEN = StrKey.encodeContract(Buffer.alloc(32, 17));
 const OTHER_TRADING = StrKey.encodeContract(Buffer.alloc(32, 18));
 const OTHER_ROUTER = StrKey.encodeContract(Buffer.alloc(32, 19));
+const OTHER_USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 20));
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -107,9 +111,12 @@ function market(open: Position): MarketData {
     };
 }
 
-function snapshot(overrides: Partial<TradingSnapshot> = {}): TradingSnapshot {
+function snapshot(
+    overrides: Partial<TradingSnapshot> = {},
+): SubjectBoundTradingSnapshot {
     const open = overrides.position ?? position();
     return {
+        subject: { user: USER, isLong: true },
         ledger: 10_000,
         ledgerTime: 20_000n,
         deployment: {
@@ -505,6 +512,23 @@ describe('buildPositionDecreaseIntentExecution', () => {
                 },
             }),
         ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT' });
+    });
+
+    it('rejects an execution user that differs from the snapshot subject', () => {
+        const source = snapshot();
+
+        expect(
+            buildPositionDecreaseIntentExecution({
+                snapshot: source,
+                user: OTHER_USER,
+                quote: exactQuote(source),
+                policy: directPolicy,
+            }),
+        ).toMatchObject({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: 'execution user must match snapshot subject',
+        });
     });
 
     it('requires direct quote and policy transport identity', () => {

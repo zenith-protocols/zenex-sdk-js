@@ -28,8 +28,7 @@ type PositionDecreaseSizeIntent =
     | { kind: 'fraction'; ratio: ExactRatio };
 
 type PositionDecreaseCollateralReturnIntent =
-    | { kind: 'explicit'; amount: bigint }
-    | { kind: 'proRata' };
+    { kind: 'explicit'; amount: bigint } | { kind: 'proRata' };
 
 type PositionDecreaseExecutionIntent =
     | {
@@ -47,10 +46,12 @@ function quotePositionDecreaseIntent(
 ): QuoteResult<PositionDecreaseIntentOutcome>;
 ```
 
-The input is a discriminated union. A full size forbids `collateralReturn`.
+The input is a discriminated union over a `SubjectBoundTradingSnapshot`. A
+full size forbids `collateralReturn`.
 Both partial size forms require it. Runtime validation rejects a
 `collateralReturn` property on a full request even when JavaScript or a type
-cast bypasses the TypeScript union.
+cast bypasses the TypeScript union. The explicit side must equal the snapshot
+subject side, and malformed or missing subject provenance fails closed.
 
 The order module exposes:
 
@@ -60,8 +61,9 @@ function buildPositionDecreaseIntentExecution(
 ): QuoteResult<PreparedExecution>;
 ```
 
-The builder accepts only an exact intent quote, the same coherent snapshot, a
-user address, and a fill-or-kill direct or relay policy. It does not accept
+The builder accepts only an exact intent quote, the same coherent subject-bound
+snapshot, its matching user address, and a fill-or-kill direct or relay policy.
+It does not accept
 caller-supplied trading addresses, Router addresses, sides, atomics, price
 bounds, expirations, or trailing calls.
 

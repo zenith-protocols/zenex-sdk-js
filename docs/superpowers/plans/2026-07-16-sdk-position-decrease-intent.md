@@ -30,6 +30,7 @@
 ### Task 1: Shared Exact Ratio
 
 **Files:**
+
 - Create: `src/math/ratio.ts`
 - Modify: `src/math/index.ts`
 - Modify: `src/vault/quote.ts`
@@ -37,6 +38,7 @@
 - Test: `test/vault/vault_minimum_output.test.ts`
 
 **Interfaces:**
+
 - Consumes: `checkedI128` from `src/math/fixed.ts`.
 - Produces: public `ExactRatio` and internal `normalizeExactRatio(input, options)` with an exact reduced bigint result.
 
@@ -147,12 +149,14 @@ git commit -m "feat(math): share exact ratio normalization"
 ### Task 2: Exact Position-Decrease Quote
 
 **Files:**
+
 - Create: `src/position/decrease.ts`
 - Modify: `src/position/index.ts`
 - Create: `test/position/decrease_intent.test.ts`
 
 **Interfaces:**
-- Consumes: `ExactRatio`, `normalizeExactRatio`, `mulDivFloor`, `addI128`, `subI128`, `quotePositionAction`, and `TradingSnapshot`.
+
+- Consumes: `ExactRatio`, `normalizeExactRatio`, `mulDivFloor`, `addI128`, `subI128`, `quotePositionAction`, and `SubjectBoundTradingSnapshot`.
 - Produces: `POSITION_DECREASE_MAX_VALIDITY_LEDGERS`, intent unions, `PositionDecreaseIntentOutcome`, `ExactPositionDecreaseIntentQuote`, and `quotePositionDecreaseIntent`.
 
 - [ ] **Step 1: Write failing tests for canonical size and collateral resolution**
@@ -285,8 +289,9 @@ const priceBound = isLong
 const expiration = snapshot.ledger + validForLedgers;
 ```
 
-Reject malformed snapshot identity, side, fee intent, ratios, delta, u32 sum,
-or empty/oversized price update as `INVALID_INPUT`. Require execution fee to
+Reject malformed snapshot identity, subject provenance, side, fee intent,
+ratios, delta, u32 sum, or empty/oversized price update as `INVALID_INPUT`.
+Require the explicit side to equal the subject side and execution fee to
 equal snapshot config. Reject Frozen and Retired order creation as a contract
 gate. Retain normalized request, deployment identity, canonical action,
 resolved atomics, bound, expiration, and full nested action outcome.
@@ -307,12 +312,14 @@ git commit -m "feat(position): quote exact decrease intents"
 ### Task 3: Strict Position-Decrease Execution Builder
 
 **Files:**
+
 - Modify: `src/order/transactions.ts`
 - Modify: `src/order/index.ts`
 - Create: `test/order/position_decrease_intent_execution.test.ts`
 
 **Interfaces:**
-- Consumes: `ExactPositionDecreaseIntentQuote`, `quotePositionDecreaseIntent`, `buildOrderOperation`, `TradingSnapshot`, `FULL_CLOSE`, and fill-or-kill policy variants.
+
+- Consumes: `ExactPositionDecreaseIntentQuote`, `quotePositionDecreaseIntent`, `buildOrderOperation`, `SubjectBoundTradingSnapshot`, `FULL_CLOSE`, and fill-or-kill policy variants.
 - Produces: `PositionDecreaseFillOrKillPolicy`, `BuildPositionDecreaseIntentExecutionInput`, and `buildPositionDecreaseIntentExecution` returning `QuoteResult<PreparedExecution>`.
 
 - [ ] **Step 1: Write failing direct and relay builder tests**
@@ -347,7 +354,7 @@ export type PositionDecreaseFillOrKillPolicy = Extract<
 >;
 
 export interface BuildPositionDecreaseIntentExecutionInput {
-    readonly snapshot: TradingSnapshot;
+    readonly snapshot: SubjectBoundTradingSnapshot;
     readonly user: string;
     readonly quote: ExactPositionDecreaseIntentQuote;
     readonly policy: PositionDecreaseFillOrKillPolicy;
@@ -359,7 +366,8 @@ supplied snapshot. Compare the complete expected and supplied exact quote with
 a browser-safe structural equality helper that checks object keys, arrays,
 `Uint8Array`, bigints, and primitives. Unknown keys fail equality. Then call
 `buildOrderOperation` with identities and validation context derived only from
-the snapshot.
+the snapshot. Require the explicit execution user to equal the snapshot
+subject user.
 
 - [ ] **Step 4: Run direct and relay builder tests and verify GREEN**
 
@@ -405,12 +413,14 @@ git commit -m "feat(position): prepare exact decrease executions"
 ### Task 4: Public Exports, Integration Documentation, and Verification
 
 **Files:**
+
 - Modify: `README.md`
 - Modify: `test/index_exports.test.ts`
 - Modify: `test/index_type_exports.test.ts`
 - Regenerate: `etc/zenex-sdk.api.md`
 
 **Interfaces:**
+
 - Consumes: all Task 1 through Task 3 public names.
 - Produces: package-root runtime and type exports plus integrator examples.
 
