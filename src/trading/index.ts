@@ -69,10 +69,15 @@ export type { SkewSplitFees } from './trading_market.js';
 export { validateTradingConfig } from './trading_config.js';
 
 // Events (v2 event layer; matches trading/src/events.rs)
-export {
-    TradingEventType,
-    decodeTradingEvent,
-} from './trading_events.js';
+export { TradingEventType, decodeTradingEvent } from './trading_events.js';
+
+// Coherent exact quote snapshot
+export { loadTradingSnapshot } from './trading_snapshot.js';
+export type {
+    TradingDeployment,
+    TradingSnapshot,
+    TradingSnapshotRequest,
+} from './trading_snapshot.js';
 
 export type {
     BaseTradingEvent,
