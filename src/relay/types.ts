@@ -1,3 +1,5 @@
+import type { TrustedSmartAccountRegistry } from './smart_account_evidence.js';
+
 export type RelayExecutionPolicy =
     | 'fillOrKill'
     | 'restOnly'
@@ -120,6 +122,7 @@ export interface SingleMarketSessionInput {
     sessionPolicy: string;
     smartAccount: string;
     deployments: TrustedDeploymentRegistry;
+    smartAccounts: TrustedSmartAccountRegistry;
     capability: 'single-transfer-destination-v1';
     markets: readonly {
         trading: string;

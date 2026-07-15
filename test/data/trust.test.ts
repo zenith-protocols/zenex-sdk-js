@@ -1,4 +1,4 @@
-import { StrKey } from '@stellar/stellar-sdk';
+import { Networks, StrKey, hash } from '@stellar/stellar-sdk';
 import { describe, expect, it } from 'vitest';
 import { decodeApiSchema, ZenexDataDecodeError } from '../../src/data/codec.js';
 import type { PublicConfig } from '../../src/data/generated.js';
@@ -18,6 +18,11 @@ import {
     WEBAUTHN_VERIFIER_WASM_SHA256,
 } from '../../src/relay/policy.js';
 import type { VerifiedContractDeployment } from '../../src/relay/types.js';
+import type { VerifiedSmartAccountInstance } from '../../src/relay/smart_account_evidence.js';
+import {
+    TESTNET_NETWORK_ID,
+    verifiedSmartAccountFixture,
+} from '../helpers/smart_account_evidence.js';
 
 const ROUTER = 'CDBUEWVNX33GUWYQQIXQHZNABWKJR4NJVHP5TCHVSQOSSVB4IWJBVFIK';
 const REFERRAL = 'CAPPKUGOUTMM3JSXLPO2H7HTSA3VRGRMWHYRNE63X43T6LPYIS7RGY4E';
@@ -211,11 +216,10 @@ describe('public config trust boundary', () => {
         );
     });
 
-    it('builds immutable Router identities and deployment registry records', () => {
-        const userAccount = deployment(
+    it('builds immutable Router identities and separate live account records', async () => {
+        const userAccount = await verifiedSmartAccountFixture(
             StrKey.encodeContract(Buffer.alloc(32, 71)),
-            SMART_ACCOUNT_WASM_SHA256,
-            SMART_ACCOUNT_SPEC_SHA256,
+            49_000,
         );
         const trust = createZenexTrustBundle(publicConfig(), [userAccount]);
 
@@ -248,8 +252,16 @@ describe('public config trust boundary', () => {
             SESSION_POLICY_WASM_SHA256,
         );
         expect(
-            trust.deployments.resolve(userAccount.contractId)?.wasmHash,
-        ).toBe(SMART_ACCOUNT_WASM_SHA256);
+            trust.deployments.resolve(userAccount.contractId),
+        ).toBeUndefined();
+        expect(trust.smartAccounts.resolve(userAccount.contractId)).toBe(
+            userAccount,
+        );
+        expect(trust.priceFree.smartAccounts).toBe(trust.smartAccounts);
+        expect(trust.smartAccounts).toMatchObject({
+            networkId: TESTNET_NETWORK_ID,
+            networkPassphrase: Networks.TESTNET,
+        });
         expect(trust.smartAccountDeployment).toMatchObject({
             kitVersion: '0.3.0',
             deployer: SMART_ACCOUNT_DEPLOYER,
@@ -277,6 +289,7 @@ describe('public config trust boundary', () => {
             },
         ]);
         expect(Object.isFrozen(trust)).toBe(true);
+        expect(Object.isFrozen(trust.smartAccounts)).toBe(true);
         expect(Object.isFrozen(trust.relayContracts.trading)).toBe(true);
         expect(Object.isFrozen(trust.tradingDeployments)).toBe(true);
         expect(Object.isFrozen(trust.tradingDeployments[0])).toBe(true);
@@ -294,7 +307,7 @@ describe('public config trust boundary', () => {
         });
     });
 
-    it('does not trust claimed config or a per-user unverified artifact', () => {
+    it('does not trust claimed config or forged per-user evidence', () => {
         const claimed: PublicConfig = {
             ...publicConfig(),
             evidence: { state: 'claimed' },
@@ -303,17 +316,64 @@ describe('public config trust boundary', () => {
             ZenexPublicConfigTrustError,
         );
 
-        const userAccount = deployment(
-            StrKey.encodeContract(Buffer.alloc(32, 72)),
-            'f'.repeat(64),
-            SMART_ACCOUNT_SPEC_SHA256,
+        const forged = {
+            contractId: StrKey.encodeContract(Buffer.alloc(32, 72)),
+            networkId: TESTNET_NETWORK_ID,
+            networkPassphrase: Networks.TESTNET,
+            observedLedger: 49_000,
+            instanceExecutableHash: SMART_ACCOUNT_WASM_SHA256,
+        } as unknown as VerifiedSmartAccountInstance;
+        expect(() => createZenexTrustBundle(publicConfig(), [forged])).toThrow(
+            ZenexPublicConfigTrustError,
         );
-        expect(() =>
-            createZenexTrustBundle(publicConfig(), [userAccount]),
-        ).toThrow(ZenexPublicConfigTrustError);
     });
 
-    it('rejects mismatched SAC metadata and overlapping relay identities', () => {
+    it('rejects spread, JSON, duplicate, and cross-network live account inputs', async () => {
+        const userAccount = await verifiedSmartAccountFixture(
+            StrKey.encodeContract(Buffer.alloc(32, 73)),
+            49_000,
+        );
+        const spread = {
+            ...userAccount,
+        } as unknown as VerifiedSmartAccountInstance;
+        const json = JSON.parse(
+            JSON.stringify(userAccount),
+        ) as VerifiedSmartAccountInstance;
+        expect(() => createZenexTrustBundle(publicConfig(), [spread])).toThrow(
+            ZenexPublicConfigTrustError,
+        );
+        expect(() => createZenexTrustBundle(publicConfig(), [json])).toThrow(
+            ZenexPublicConfigTrustError,
+        );
+        expect(() =>
+            createZenexTrustBundle(publicConfig(), [userAccount, userAccount]),
+        ).toThrowError(
+            expect.objectContaining({
+                path: '/userSmartAccounts/1/contractId',
+            }),
+        );
+
+        const mainnetPassphrase = Networks.PUBLIC;
+        const mainnetAccount = await verifiedSmartAccountFixture(
+            StrKey.encodeContract(Buffer.alloc(32, 74)),
+            49_000,
+            {
+                network: {
+                    rpc: 'http://localhost:1337',
+                    passphrase: mainnetPassphrase,
+                    opts: { allowHttp: true },
+                },
+                networkId: hash(Buffer.from(mainnetPassphrase)).toString('hex'),
+            },
+        );
+        expect(() =>
+            createZenexTrustBundle(publicConfig(), [mainnetAccount]),
+        ).toThrowError(
+            expect.objectContaining({ path: '/userSmartAccounts/0/networkId' }),
+        );
+    });
+
+    it('rejects mismatched SAC metadata and overlapping relay identities', async () => {
         const badSac = publicConfig() as any;
         badSac.collateralAssets[0].classicAsset.code = 'EURC';
         expect(() => createZenexTrustBundle(badSac)).toThrowError(
@@ -355,10 +415,9 @@ describe('public config trust boundary', () => {
             }),
         );
 
-        const userCollision = deployment(
+        const userCollision = await verifiedSmartAccountFixture(
             TRADING,
-            SMART_ACCOUNT_WASM_SHA256,
-            SMART_ACCOUNT_SPEC_SHA256,
+            49_000,
         );
         expect(() =>
             createZenexTrustBundle(publicConfig(), [userCollision]),

@@ -29,6 +29,10 @@ import {
     type TrustedDeploymentRegistry,
     type VerifiedContractDeployment,
 } from './types.js';
+import {
+    SMART_ACCOUNT_WASM_SHA256,
+    trustedSmartAccountInstanceIssue,
+} from './smart_account_evidence.js';
 
 const U32_MAX = 4_294_967_295;
 const UUID =
@@ -45,8 +49,7 @@ const P256_B = BigInt(
 /** Pinned smart-account-kit 0.3.0 account artifact. */
 export const SMART_ACCOUNT_DEPLOYER =
     'GAAH4OT36RRCCAGKARGPN2HLHT2NOBVFHO4GUHA6CF7UKQ4MMV24WQ4N';
-export const SMART_ACCOUNT_WASM_SHA256 =
-    '9cd9b828e8723b4d21ede1ceb4bb9327310a807bfc3697bf8060f3d90b9446b4';
+export { SMART_ACCOUNT_WASM_SHA256 };
 export const SMART_ACCOUNT_SPEC_SHA256 =
     'd2a0c19c0d07dcd6e24542963e33d2127209f9175d3823ac9743600a8d3123bd';
 /** Pinned smart-account-kit 0.3.0 WebAuthn verifier artifact. */
@@ -1332,12 +1335,10 @@ export function buildSingleMarketSessionRule(
     if (input.capability !== 'single-transfer-destination-v1') {
         return sessionUnavailable('unsupported session capability');
     }
-    const smartAccountIssue = trustedDeploymentIssue(
-        input.deployments,
+    const smartAccountIssue = trustedSmartAccountInstanceIssue(
+        input.smartAccounts,
         input.smartAccount,
-        SMART_ACCOUNT_WASM_SHA256,
-        SMART_ACCOUNT_SPEC_SHA256,
-        'smart account',
+        input.currentLedger,
     );
     if (smartAccountIssue !== undefined) {
         return sessionUnavailable(smartAccountIssue);

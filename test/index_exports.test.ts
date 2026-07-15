@@ -224,6 +224,7 @@ describe('package root exports', () => {
         expect(SDK.buildRelayCallRequestFromTransaction).toBeTypeOf('function');
         expect(SDK.buildPriceFreeRelayOperation).toBeTypeOf('function');
         expect(SDK.buildSmartAccountDeploymentRequest).toBeTypeOf('function');
+        expect(SDK.verifySmartAccountInstance).toBeTypeOf('function');
         expect(SDK.SMART_ACCOUNT_DEPLOYMENT_MAX_TIMEOUT_SECONDS).toBe(30);
         expect(SDK.buildSingleMarketSessionRule).toBeTypeOf('function');
         expect(SDK.prepareStrictTransaction).toBeTypeOf('function');

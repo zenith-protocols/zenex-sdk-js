@@ -11,6 +11,10 @@ import { TradingRouterContract } from '../trading-router/router_contract.js';
 import type { Call } from '../trading-router/router_types.js';
 import { buildSingleMarketSessionRule } from './policy.js';
 import type { PolicyBuildResult, TrustedDeploymentRegistry } from './types.js';
+import {
+    trustedSmartAccountInstanceIssue,
+    type TrustedSmartAccountRegistry,
+} from './smart_account_evidence.js';
 
 const U32_MAX = 4_294_967_295;
 const RULE_NAME = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;
@@ -30,6 +34,7 @@ export interface PriceFreeRelayConfiguration {
         readonly maximumDurationLedgers: bigint;
     };
     readonly deployments: TrustedDeploymentRegistry;
+    readonly smartAccounts: TrustedSmartAccountRegistry;
 }
 
 export type PriceFreeRelayAction =
@@ -174,6 +179,12 @@ function configurationIssue(
         typeof configuration.deployments.resolve !== 'function'
     ) {
         return 'trusted deployment registry is required';
+    }
+    if (
+        !configuration.smartAccounts ||
+        typeof configuration.smartAccounts.resolve !== 'function'
+    ) {
+        return 'trusted smart account instance registry is required';
     }
     return undefined;
 }
@@ -375,6 +386,7 @@ function actionCalls(
                 sessionPolicy: input.configuration.sessionPolicy.contractId,
                 smartAccount: input.user,
                 deployments: input.configuration.deployments,
+                smartAccounts: input.configuration.smartAccounts,
                 capability: 'single-transfer-destination-v1',
                 markets: [
                     {
@@ -403,6 +415,14 @@ function actionCalls(
                 action.id === 0
             ) {
                 return unavailable('removeSessionRule action is invalid');
+            }
+            const smartAccountIssue = trustedSmartAccountInstanceIssue(
+                input.configuration.smartAccounts,
+                input.user,
+                input.currentLedger,
+            );
+            if (smartAccountIssue !== undefined) {
+                return unavailable(smartAccountIssue);
             }
             calls.push({
                 contract: input.user,

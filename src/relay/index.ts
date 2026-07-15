@@ -20,6 +20,15 @@ export {
     extractRelayCallAuthorization,
     prepareRelayAuthDiscovery,
 } from './auth_discovery.js';
+export {
+    SmartAccountInstanceVerificationError,
+    verifySmartAccountInstance,
+} from './smart_account_evidence.js';
+export type {
+    TrustedSmartAccountRegistry,
+    VerifiedSmartAccountInstance,
+    VerifySmartAccountInstanceInput,
+} from './smart_account_evidence.js';
 export type {
     RelayCallPolicy,
     RelayContractIdentities,

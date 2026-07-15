@@ -5,21 +5,25 @@ import {
     scValToNative,
     xdr,
 } from '@stellar/stellar-sdk';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { ExactRelayFeeToken } from '../../src/order/transactions.js';
 import {
     ED25519_VERIFIER_SPEC_SHA256,
     ED25519_VERIFIER_WASM_SHA256,
     SESSION_POLICY_SPEC_SHA256,
     SESSION_POLICY_WASM_SHA256,
-    SMART_ACCOUNT_SPEC_SHA256,
-    SMART_ACCOUNT_WASM_SHA256,
     buildRelayCallRequest,
 } from '../../src/relay/policy.js';
 import {
     buildPriceFreeRelayOperation,
     type PriceFreeRelayConfiguration,
 } from '../../src/relay/price_free.js';
+import type { VerifiedSmartAccountInstance } from '../../src/relay/smart_account_evidence.js';
+import {
+    TESTNET_NETWORK,
+    TESTNET_NETWORK_ID,
+    verifiedSmartAccountFixture,
+} from '../helpers/smart_account_evidence.js';
 
 const ROUTER = StrKey.encodeContract(Buffer.alloc(32, 81));
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 82));
@@ -49,7 +53,6 @@ function deployment(contractId: string, wasmHash: string, specHash: string) {
 
 const DEPLOYMENTS = new Map(
     [
-        deployment(USER, SMART_ACCOUNT_WASM_SHA256, SMART_ACCOUNT_SPEC_SHA256),
         deployment(
             SESSION_POLICY,
             SESSION_POLICY_WASM_SHA256,
@@ -63,23 +66,22 @@ const DEPLOYMENTS = new Map(
     ].map((record) => [record.contractId, record]),
 );
 
-const configuration: PriceFreeRelayConfiguration = {
-    router: ROUTER,
-    referral: REFERRAL,
-    markets: [{ trading: TRADING, collateral: COLLATERAL }],
-    feeTokens: [COLLATERAL],
-    sessionPolicy: {
-        contractId: SESSION_POLICY,
-        ed25519Verifier: ED25519_VERIFIER,
-        ruleName: 'trading-session',
-        maximumDurationLedgers: 100n,
-    },
-    deployments: {
-        resolve(contractId) {
-            return DEPLOYMENTS.get(contractId);
-        },
-    },
-};
+let smartAccountInstance: VerifiedSmartAccountInstance;
+let otherAccountInstance: VerifiedSmartAccountInstance;
+let configuration: PriceFreeRelayConfiguration;
+
+function smartAccounts(
+    resolve: (
+        contractId: string,
+    ) => VerifiedSmartAccountInstance | undefined = (contractId) =>
+        contractId === USER ? smartAccountInstance : undefined,
+) {
+    return {
+        networkId: TESTNET_NETWORK_ID,
+        networkPassphrase: TESTNET_NETWORK.passphrase,
+        resolve,
+    };
+}
 
 const feeToken: ExactRelayFeeToken = {
     collateralAssetId: 'usdc',
@@ -177,6 +179,32 @@ function relayAuth(operationXdr: string): string {
 }
 
 describe('buildPriceFreeRelayOperation', () => {
+    beforeAll(async () => {
+        smartAccountInstance = await verifiedSmartAccountFixture(USER, 1_000);
+        otherAccountInstance = await verifiedSmartAccountFixture(
+            StrKey.encodeContract(Buffer.alloc(32, 90)),
+            1_000,
+        );
+        configuration = {
+            router: ROUTER,
+            referral: REFERRAL,
+            markets: [{ trading: TRADING, collateral: COLLATERAL }],
+            feeTokens: [COLLATERAL],
+            sessionPolicy: {
+                contractId: SESSION_POLICY,
+                ed25519Verifier: ED25519_VERIFIER,
+                ruleName: 'trading-session',
+                maximumDurationLedgers: 100n,
+            },
+            deployments: {
+                resolve(contractId) {
+                    return DEPLOYMENTS.get(contractId);
+                },
+            },
+            smartAccounts: smartAccounts(),
+        };
+    });
+
     it('builds one mixed exact-allowlist batch with canonical unsigned tail', () => {
         const result = build([
             { kind: 'cancelOrder', trading: TRADING, id: 7 },
@@ -323,5 +351,100 @@ describe('buildPriceFreeRelayOperation', () => {
                 },
             ]),
         ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT' });
+    });
+
+    it.each([
+        [
+            'add',
+            {
+                kind: 'addSingleMarketSession' as const,
+                trading: TRADING,
+                signerKeyData: new Uint8Array(32).fill(9),
+                validUntil: 1_050,
+            },
+        ],
+        ['remove', { kind: 'removeSessionRule' as const, id: 3 }],
+    ])(
+        'requires exact live account evidence for session %s',
+        (_label, action) => {
+            const base = {
+                user: USER,
+                currentLedger: 1_000,
+                configuration,
+                feeToken,
+                maxFeeAmount: 1_000n,
+                feeExpiration: 1_050,
+                actions: [action],
+            };
+            expect(
+                buildPriceFreeRelayOperation({
+                    ...base,
+                    configuration: {
+                        ...configuration,
+                        smartAccounts: smartAccounts(() => undefined),
+                    },
+                }),
+            ).toMatchObject({
+                kind: 'unavailable',
+                reason: expect.stringMatching(/absent/i),
+            });
+            expect(
+                buildPriceFreeRelayOperation({
+                    ...base,
+                    configuration: {
+                        ...configuration,
+                        smartAccounts: smartAccounts(
+                            () => otherAccountInstance,
+                        ),
+                    },
+                }),
+            ).toMatchObject({
+                kind: 'unavailable',
+                reason: expect.stringMatching(/different contract identity/i),
+            });
+            expect(
+                buildPriceFreeRelayOperation({
+                    ...base,
+                    configuration: {
+                        ...configuration,
+                        smartAccounts: smartAccounts(
+                            () =>
+                                ({
+                                    ...smartAccountInstance,
+                                }) as VerifiedSmartAccountInstance,
+                        ),
+                    },
+                }),
+            ).toMatchObject({
+                kind: 'unavailable',
+                reason: expect.stringMatching(/not live verified/i),
+            });
+            expect(
+                buildPriceFreeRelayOperation({
+                    ...base,
+                    currentLedger: 1_001,
+                }),
+            ).toMatchObject({
+                kind: 'unavailable',
+                reason: expect.stringMatching(/different ledger/i),
+            });
+        },
+    );
+
+    it('keeps non-session actions independent from the live account registry', () => {
+        const result = buildPriceFreeRelayOperation({
+            user: USER,
+            currentLedger: 1_000,
+            configuration: {
+                ...configuration,
+                smartAccounts: smartAccounts(() => undefined),
+            },
+            feeToken,
+            maxFeeAmount: 1_000n,
+            feeExpiration: 1_050,
+            actions: [{ kind: 'cancelOrder', trading: TRADING, id: 1 }],
+        });
+
+        expect(result.kind).toBe('ready');
     });
 });

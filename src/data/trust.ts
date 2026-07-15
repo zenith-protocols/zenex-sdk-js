@@ -16,6 +16,11 @@ import type {
     TrustedDeploymentRegistry,
     VerifiedContractDeployment,
 } from '../relay/types.js';
+import {
+    verifiedSmartAccountInstanceIssue,
+    type TrustedSmartAccountRegistry,
+    type VerifiedSmartAccountInstance,
+} from '../relay/smart_account_evidence.js';
 import type { PriceFreeRelayConfiguration } from '../relay/price_free.js';
 import type { TradingDeployment } from '../trading/trading_snapshot.js';
 import type { PublicConfig } from './generated.js';
@@ -48,6 +53,8 @@ export class ZenexPublicConfigTrustError extends Error {
 export interface ZenexTrustBundle {
     readonly relayContracts: RelayContractIdentities;
     readonly deployments: TrustedDeploymentRegistry;
+    /** Live, ledger-observed per-user smart-account instances. */
+    readonly smartAccounts: TrustedSmartAccountRegistry;
     readonly smartAccountDeployment: SmartAccountDeploymentMetadata;
     /** Complete public-only configuration for the safe price-free builder. */
     readonly priceFree: PriceFreeRelayConfiguration;
@@ -177,7 +184,7 @@ function requireUniqueIds(
  */
 export function createZenexTrustBundle(
     config: PublicConfig,
-    userSmartAccounts: readonly VerifiedContractDeployment[] = [],
+    userSmartAccounts: readonly VerifiedSmartAccountInstance[] = [],
 ): ZenexTrustBundle {
     const network = NETWORKS[config.network.kind];
     if (!sameHash(config.network.id, network.id)) {
@@ -496,27 +503,36 @@ export function createZenexTrustBundle(
         }
         records.set(record.contractId, record);
     }
+    const smartAccountRecords = new Map<string, VerifiedSmartAccountInstance>();
     userSmartAccounts.forEach((record, index) => {
-        const trusted = cloneVerifiedDeployment(
-            record,
-            SMART_ACCOUNT_WASM_SHA256,
-            SMART_ACCOUNT_SPEC_SHA256,
-            `/userSmartAccounts/${index}`,
-        );
-        const configuredPath = configuredIdentityPaths.get(trusted.contractId);
+        const path = `/userSmartAccounts/${index}`;
+        const issue = verifiedSmartAccountInstanceIssue(record);
+        if (issue !== undefined) {
+            fail(path, issue);
+        }
+        if (record.networkId !== network.id) {
+            fail(
+                `${path}/networkId`,
+                `does not match the ${config.network.kind} network`,
+            );
+        }
+        if (record.networkPassphrase !== network.passphrase) {
+            fail(
+                `${path}/networkPassphrase`,
+                `does not match the ${config.network.kind} network`,
+            );
+        }
+        const configuredPath = configuredIdentityPaths.get(record.contractId);
         if (configuredPath !== undefined) {
             fail(
-                `/userSmartAccounts/${index}/contractId`,
+                `${path}/contractId`,
                 `duplicates the configured identity at ${configuredPath}`,
             );
         }
-        if (records.has(trusted.contractId)) {
-            fail(
-                `/userSmartAccounts/${index}/contractId`,
-                'deployment identity is duplicated',
-            );
+        if (smartAccountRecords.has(record.contractId)) {
+            fail(`${path}/contractId`, 'smart account identity is duplicated');
         }
-        records.set(trusted.contractId, trusted);
+        smartAccountRecords.set(record.contractId, record);
     });
 
     const relayContracts = Object.freeze({
@@ -538,9 +554,17 @@ export function createZenexTrustBundle(
             return records.get(contractId);
         },
     });
+    const smartAccounts = Object.freeze({
+        networkId: network.id,
+        networkPassphrase: network.passphrase,
+        resolve(contractId: string) {
+            return smartAccountRecords.get(contractId);
+        },
+    });
     return Object.freeze({
         relayContracts,
         deployments,
+        smartAccounts,
         tradingDeployments: Object.freeze(tradingDeployments),
         smartAccountDeployment: Object.freeze({
             kitVersion: '0.3.0' as const,
@@ -562,6 +586,7 @@ export function createZenexTrustBundle(
                     config.smartAccount.sessionPolicy.maxDurationLedgers,
             }),
             deployments,
+            smartAccounts,
         }),
         sessionPolicy: Object.freeze({
             contractId: session.contractId,

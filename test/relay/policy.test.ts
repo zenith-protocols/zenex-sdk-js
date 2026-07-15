@@ -11,14 +11,13 @@ import {
     scValToNative,
     xdr,
 } from '@stellar/stellar-sdk';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import {
     RELAY_REQUEST_STATES,
     ED25519_VERIFIER_SPEC_SHA256,
     ED25519_VERIFIER_WASM_SHA256,
     SESSION_POLICY_SPEC_SHA256,
     SESSION_POLICY_WASM_SHA256,
-    SMART_ACCOUNT_SPEC_SHA256,
     SMART_ACCOUNT_WASM_SHA256,
     WEBAUTHN_VERIFIER_SPEC_SHA256,
     WEBAUTHN_VERIFIER_WASM_SHA256,
@@ -29,6 +28,11 @@ import {
 import { OrderKind } from '../../src/trading/trading_types.js';
 import { TradingContract } from '../../src/trading/trading_contract.js';
 import { TradingRouterContract } from '../../src/trading-router/router_contract.js';
+import type { VerifiedSmartAccountInstance } from '../../src/relay/smart_account_evidence.js';
+import {
+    TESTNET_NETWORK_ID,
+    verifiedSmartAccountFixture,
+} from '../helpers/smart_account_evidence.js';
 
 const REQUEST_ID = '891c52ff-8c33-42b7-a3a3-2211a3f8e1f4';
 const ROUTER = StrKey.encodeContract(Buffer.alloc(32, 20));
@@ -87,6 +91,21 @@ function deploymentRegistry(
         deployments.map((deployment) => [deployment.contractId, deployment]),
     );
     return {
+        resolve(contractId: string) {
+            return byId.get(contractId);
+        },
+    };
+}
+
+function smartAccountRegistry(
+    ...instances: readonly VerifiedSmartAccountInstance[]
+) {
+    const byId = new Map(
+        instances.map((instance) => [instance.contractId, instance]),
+    );
+    return {
+        networkId: TESTNET_NETWORK_ID,
+        networkPassphrase: Networks.TESTNET,
         resolve(contractId: string) {
             return byId.get(contractId);
         },
@@ -782,36 +801,51 @@ describe('buildSingleMarketSessionRule', () => {
         SESSION_POLICY_WASM_SHA256,
         SESSION_POLICY_SPEC_SHA256,
     );
-    const smartAccountDeployment = verifiedDeployment(
-        SMART_ACCOUNT,
-        SMART_ACCOUNT_WASM_SHA256,
-        SMART_ACCOUNT_SPEC_SHA256,
-    );
     const ed25519VerifierDeployment = verifiedDeployment(
         ED25519_VERIFIER,
         ED25519_VERIFIER_WASM_SHA256,
         ED25519_VERIFIER_SPEC_SHA256,
     );
-    const input = {
-        sessionPolicy: SESSION_POLICY,
-        smartAccount: SMART_ACCOUNT,
-        deployments: deploymentRegistry(
-            sessionPolicyDeployment,
-            smartAccountDeployment,
-            ed25519VerifierDeployment,
-        ),
-        capability: 'single-transfer-destination-v1' as const,
-        markets: [{ trading: TRADING, router: ROUTER, collateral: COLLATERAL }],
-        signer: {
-            tag: 'External' as const,
-            verifier: ED25519_VERIFIER,
-            keyData: new Uint8Array(32).fill(9),
-        },
-        name: 'zenex-session',
-        currentLedger: 49_000,
-        maximumDurationLedgers: 2_000n,
-        validUntil: 50_000,
-    };
+    let smartAccountInstance: VerifiedSmartAccountInstance;
+    let otherAccountInstance: VerifiedSmartAccountInstance;
+    let input: Parameters<typeof buildSingleMarketSessionRule>[0];
+
+    beforeAll(async () => {
+        smartAccountInstance = await verifiedSmartAccountFixture(
+            SMART_ACCOUNT,
+            49_000,
+        );
+        otherAccountInstance = await verifiedSmartAccountFixture(
+            StrKey.encodeContract(Buffer.alloc(32, 31)),
+            49_000,
+        );
+        input = {
+            sessionPolicy: SESSION_POLICY,
+            smartAccount: SMART_ACCOUNT,
+            deployments: deploymentRegistry(
+                sessionPolicyDeployment,
+                ed25519VerifierDeployment,
+            ),
+            smartAccounts: smartAccountRegistry(smartAccountInstance),
+            capability: 'single-transfer-destination-v1',
+            markets: [
+                {
+                    trading: TRADING,
+                    router: ROUTER,
+                    collateral: COLLATERAL,
+                },
+            ],
+            signer: {
+                tag: 'External',
+                verifier: ED25519_VERIFIER,
+                keyData: new Uint8Array(32).fill(9),
+            },
+            name: 'zenex-session',
+            currentLedger: 49_000,
+            maximumDurationLedgers: 2_000n,
+            validUntil: 50_000,
+        };
+    });
 
     it('builds one Default rule with one verified single-destination policy', () => {
         const result = buildSingleMarketSessionRule(input);
@@ -855,7 +889,6 @@ describe('buildSingleMarketSessionRule', () => {
                             uploadedWasmHash: 'ab'.repeat(32),
                         },
                     },
-                    smartAccountDeployment,
                     ed25519VerifierDeployment,
                 ),
             }),
@@ -863,10 +896,7 @@ describe('buildSingleMarketSessionRule', () => {
         expect(
             buildSingleMarketSessionRule({
                 ...input,
-                deployments: deploymentRegistry(
-                    sessionPolicyDeployment,
-                    smartAccountDeployment,
-                ),
+                deployments: deploymentRegistry(sessionPolicyDeployment),
             }),
         ).toMatchObject({
             kind: 'unavailable',
@@ -874,7 +904,7 @@ describe('buildSingleMarketSessionRule', () => {
         });
     });
 
-    it('requires complete verified on-chain instance evidence', () => {
+    it('requires runtime-authentic live evidence for the exact account and ledger', () => {
         expect(
             buildSingleMarketSessionRule(
                 null as unknown as Parameters<
@@ -885,66 +915,96 @@ describe('buildSingleMarketSessionRule', () => {
         expect(
             buildSingleMarketSessionRule({
                 ...input,
-                deployments: deploymentRegistry(
-                    sessionPolicyDeployment,
-                    {
-                        ...smartAccountDeployment,
-                        evidence: {
-                            ...smartAccountDeployment.evidence,
-                            state: 'claimed' as 'verified',
-                        },
-                    },
-                    ed25519VerifierDeployment,
-                ),
+                smartAccounts: smartAccountRegistry(),
             }),
-        ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT' });
+        ).toMatchObject({
+            kind: 'unavailable',
+            reason: expect.stringMatching(/absent/i),
+        });
         expect(
             buildSingleMarketSessionRule({
                 ...input,
-                deployments: deploymentRegistry(
-                    sessionPolicyDeployment,
-                    {
-                        ...smartAccountDeployment,
-                        evidence: {
-                            ...smartAccountDeployment.evidence,
-                            instanceExecutableHash: 'not-a-hash',
-                        },
-                    },
-                    ed25519VerifierDeployment,
-                ),
-            }),
-        ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT' });
-        expect(
-            buildSingleMarketSessionRule({
-                ...input,
-                deployments: deploymentRegistry(
-                    sessionPolicyDeployment,
-                    {
-                        ...smartAccountDeployment,
-                        evidence: {
-                            ...smartAccountDeployment.evidence,
-                            instanceExecutableHash: 'ab'.repeat(32),
-                        },
-                    },
-                    ed25519VerifierDeployment,
-                ),
-            }),
-        ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT' });
-        expect(
-            buildSingleMarketSessionRule({
-                ...input,
-                deployments: {
-                    resolve(contractId: string) {
-                        if (contractId !== SMART_ACCOUNT) {
-                            return input.deployments.resolve(contractId);
-                        }
-                        return {
-                            ...smartAccountDeployment,
-                            contractId: ROUTER,
-                        };
+                smartAccounts: {
+                    ...smartAccountRegistry(),
+                    resolve() {
+                        return otherAccountInstance;
                     },
                 },
             }),
-        ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT' });
+        ).toMatchObject({
+            kind: 'unavailable',
+            reason: expect.stringMatching(/different contract identity/i),
+        });
+        expect(
+            buildSingleMarketSessionRule({
+                ...input,
+                smartAccounts: {
+                    ...smartAccountRegistry(),
+                    resolve() {
+                        return {
+                            ...smartAccountInstance,
+                        } as VerifiedSmartAccountInstance;
+                    },
+                },
+            }),
+        ).toMatchObject({
+            kind: 'unavailable',
+            reason: expect.stringMatching(/not live verified/i),
+        });
+        expect(
+            buildSingleMarketSessionRule({
+                ...input,
+                smartAccounts: {
+                    ...smartAccountRegistry(),
+                    resolve() {
+                        return JSON.parse(
+                            JSON.stringify(smartAccountInstance),
+                        ) as VerifiedSmartAccountInstance;
+                    },
+                },
+            }),
+        ).toMatchObject({
+            kind: 'unavailable',
+            reason: expect.stringMatching(/not live verified/i),
+        });
+        expect(
+            buildSingleMarketSessionRule({
+                ...input,
+                currentLedger: input.currentLedger + 1,
+            }),
+        ).toMatchObject({
+            kind: 'unavailable',
+            reason: expect.stringMatching(/different ledger/i),
+        });
+        expect(
+            buildSingleMarketSessionRule({
+                ...input,
+                smartAccounts: {
+                    networkId: '00'.repeat(32),
+                    networkPassphrase: Networks.TESTNET,
+                    resolve() {
+                        return smartAccountInstance;
+                    },
+                },
+            }),
+        ).toMatchObject({
+            kind: 'unavailable',
+            reason: expect.stringMatching(/different network/i),
+        });
+        expect(
+            buildSingleMarketSessionRule({
+                ...input,
+                smartAccounts: {
+                    networkId: TESTNET_NETWORK_ID,
+                    networkPassphrase: Networks.PUBLIC,
+                    resolve() {
+                        return smartAccountInstance;
+                    },
+                },
+            }),
+        ).toMatchObject({
+            kind: 'unavailable',
+            reason: expect.stringMatching(/different network passphrase/i),
+        });
     });
 });
