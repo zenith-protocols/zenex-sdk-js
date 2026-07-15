@@ -257,6 +257,10 @@ export class TradingRouterContract extends Contract {
      * # Errors
      * - Propagates the trading contract's `create_order` errors; fill
      *   failures are reported in the appended outcome, not thrown.
+     *
+     * @deprecated Low-level ABI compatibility only. User-facing instant
+     * execution should use `buildOrderOperation` with `fillOrKill`, which
+     * selects the strict `create_and_fill` path.
      */
     createAndTryFill(
         calls: Call[],
@@ -341,6 +345,10 @@ export class TradingRouterContract extends Contract {
      *
      * # Events
      * - `fee_collected`: the fee moved from `user` to `feeRecipient`.
+     *
+     * @deprecated Low-level ABI compatibility only. Relayed instant
+     * execution should use `buildOrderOperation` with `fillOrKill`, which
+     * selects the strict `create_and_fill_with_fee` path.
      */
     createAndTryFillWithFee(args: CreateAndFillWithFeeArgs): string {
         return this.call(

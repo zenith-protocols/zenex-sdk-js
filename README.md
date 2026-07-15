@@ -127,8 +127,10 @@ Execution policy maps directly to the v2 Router contract:
 - `smartAccountDeployment` accepts only the dedicated signed deployment envelope
   with an active time bound expiring within 30 seconds.
 
-There is no generic transaction submitter, try-fill builder, restore builder,
-Fee Forwarder identity, or unsafe call escape hatch.
+The high-level execution API exposes no generic transaction submitter, try-fill
+path, restore builder, Fee Forwarder identity, or unsafe call escape hatch.
+Deprecated low-level Router try-fill bindings remain only for ABI compatibility;
+new integrations should use the strict `fillOrKill` builders.
 
 Relayed order policies accept only the exact public fee token, maximum fee, and
 fee expiration. The SDK encodes the structural unsigned fee amount as `1`, the fee
