@@ -5,6 +5,7 @@ import {
     mulDivFloor,
     subI128,
 } from '../math/fixed.js';
+import { normalizeExactRatio, type ExactRatio } from '../math/ratio.js';
 import { marketSidePnl, sideCapacity } from '../market/capacity.js';
 import { advanceMarketAccruals } from '../market/rates.js';
 import type { VerifiedPrice } from '../market/types.js';
@@ -59,10 +60,7 @@ export interface VaultEstimatedOutputReference {
     readonly output: bigint;
 }
 
-export interface VaultRationalSlippageBound {
-    readonly numerator: bigint;
-    readonly denominator: bigint;
-}
+export interface VaultRationalSlippageBound extends ExactRatio {}
 
 export interface VaultMinimumOutput {
     readonly reference: VaultEstimatedOutputReference;
@@ -116,8 +114,7 @@ export interface VaultRetiredImmediateRedeem {
 }
 
 export type VaultOrderCreationOutcome =
-    | VaultRestingOrderCreation
-    | VaultRetiredImmediateRedeem;
+    VaultRestingOrderCreation | VaultRetiredImmediateRedeem;
 
 export interface ExactVaultOrderCreationQuote {
     kind: 'exact';
@@ -126,8 +123,7 @@ export interface ExactVaultOrderCreationQuote {
     priceTime: bigint;
 }
 
-export interface ExactVaultRestingOrderCreationQuote
-    extends ExactVaultOrderCreationQuote {
+export interface ExactVaultRestingOrderCreationQuote extends ExactVaultOrderCreationQuote {
     value: VaultRestingOrderCreation;
 }
 
@@ -347,17 +343,6 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
     );
 }
 
-function greatestCommonDivisor(left: bigint, right: bigint): bigint {
-    let divisor = left;
-    let remainder = right;
-    while (remainder !== 0n) {
-        const next = divisor % remainder;
-        divisor = remainder;
-        remainder = next;
-    }
-    return divisor;
-}
-
 /**
  * Derive an atomic vault-order minimum from a caller-supplied fill estimate.
  * The arithmetic is exact, but the result retains estimate provenance because
@@ -382,33 +367,19 @@ export function deriveVaultMinimumOutput(
         }
         const output = checkedI128(reference.output);
         if (output < 0n) {
-            throw new RangeError(
-                'vault estimated output must be nonnegative',
-            );
+            throw new RangeError('vault estimated output must be nonnegative');
         }
 
         const bound = input.maximumSlippage;
         if (!bound || typeof bound !== 'object') {
             throw new TypeError('maximum slippage bound is required');
         }
-        const numerator = checkedI128(bound.numerator);
-        const denominator = checkedI128(bound.denominator);
-        if (denominator <= 0n) {
-            throw new RangeError(
-                'maximum slippage denominator must be positive',
-            );
-        }
-        if (numerator < 0n || numerator > denominator) {
-            throw new RangeError(
-                'maximum slippage must be between zero and one',
-            );
-        }
-
-        const divisor = greatestCommonDivisor(numerator, denominator);
-        const maximumSlippage = {
-            numerator: numerator / divisor,
-            denominator: denominator / divisor,
-        } as const;
+        const maximumSlippage = normalizeExactRatio(bound, {
+            label: 'maximum slippage',
+            minimum: 0n,
+            allowOne: true,
+        });
+        const { numerator, denominator } = maximumSlippage;
         const minOut = mulDivFloor(
             output,
             denominator - numerator,
