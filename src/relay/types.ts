@@ -9,13 +9,17 @@ export type RelayCallPolicy = Exclude<
     'smartAccountDeployment'
 >;
 
+type RelayCallRequestPayload = {
+    [Policy in RelayCallPolicy]: {
+        readonly requestId: string;
+        readonly policy: Policy;
+        readonly func: string;
+        readonly auth: readonly string[];
+    };
+}[RelayCallPolicy];
+
 type RelayRequestPayload =
-    | {
-          readonly requestId: string;
-          readonly policy: RelayCallPolicy;
-          readonly func: string;
-          readonly auth: readonly string[];
-      }
+    | RelayCallRequestPayload
     | {
           readonly requestId: string;
           readonly policy: 'smartAccountDeployment';
