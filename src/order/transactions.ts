@@ -2,6 +2,12 @@ import { Address, StrKey } from '@stellar/stellar-sdk';
 import { MAX_SIGNED_PRICE_UPDATE_BYTES } from '../data/price.js';
 import { checkedI128 } from '../math/fixed.js';
 import type { MarginAdjustmentQuote } from '../position/margin.js';
+import {
+    quotePositionDecreaseIntent,
+    type ExactPositionDecreaseIntentQuote,
+    type QuotePositionDecreaseIntentInput,
+} from '../position/decrease.js';
+import { canonicalIdentity } from '../position/decrease_identity.js';
 import type { PositionActionOutcome } from '../position/quote.js';
 import {
     decodeLedgerSequence,
@@ -10,6 +16,7 @@ import {
     type QuoteResult,
 } from '../quote/result.js';
 import { TradingContract } from '../trading/trading_contract.js';
+import type { TradingSnapshot } from '../trading/trading_snapshot.js';
 import {
     FULL_CLOSE,
     OrderKind,
@@ -107,6 +114,18 @@ export interface BuildPositionActionExecutionInput {
     expiration: number;
     policy: ContractExecutionPolicy;
     validation: OrderValidationContext;
+}
+
+export type PositionDecreaseFillOrKillPolicy = Extract<
+    ContractExecutionPolicy,
+    { kind: 'fillOrKill' }
+>;
+
+export interface BuildPositionDecreaseIntentExecutionInput {
+    snapshot: TradingSnapshot;
+    user: string;
+    quote: ExactPositionDecreaseIntentQuote;
+    policy: PositionDecreaseFillOrKillPolicy;
 }
 
 export interface BuildMarginAdjustmentExecutionInput {
@@ -922,6 +941,147 @@ export function buildPositionActionExecution(
         policy: input.policy,
         validation: input.validation,
     });
+}
+
+/** Prepare one exact snapshot-bound decrease through Router fill-or-kill. */
+export function buildPositionDecreaseIntentExecution(
+    input: BuildPositionDecreaseIntentExecutionInput,
+): QuoteResult<PreparedExecution> {
+    try {
+        if (!input || typeof input !== 'object') {
+            return invalid('position decrease execution input is required');
+        }
+        const policyError = requireFillOrKill(input.policy);
+        if (policyError !== undefined) return policyError;
+        const quote = input.quote;
+        if (!quote || typeof quote !== 'object' || quote.kind !== 'exact') {
+            return invalid(
+                'an exact position decrease intent quote is required',
+            );
+        }
+        const value = quote.value;
+        if (
+            !value ||
+            typeof value !== 'object' ||
+            value.kind !== 'positionDecrease'
+        ) {
+            return invalid('position decrease intent quote value is invalid');
+        }
+        const intent = value.intent;
+        if (!intent || typeof intent !== 'object') {
+            return invalid('position decrease normalized intent is required');
+        }
+
+        const quoteInputBase = {
+            snapshot: input.snapshot,
+            isLong: value.identity.isLong,
+            size: intent.size,
+            execution: intent.execution,
+            maximumSlippage: intent.maximumSlippage,
+            validForLedgers: intent.validForLedgers,
+        };
+        let quoteInput: QuotePositionDecreaseIntentInput;
+        if (intent.size.kind === 'full') {
+            if (intent.collateralReturn !== null) {
+                return invalid(
+                    'full position decrease quote contains collateral intent',
+                );
+            }
+            quoteInput = quoteInputBase as QuotePositionDecreaseIntentInput;
+        } else {
+            if (intent.collateralReturn === null) {
+                return invalid(
+                    'partial position decrease quote lacks collateral intent',
+                );
+            }
+            quoteInput = {
+                ...quoteInputBase,
+                collateralReturn: intent.collateralReturn,
+            } as QuotePositionDecreaseIntentInput;
+        }
+        const expected = quotePositionDecreaseIntent(quoteInput);
+        if (expected.kind !== 'exact') {
+            return invalid(
+                'position decrease quote does not match the supplied snapshot',
+            );
+        }
+        if (canonicalIdentity(expected) !== canonicalIdentity(quote)) {
+            return invalid(
+                'position decrease quote does not match the supplied snapshot or normalized intent',
+            );
+        }
+
+        if (input.policy.transport !== intent.execution.transport) {
+            return invalid(
+                'position decrease quote transport does not match execution policy',
+            );
+        }
+        if (input.policy.transport === 'relay') {
+            if (intent.execution.transport !== 'relay') {
+                return invalid(
+                    'relay policy requires a relay position decrease quote',
+                );
+            }
+            const quotedRelayFee = checkedI128(intent.execution.relayFee);
+            const signedMaximum = checkedI128(input.policy.maxFeeAmount);
+            if (quotedRelayFee !== signedMaximum) {
+                return invalid(
+                    'quoted relay fee must equal the signed policy maximum',
+                );
+            }
+            if (input.policy.feeExpiration !== expected.value.expiration) {
+                return invalid(
+                    'relay fee expiration must equal the quoted order expiration',
+                );
+            }
+        }
+
+        const action = expected.value.action;
+        let notional: bigint;
+        let collateral: bigint;
+        if (action.kind === 'close') {
+            notional = FULL_CLOSE;
+            collateral = 0n;
+        } else if (action.kind === 'decrease') {
+            notional = action.notional;
+            collateral = action.collateral;
+        } else {
+            return invalid('position decrease quote action is invalid');
+        }
+
+        const snapshot = input.snapshot;
+        return buildOrderOperation({
+            tradingAddress: snapshot.deployment.trading,
+            routerAddress: snapshot.deployment.router,
+            user: input.user,
+            order: {
+                trading: snapshot.deployment.trading,
+                user: input.user,
+                isLong: expected.value.identity.isLong,
+                kind: OrderKind.MarketDecrease,
+                notional,
+                collateral,
+                triggerPrice: 0n,
+                priceBound: expected.value.priceBound,
+                expiration: expected.value.expiration,
+            },
+            policy: input.policy,
+            validation: {
+                ledger: snapshot.ledger,
+                now: snapshot.ledgerTime,
+                status: snapshot.status,
+                config: snapshot.config,
+                price: snapshot.price,
+                priceUpdate: snapshot.priceUpdate,
+            },
+        });
+    } catch (error) {
+        return invalid(
+            error instanceof Error
+                ? error.message
+                : 'could not build position decrease execution',
+        );
+    }
 }
 
 /** Encode the gross quoted delta exactly, including Max withdrawal results. */

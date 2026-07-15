@@ -1,4 +1,5 @@
 import { StrKey } from '@stellar/stellar-sdk';
+import { MAX_SIGNED_PRICE_UPDATE_BYTES } from '../data/price.js';
 import { addI128, checkedI128, mulDivFloor, subI128 } from '../math/fixed.js';
 import { normalizeExactRatio, type ExactRatio } from '../math/ratio.js';
 import {
@@ -9,6 +10,7 @@ import {
 } from '../quote/result.js';
 import type { TradingSnapshot } from '../trading/trading_snapshot.js';
 import { Status } from '../trading/trading_types.js';
+import { positionDecreaseSnapshotBinding } from './decrease_identity.js';
 import {
     quotePositionAction,
     type PositionAction,
@@ -77,6 +79,8 @@ export interface PositionDecreaseIntentIdentity {
     readonly trading: string;
     readonly router: string;
     readonly isLong: boolean;
+    /** Opaque exact binding to every field of the coherent input snapshot. */
+    readonly snapshotBinding: string;
 }
 
 export interface PositionDecreaseIntentOutcome {
@@ -168,8 +172,14 @@ function validateSnapshotBoundary(snapshot: TradingSnapshot): void {
     if (price.source !== 'pyth' && price.source !== 'terminal') {
         throw new RangeError('snapshot verified price source is unknown');
     }
-    if (!(snapshot.priceUpdate instanceof Uint8Array)) {
-        throw new TypeError('snapshot price update must be bytes');
+    if (
+        !(snapshot.priceUpdate instanceof Uint8Array) ||
+        snapshot.priceUpdate.byteLength === 0 ||
+        snapshot.priceUpdate.byteLength > MAX_SIGNED_PRICE_UPDATE_BYTES
+    ) {
+        throw new TypeError(
+            'snapshot price update must contain no more than 32 KiB of bytes',
+        );
     }
 }
 
@@ -354,6 +364,15 @@ function resolvePositionDecreaseIntent(
     }
 
     const execution = normalizeExecution(input.execution);
+    const configuredExecutionFee = nonnegativeAtomic(
+        input.snapshot.config.execFee,
+        'snapshot config execution fee',
+    );
+    if (execution.executionFee !== configuredExecutionFee) {
+        throw new RangeError(
+            'execution fee must equal snapshot config execFee',
+        );
+    }
     const maximumSlippage = normalizeExactRatio(input.maximumSlippage, {
         label: 'maximum slippage',
         minimum: 0n,
@@ -433,6 +452,9 @@ export function quotePositionDecreaseIntent(
                     trading: input.snapshot.deployment.trading,
                     router: input.snapshot.deployment.router,
                     isLong: input.isLong,
+                    snapshotBinding: positionDecreaseSnapshotBinding(
+                        input.snapshot,
+                    ),
                 },
                 intent: resolved.intent,
                 action: resolved.action,

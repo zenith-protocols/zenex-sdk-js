@@ -118,13 +118,20 @@ there is no separate requested collateral amount for a close.
 
 ## Fees and Transport
 
-Every quote includes an exact nonnegative execution fee. A direct quote has a
-zero relay fee. A relay quote requires an exact nonnegative relay fee. The
-execution intent binds the quote to its transport so a direct economic quote
-cannot be submitted through relay, or the reverse.
+Every quote includes an exact nonnegative execution fee equal to
+`snapshot.config.execFee`. The contract reads this configured amount when it
+creates the order, so a caller-selected lower or higher value is not an exact
+quote. A direct quote has a zero relay fee. A relay quote requires an exact
+nonnegative relay fee equal to the execution policy's signed `maxFeeAmount`.
+The execution intent binds the quote to its transport so a direct economic
+quote cannot be submitted through relay, or the reverse.
 
-The existing `quotePositionAction` receives these exact fees. Relay fee is the
-external wallet leg represented by the existing position quote model.
+The existing `quotePositionAction` receives these exact fees. Execution fee is
+an upfront order escrow, not a position-margin debit. Atomic
+`create_and_fill` pays it to the selected keeper; when the user is the direct
+self-keeper, it returns to the same user. Relay fee is the conservative
+possible external wallet charge, and `FeeBreakdown.marginDebit` excludes both
+execution and relay legs.
 
 ## Exact Price Bound
 
@@ -167,7 +174,7 @@ valid while the execution ledger is less than or equal to this value. The
 frontend performs no absolute-ledger arithmetic.
 
 For relay execution, `policy.feeExpiration` must equal the quoted order
-expiration. The quoted relay fee must be no greater than the signed
+expiration. The quoted relay fee must exactly equal the signed
 `policy.maxFeeAmount`.
 
 ## Provenance and Identity
@@ -181,6 +188,7 @@ The exact outcome retains:
 
 - normalized requested intent;
 - the snapshot trading and Router contract identities and side;
+- an opaque deterministic binding to every coherent snapshot field;
 - canonical close or partial-decrease action;
 - resolved atomic notional and partial collateral;
 - exact price bound and expiration;
@@ -188,15 +196,22 @@ The exact outcome retains:
 
 The builder fails closed. It reconstructs the intent quote against the
 supplied snapshot and requires complete structural equality, including no
-unknown fields. This binds current position, market, config, price, ledger,
-deployment, side, fee intent, resolved atomics, and quote outcome.
+unknown fields. The opaque snapshot binding distinguishes even fields that do
+not affect the immediate transition. This binds current position, market,
+config, price bytes, ledger and ledger time, deployment, side, fee intent,
+resolved atomics, and quote outcome.
 
 Both transports require a `fillOrKill` policy. The policy transport must equal
 the quote transport. A direct policy's serialized price update must byte-match
 the snapshot update. A relay build uses the snapshot update, requires its
-quoted relay fee within the signed maximum, and requires exact fee-expiration
+quoted relay fee to equal the signed maximum, and requires exact fee-expiration
 identity. Any malformed, estimated, stale, mismatched, or forged quote returns
 `INVALID_INPUT` without creating an operation.
+
+Because every allowed decrease path is price-bearing, the coherent snapshot
+must contain a nonempty serialized price update no larger than 32 KiB. Empty
+or oversized updates fail at quote time instead of producing an exact intent
+that neither direct nor relay execution can build.
 
 After identity checks, the builder derives `OrderValidationContext` entirely
 from the supplied snapshot and delegates operation creation to the existing

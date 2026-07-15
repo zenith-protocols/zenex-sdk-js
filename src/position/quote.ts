@@ -65,8 +65,11 @@ export interface FeeBreakdown {
     impact: bigint;
     funding: bigint;
     borrowing: bigint;
+    /** Upfront order escrow paid to the keeper, never part of marginDebit. */
     execution: bigint;
+    /** Conservative external relay wallet leg, never part of marginDebit. */
     relay: bigint;
+    /** Position-margin debit: trade fees and paid accruals only. */
     marginDebit: bigint;
 }
 

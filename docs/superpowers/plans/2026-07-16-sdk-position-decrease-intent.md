@@ -14,6 +14,9 @@
 - Export `POSITION_DECREASE_MAX_VALIDITY_LEDGERS` with the exact value `60`.
 - Full size rejects `collateralReturn`; partial size requires explicit or pro-rata collateral intent.
 - Fraction and pro-rata resolution use documented bigint floor rounding.
+- Execution fee must equal `snapshot.config.execFee` and is an escrow leg, not a margin debit.
+- Relay fee must equal the signed `policy.maxFeeAmount`; fee expiration must equal order expiration.
+- Snapshot price updates must be nonempty and no larger than 32 KiB.
 - Only `{ kind: 'full' }` may request the whole position; it uses `{ kind: 'close' }` and `FULL_CLOSE` on the wire.
 - Explicit notional or fraction inputs resolving to the whole position fail closed so their collateral intent is never ignored.
 - Price-bound rounding is conservative: long lower bound uses ceil, short upper bound uses floor.
@@ -282,8 +285,9 @@ const priceBound = isLong
 const expiration = snapshot.ledger + validForLedgers;
 ```
 
-Reject malformed snapshot identity, side, fee intent, ratios, delta, or u32
-sum as `INVALID_INPUT`. Reject Frozen and Retired order creation as a contract
+Reject malformed snapshot identity, side, fee intent, ratios, delta, u32 sum,
+or empty/oversized price update as `INVALID_INPUT`. Require execution fee to
+equal snapshot config. Reject Frozen and Retired order creation as a contract
 gate. Retain normalized request, deployment identity, canonical action,
 resolved atomics, bound, expiration, and full nested action outcome.
 
@@ -382,7 +386,7 @@ Expected: at least one newly added mismatch is not yet rejected.
 Return `unavailable('INVALID_INPUT', reason)` for every malformed or mismatched
 quote or policy. Require `fillOrKill` at runtime despite the public narrowed
 type. Require direct policy bytes to equal `snapshot.priceUpdate`. Require
-relay transport identity, `quotedRelayFee <= policy.maxFeeAmount`, and
+relay transport identity, `quotedRelayFee === policy.maxFeeAmount`, and
 `policy.feeExpiration === quote.value.expiration` before operation creation.
 
 - [ ] **Step 8: Run focused builder and validation tests and verify GREEN**

@@ -201,6 +201,23 @@ describe('quotePositionDecreaseIntent', () => {
         });
     });
 
+    it.each([1n, 3n])(
+        'rejects execution fee %s that differs from snapshot config',
+        (executionFee) => {
+            expect(
+                quotePositionDecreaseIntent(
+                    directInput({
+                        execution: { transport: 'direct', executionFee },
+                    }),
+                ),
+            ).toMatchObject({
+                kind: 'unavailable',
+                code: 'INVALID_INPUT',
+                reason: 'execution fee must equal snapshot config execFee',
+            });
+        },
+    );
+
     it('rejects explicit collateral above the snapshot position', () => {
         expect(
             quotePositionDecreaseIntent(
@@ -466,6 +483,21 @@ describe('quotePositionDecreaseIntent', () => {
         ).toMatchObject({
             kind: 'unavailable',
             code: 'INVALID_INPUT',
+        });
+    });
+
+    it.each([
+        ['empty', new Uint8Array()],
+        ['oversized', new Uint8Array(32 * 1024 + 1)],
+    ])('rejects an %s snapshot price update', (_label, priceUpdate) => {
+        expect(
+            quotePositionDecreaseIntent(
+                directInput({ snapshot: snapshot({ priceUpdate }) }),
+            ),
+        ).toMatchObject({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: expect.stringContaining('price update'),
         });
     });
 
