@@ -1,4 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
 import { TradingContract } from '../src/trading/trading_contract.js';
 import { TradingRouterContract } from '../src/trading-router/router_contract.js';
 import { FactoryContract } from '../src/factory/factory_contract.js';
@@ -6,55 +8,136 @@ import { VaultContract } from '../src/vault/vault_contract.js';
 import { PriceVerifierContract } from '../src/price-verifier/price_verifier_contract.js';
 import { TreasuryContract } from '../src/treasury/treasury_contract.js';
 import { GovernanceContract } from '../src/governance/governance_contract.js';
+import {
+    factorySpec,
+    governanceSpec,
+    priceVerifierSpec,
+    strategyVaultSpec,
+    tradingRouterSpec,
+    tradingSpec,
+    treasurySpec,
+} from '../src/generated/contract_specs.js';
 
-import tradingSpec from './fixtures/specs/trading.json';
-import tradingRouterSpec from './fixtures/specs/trading_router.json';
-import factorySpec from './fixtures/specs/factory.json';
-import strategyVaultSpec from './fixtures/specs/strategy_vault.json';
-import priceVerifierSpec from './fixtures/specs/price_verifier.json';
-import treasurySpec from './fixtures/specs/treasury.json';
-import governanceSpec from './fixtures/specs/governance.json';
+import factoryFixture from './fixtures/specs/factory.json';
+import governanceFixture from './fixtures/specs/governance.json';
+import priceVerifierFixture from './fixtures/specs/price_verifier.json';
+import strategyVaultFixture from './fixtures/specs/strategy_vault.json';
+import tradingFixture from './fixtures/specs/trading.json';
+import tradingRouterFixture from './fixtures/specs/trading_router.json';
+import treasuryFixture from './fixtures/specs/treasury.json';
+import manifest from './fixtures/specs/wasm-manifest.json';
 
-/**
- * Guards every SDK contract binding's embedded `static spec` against the
- * base64 XDR entries extracted straight from the compiled WASM (via
- * `tools/extracted-specs/*`, committed as fixtures under
- * `test/fixtures/specs/`). A drift here means the hand-maintained binding no
- * longer matches the audited on-chain interface.
- */
-describe('spec-vs-WASM consistency', () => {
-    it('TradingContract.spec matches the compiled wasm', () => {
-        expect(TradingContract.spec.entries.map((e) => e.toXDR('base64')).sort())
-            .toEqual([...tradingSpec].sort());
+const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+
+const contracts = [
+    {
+        package: 'trading',
+        exportName: 'tradingSpec',
+        spec: tradingSpec,
+        fixture: tradingFixture,
+        contract: TradingContract,
+        source: 'src/trading/trading_contract.ts',
+        sha256: 'c5e821f5903ada0021e521af259848b9ea9dd89ae08760dbba950b4fea092794',
+        bytes: 64_947,
+    },
+    {
+        package: 'trading-router',
+        exportName: 'tradingRouterSpec',
+        spec: tradingRouterSpec,
+        fixture: tradingRouterFixture,
+        contract: TradingRouterContract,
+        source: 'src/trading-router/router_contract.ts',
+        sha256: '1affc4279fdc11de0ae14d2a8958f34aa88dfed4759f93a5a49b85c5c545caaa',
+        bytes: 12_350,
+    },
+    {
+        package: 'factory',
+        exportName: 'factorySpec',
+        spec: factorySpec,
+        fixture: factoryFixture,
+        contract: FactoryContract,
+        source: 'src/factory/factory_contract.ts',
+        sha256: '3b4fb39c1733aeb2704acd9bfdc10ba185933ac8624f43b0124a56573adac7bd',
+        bytes: 7_722,
+    },
+    {
+        package: 'strategy-vault',
+        exportName: 'strategyVaultSpec',
+        spec: strategyVaultSpec,
+        fixture: strategyVaultFixture,
+        contract: VaultContract,
+        source: 'src/vault/vault_contract.ts',
+        sha256: '26899099b15ef633220eabfd0871d2678170a3faab12a4e45eb1b986964950eb',
+        bytes: 20_915,
+    },
+    {
+        package: 'price-verifier',
+        exportName: 'priceVerifierSpec',
+        spec: priceVerifierSpec,
+        fixture: priceVerifierFixture,
+        contract: PriceVerifierContract,
+        source: 'src/price-verifier/price_verifier_contract.ts',
+        sha256: 'a305fb2c74d335602fc4c29e33f12772e747f80d0734293fbea83b709db0a2b3',
+        bytes: 15_247,
+    },
+    {
+        package: 'treasury',
+        exportName: 'treasurySpec',
+        spec: treasurySpec,
+        fixture: treasuryFixture,
+        contract: TreasuryContract,
+        source: 'src/treasury/treasury_contract.ts',
+        sha256: '85322d7b3edd30ac9c5f9a7dfb187dfa9eadf0781333ad841fe1bedb75a0eae9',
+        bytes: 6_248,
+    },
+    {
+        package: 'governance',
+        exportName: 'governanceSpec',
+        spec: governanceSpec,
+        fixture: governanceFixture,
+        contract: GovernanceContract,
+        source: 'src/governance/governance_contract.ts',
+        sha256: '751b7cc97b3c348e1eaf263eaef0c694ac1c5b3879256e68afe4ab9be8efac87',
+        bytes: 10_130,
+    },
+] as const;
+
+describe('approved v2 contract spec consistency', () => {
+    it('pins source commit, source tree, Cargo.lock, and toolchain evidence', () => {
+        expect(manifest).toMatchObject({
+            schemaVersion: 1,
+            contractsCommit: '4c631eb17af53ec5e6875f42bf71a43af295e521',
+            productionSourceTree: '3c9815124a70cd8ee3f6fddad2baf072606588bb',
+            cargoLock: {
+                path: 'Cargo.lock',
+                sha256: '1b07b1d4d9e7d55ecb66d01b3d9c0e367bf342ab5ea9ed11f2b3c495d7c9eab2',
+            },
+            toolchain: {
+                stellarCli: 'stellar 25.2.0 (28484880988199233a7e8e87c97cb12dac323cb3)',
+                stellarXdr: 'stellar-xdr 25.0.0 (dc9f40fcb83c3054341f70b65a2222073369b37b)',
+                xdrCurrentRevision: '0a621ec7811db000a60efae5b35f78dee3aa2533',
+                sorobanSdk: '25.3.0',
+            },
+        });
     });
 
-    it('TradingRouterContract.spec matches the compiled wasm', () => {
-        expect(TradingRouterContract.spec.entries.map((e) => e.toXDR('base64')).sort())
-            .toEqual([...tradingRouterSpec].sort());
+    it.each(contracts)('pins $package spec to its approved rebuilt WASM', (entry) => {
+        const artifact = manifest.contracts.find((candidate) => candidate.package === entry.package);
+
+        expect(artifact).toMatchObject({
+            sha256: entry.sha256,
+            bytes: entry.bytes,
+        });
+        expect(entry.spec).toEqual(entry.fixture);
+        expect(entry.contract.spec.entries.map((specEntry) => specEntry.toXDR('base64')))
+            .toEqual(entry.spec);
     });
 
-    it('FactoryContract.spec matches the compiled wasm', () => {
-        expect(FactoryContract.spec.entries.map((e) => e.toXDR('base64')).sort())
-            .toEqual([...factorySpec].sort());
-    });
+    it.each(contracts)('$source consumes only its generated $exportName array', (entry) => {
+        const source = readFileSync(`${repoRoot}/${entry.source}`, 'utf8');
 
-    it('VaultContract.spec matches the compiled wasm', () => {
-        expect(VaultContract.spec.entries.map((e) => e.toXDR('base64')).sort())
-            .toEqual([...strategyVaultSpec].sort());
-    });
-
-    it('PriceVerifierContract.spec matches the compiled wasm', () => {
-        expect(PriceVerifierContract.spec.entries.map((e) => e.toXDR('base64')).sort())
-            .toEqual([...priceVerifierSpec].sort());
-    });
-
-    it('TreasuryContract.spec matches the compiled wasm', () => {
-        expect(TreasuryContract.spec.entries.map((e) => e.toXDR('base64')).sort())
-            .toEqual([...treasurySpec].sort());
-    });
-
-    it('GovernanceContract.spec matches the compiled wasm', () => {
-        expect(GovernanceContract.spec.entries.map((e) => e.toXDR('base64')).sort())
-            .toEqual([...governanceSpec].sort());
+        expect(source).toContain(`import { ${entry.exportName} } from '../generated/contract_specs.js';`);
+        expect(source).toContain(`static spec: contract.Spec = new contract.Spec(${entry.exportName});`);
+        expect(source).not.toMatch(/new contract\.Spec\(\[\s*['"]/);
     });
 });

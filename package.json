@@ -23,7 +23,9 @@
         "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types && npm run build:pkg",
         "prepare": "npm run build",
         "test": "vitest run",
-        "test:coverage": "vitest run --coverage"
+        "test:coverage": "vitest run --coverage",
+        "specs:generate": "node scripts/contract-specs.mjs generate",
+        "specs:check": "node scripts/contract-specs.mjs check"
     },
     "exports": {
         ".": {
