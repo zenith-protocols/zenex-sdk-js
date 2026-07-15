@@ -63,6 +63,40 @@ interface DiscoveryMetadata {
 }
 
 const preparedDiscoveries = new WeakMap<object, DiscoveryMetadata>();
+const DEFAULT_RPC_TIMEOUT_MS = 30_000;
+
+function rpcTimeoutMs(options: rpc.Server.Options | undefined): number {
+    const configured = options?.timeout;
+    if (configured === undefined || configured === 0) {
+        return DEFAULT_RPC_TIMEOUT_MS;
+    }
+    if (!Number.isSafeInteger(configured) || configured < 1) {
+        throw new TypeError('relay auth discovery RPC timeout must be positive');
+    }
+    return configured;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(
+                    () =>
+                        reject(
+                            new Error(
+                                `relay auth discovery RPC timed out after ${timeoutMs}ms`,
+                            ),
+                        ),
+                    timeoutMs,
+                );
+            }),
+        ]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+    }
+}
 
 function unknownRejection(
     simulation: rpc.Api.SimulateTransactionSuccessResponse,
@@ -147,12 +181,20 @@ export async function prepareRelayAuthDiscovery(
         'relay auth discovery transaction',
     );
     const functionXdr = rawOperation.func.toXDR('base64');
+    const timeoutMs = rpcTimeoutMs(input.network.opts);
     const stellarRpc =
-        input.server ?? new rpc.Server(input.network.rpc, input.network.opts);
-    const simulation = await stellarRpc.simulateTransaction(
-        input.transaction,
-        undefined,
-        'record_allow_nonroot',
+        input.server ??
+        new rpc.Server(input.network.rpc, {
+            ...input.network.opts,
+            timeout: timeoutMs,
+        });
+    const simulation = await withTimeout(
+        stellarRpc.simulateTransaction(
+            input.transaction,
+            undefined,
+            'record_allow_nonroot',
+        ),
+        timeoutMs,
     );
     const latestLedger = decodeLedgerSequence(simulation.latestLedger);
 

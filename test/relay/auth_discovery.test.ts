@@ -205,6 +205,29 @@ function signedTransaction(
 }
 
 describe('prepareRelayAuthDiscovery', () => {
+    it('bounds auth discovery even when the RPC client never settles', async () => {
+        const pendingServer = {
+            simulateTransaction: vi.fn().mockReturnValue(new Promise(() => {})),
+        } as unknown as rpc.Server;
+        const pending = prepareRelayAuthDiscovery({
+            network: { ...network, opts: { allowHttp: true, timeout: 1 } },
+            transaction: transaction(),
+            server: pendingServer,
+        }).catch((error: unknown) => error);
+
+        const observed = await Promise.race([
+            pending,
+            new Promise<'still-pending'>((resolve) =>
+                setTimeout(() => resolve('still-pending'), 20),
+            ),
+        ]);
+
+        expect(observed).toBeInstanceOf(Error);
+        expect(observed).toMatchObject({
+            message: expect.stringMatching(/timed out after 1ms/i),
+        });
+    });
+
     it('records non-root auth once and returns only the assembled success', async () => {
         const { raw, stellarRpc, result } = await discovery();
 
