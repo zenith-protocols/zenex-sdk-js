@@ -74,9 +74,11 @@ export { TradingEventType, decodeTradingEvent } from './trading_events.js';
 // Coherent exact quote snapshot
 export { loadTradingSnapshot } from './trading_snapshot.js';
 export type {
+    SubjectBoundTradingSnapshot,
     TradingDeployment,
     TradingSnapshot,
     TradingSnapshotRequest,
+    TradingSnapshotSubject,
 } from './trading_snapshot.js';
 
 export type {

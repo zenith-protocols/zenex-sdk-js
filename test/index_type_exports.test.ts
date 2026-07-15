@@ -148,4 +148,65 @@ describe('package root type exports', () => {
 
         expect(diagnostics).toEqual([]);
     });
+
+    it('exports subject-bound snapshots without requiring subjects on legacy fixtures', () => {
+        const consumerPath = fileURLToPath(
+            new URL('./root-snapshot-subject-consumer.ts', import.meta.url),
+        );
+        const source = `
+            import type {
+                TradingSnapshot,
+                TradingSnapshotSubject,
+                SubjectBoundTradingSnapshot,
+                QuoteResult,
+            } from '../src/index.js';
+            import type {
+                SubjectBoundTradingSnapshot as TradingEntryBoundSnapshot,
+            } from '../src/trading/index.js';
+            import { loadTradingSnapshot } from '../src/index.js';
+
+            const legacyFields = {} as Omit<TradingSnapshot, 'subject'>;
+            export const legacy: TradingSnapshot = legacyFields;
+            export const subject: TradingSnapshotSubject = {
+                user: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+                isLong: true,
+            };
+            export const bound: SubjectBoundTradingSnapshot = {
+                ...legacyFields,
+                subject,
+            };
+            export const tradingEntryBound: TradingEntryBoundSnapshot = bound;
+            export const loaded: Promise<QuoteResult<SubjectBoundTradingSnapshot>> =
+                loadTradingSnapshot({} as Parameters<typeof loadTradingSnapshot>[0]);
+        `;
+        const options: ts.CompilerOptions = {
+            target: ts.ScriptTarget.ES2022,
+            module: ts.ModuleKind.Node16,
+            moduleResolution: ts.ModuleResolutionKind.Node16,
+            strict: true,
+            skipLibCheck: true,
+            noEmit: true,
+        };
+        const host = ts.createCompilerHost(options);
+        const readFile = host.readFile.bind(host);
+        const fileExists = host.fileExists.bind(host);
+        host.fileExists = (path) => path === consumerPath || fileExists(path);
+        host.readFile = (path) =>
+            path === consumerPath ? source : readFile(path);
+        host.getSourceFile = (path, languageVersion) => {
+            const contents = host.readFile(path);
+            return contents === undefined
+                ? undefined
+                : ts.createSourceFile(path, contents, languageVersion, true);
+        };
+
+        const program = ts.createProgram([consumerPath], options, host);
+        const diagnostics = ts
+            .getPreEmitDiagnostics(program)
+            .map((diagnostic) =>
+                ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
+            );
+
+        expect(diagnostics).toEqual([]);
+    });
 });

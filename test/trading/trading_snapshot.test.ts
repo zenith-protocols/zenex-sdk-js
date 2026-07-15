@@ -351,6 +351,7 @@ describe('loadTradingSnapshot', () => {
         expect(result.ledger).toBe(42);
         expect(result.priceTime).toBe(95n);
         expect(result.value).toEqual({
+            subject: { user: USER, isLong: true },
             ledger: 42,
             ledgerTime: 100n,
             deployment,
@@ -375,6 +376,25 @@ describe('loadTradingSnapshot', () => {
             },
             treasuryRate: 30_000_000_000_000_000n,
         });
+    });
+
+    it('retains canonical contract-account and short-side provenance', async () => {
+        const { simulate } = mockSuccess();
+
+        const result = await loadTradingSnapshot({
+            ...request,
+            user: OTHER,
+            isLong: false,
+        });
+
+        const decoded = decodedMulticall(simulate.mock.calls[0][0]);
+        expect(decoded.calls[2]).toMatchObject({
+            contract: TRADING,
+            args: [OTHER, false],
+        });
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        expect(result.value.subject).toEqual({ user: OTHER, isLong: false });
     });
 
     it('uses a nonzero retirement price as the terminal mark', async () => {
@@ -434,6 +454,8 @@ describe('loadTradingSnapshot', () => {
         expect(result.kind).toBe('exact');
         expect(latest).toHaveBeenCalledTimes(2);
         expect(simulate).toHaveBeenCalledTimes(2);
+        if (result.kind !== 'exact') return;
+        expect(result.value.subject).toEqual({ user: USER, isLong: true });
     });
 
     it('fails closed when the retry still observes different ledgers', async () => {

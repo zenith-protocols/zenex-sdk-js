@@ -132,9 +132,11 @@ export type {
     TradingCloseFillEvent,
     TradingLiquidationEvent,
     TradingEvent,
+    SubjectBoundTradingSnapshot,
     TradingDeployment,
     TradingSnapshot,
     TradingSnapshotRequest,
+    TradingSnapshotSubject,
 } from './trading/index.js';
 
 export { loadTradingSnapshot } from './trading/index.js';

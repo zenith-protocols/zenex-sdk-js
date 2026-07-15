@@ -42,7 +42,13 @@ export interface TradingDeployment {
     readonly vaultShareDecimals: number;
 }
 
+export interface TradingSnapshotSubject {
+    readonly user: string;
+    readonly isLong: boolean;
+}
+
 export interface TradingSnapshot {
+    readonly subject?: TradingSnapshotSubject;
     ledger: number;
     ledgerTime: bigint;
     deployment: TradingDeployment;
@@ -61,6 +67,10 @@ export interface TradingSnapshot {
     vault: VaultAtomicState;
     treasuryRate: bigint;
 }
+
+export type SubjectBoundTradingSnapshot = TradingSnapshot & {
+    readonly subject: TradingSnapshotSubject;
+};
 
 export interface TradingSnapshotRequest {
     network: Network;
@@ -416,11 +426,12 @@ function pythPrice(
 function decodeSnapshot(
     values: xdr.ScVal[],
     deployment: TradingDeployment,
+    subject: TradingSnapshotSubject,
     ledger: number,
     ledgerTime: bigint,
     maxPriceAge: bigint,
     priceUpdate: Uint8Array,
-): TradingSnapshot {
+): SubjectBoundTradingSnapshot {
     for (let index = 0; index < 15; index += 1) {
         requireSuccessfulCall(values[index], `snapshot state ${index}`);
     }
@@ -501,6 +512,7 @@ function decodeSnapshot(
     }
 
     return {
+        subject: { ...subject },
         ledger,
         ledgerTime,
         deployment: { ...deployment },
@@ -522,7 +534,7 @@ function decodeSnapshot(
 
 export async function loadTradingSnapshot(
     request: TradingSnapshotRequest,
-): Promise<QuoteResult<TradingSnapshot>> {
+): Promise<QuoteResult<SubjectBoundTradingSnapshot>> {
     try {
         const validated = validateRequest(request);
         const server = new rpc.Server(
@@ -559,6 +571,7 @@ export async function loadTradingSnapshot(
             const snapshot = decodeSnapshot(
                 simulationValues(simulation),
                 validated.deployment,
+                { user: validated.user, isLong: validated.isLong },
                 ledger,
                 parseLedgerTime(header.closeTime),
                 validated.maxPriceAge,
