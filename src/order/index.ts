@@ -14,6 +14,7 @@ export {
     buildOrderOperation,
     buildPositionActionExecution,
 } from './transactions.js';
+export { prepareStrictTransaction } from './simulation.js';
 export type {
     BuildMarginAdjustmentExecutionInput,
     BuildOrderOperationInput,
@@ -23,3 +24,7 @@ export type {
     PreparedExecution,
     RelayFeeToken,
 } from './transactions.js';
+export type {
+    PrepareStrictTransactionInput,
+    StrictSimulationResult,
+} from './simulation.js';
