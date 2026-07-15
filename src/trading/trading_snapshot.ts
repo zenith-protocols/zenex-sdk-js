@@ -51,6 +51,12 @@ export interface TradingSnapshot {
     market: MarketData;
     position: Position;
     price: VerifiedPrice;
+    /**
+     * Exact serialized update submitted in this snapshot simulation.
+     * Pyth markets verify it; terminal markets carry it unchanged because
+     * their oracle path ignores the update payload.
+     */
+    priceUpdate: Uint8Array;
     vault: VaultAtomicState;
     treasuryRate: bigint;
 }
@@ -133,6 +139,8 @@ function checkedUserAddress(value: string): string {
 function validateRequest(request: TradingSnapshotRequest): {
     deployment: TradingDeployment;
     user: string;
+    isLong: boolean;
+    priceUpdate: Uint8Array;
     maxPriceAge: bigint;
 } {
     if (!request || typeof request !== 'object') {
@@ -203,21 +211,24 @@ function validateRequest(request: TradingSnapshotRequest): {
             vaultDecimalsOffset: source.vaultDecimalsOffset,
         },
         user: checkedUserAddress(request.user),
+        isLong: request.isLong,
+        priceUpdate: Uint8Array.from(request.priceUpdate),
         maxPriceAge: checkedU64(request.maxPriceAge, 'maximum price age'),
     };
 }
 
 function snapshotCalls(
-    request: TradingSnapshotRequest,
     deployment: TradingDeployment,
     user: string,
+    isLong: boolean,
+    priceUpdate: Uint8Array,
 ): Call[] {
     return [
         viewCall(deployment.trading, 'get_config'),
         viewCall(deployment.trading, 'get_market_data'),
         viewCall(deployment.trading, 'get_position', [
             Address.fromString(user).toScVal(),
-            xdr.ScVal.scvBool(request.isLong),
+            xdr.ScVal.scvBool(isLong),
         ]),
         viewCall(deployment.trading, 'get_status'),
         viewCall(deployment.trading, 'get_retirement'),
@@ -232,7 +243,7 @@ function snapshotCalls(
         viewCall(deployment.vault, 'get_strategy'),
         viewCall(deployment.treasury, 'get_rate'),
         viewCall(deployment.priceVerifier, 'verify_price', [
-            xdr.ScVal.scvBytes(Buffer.from(request.priceUpdate)),
+            xdr.ScVal.scvBytes(Buffer.from(priceUpdate)),
             xdr.ScVal.scvU32(deployment.feedId),
             xdr.ScVal.scvI32(deployment.exponent),
         ]),
@@ -396,6 +407,7 @@ function decodeSnapshot(
     ledger: number,
     ledgerTime: bigint,
     maxPriceAge: bigint,
+    priceUpdate: Uint8Array,
 ): TradingSnapshot {
     for (let index = 0; index < 15; index += 1) {
         requireSuccessfulCall(values[index], `snapshot state ${index}`);
@@ -486,6 +498,7 @@ function decodeSnapshot(
         market,
         position,
         price,
+        priceUpdate: Uint8Array.from(priceUpdate),
         vault: {
             totalAssets,
             totalSupply,
@@ -505,9 +518,10 @@ export async function loadTradingSnapshot(
             request.network.opts,
         );
         const calls = snapshotCalls(
-            request,
             validated.deployment,
             validated.user,
+            validated.isLong,
+            validated.priceUpdate,
         );
 
         for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -536,6 +550,7 @@ export async function loadTradingSnapshot(
                 ledger,
                 parseLedgerTime(header.closeTime),
                 validated.maxPriceAge,
+                validated.priceUpdate,
             );
             return exact(snapshot, ledger, snapshot.price.publishTime);
         }

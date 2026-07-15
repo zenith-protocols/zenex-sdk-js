@@ -366,6 +366,7 @@ describe('loadTradingSnapshot', () => {
                 publishTime: 95n,
                 source: 'pyth',
             },
+            priceUpdate: new Uint8Array([1, 2, 3]),
             vault: {
                 totalAssets: 10_000n,
                 totalSupply: 9_000_000n,
