@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { format } from 'prettier';
+import { isAtomicSchema, renderType } from './api-type-renderer.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_ROOT = resolve(
@@ -12,7 +13,7 @@ const PACKAGE_ROOT = resolve(
 const LOCK_PATH = join(ROOT, 'scripts/api-contract-lock.json');
 const VENDORED_PACKAGE_PATH = join(
     ROOT,
-    'vendor/zenith-protocols-zenex-api-contracts-1.0.0.tgz',
+    'vendor/zenith-protocols-zenex-api-contracts-1.1.0.tgz',
 );
 const OUTPUT_PATH = join(ROOT, 'src/data/generated.ts');
 const check = process.argv.includes('--check');
@@ -51,87 +52,15 @@ async function packageContentHash() {
     return digest.digest('hex');
 }
 
-function atomic(schema) {
-    return (
-        typeof schema?.description === 'string' &&
-        schema.description.startsWith('Canonical ') &&
-        schema.description.endsWith('base-10 integer string')
-    );
-}
-
 function propertyName(name) {
     return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)
         ? name
         : JSON.stringify(name);
 }
 
-function literal(value) {
-    return typeof value === 'string' ? JSON.stringify(value) : String(value);
-}
-
-function renderType(schema, level = 0) {
-    if (!schema || typeof schema !== 'object') return 'unknown';
-    if (atomic(schema)) {
-        const nullable =
-            Array.isArray(schema.type) && schema.type.includes('null');
-        return nullable
-            ? 'CanonicalAtomicString | null'
-            : 'CanonicalAtomicString';
-    }
-    if (Array.isArray(schema.oneOf)) {
-        return schema.oneOf.map((part) => renderType(part, level)).join(' | ');
-    }
-    if (Array.isArray(schema.anyOf)) {
-        return schema.anyOf.map((part) => renderType(part, level)).join(' | ');
-    }
-    if (schema.const !== undefined) return literal(schema.const);
-    if (Array.isArray(schema.enum)) {
-        return schema.enum.map(literal).join(' | ');
-    }
-    if (Array.isArray(schema.prefixItems)) {
-        return `readonly [${schema.prefixItems
-            .map((part) => renderType(part, level))
-            .join(', ')}]`;
-    }
-
-    const declared = Array.isArray(schema.type) ? schema.type : [schema.type];
-    const nullable = declared.includes('null');
-    const type = declared.find((candidate) => candidate !== 'null');
-    let rendered;
-    if (type === 'object' || schema.properties) {
-        const required = new Set(schema.required ?? []);
-        const properties = Object.entries(schema.properties ?? {}).sort(
-            ([left], [right]) => left.localeCompare(right),
-        );
-        if (properties.length === 0) {
-            rendered = 'Record<string, unknown>';
-        } else {
-            const indent = ' '.repeat((level + 1) * 4);
-            const closing = ' '.repeat(level * 4);
-            rendered = `\n${indent.slice(4)}{\n${properties
-                .map(
-                    ([name, child]) =>
-                        `${indent}readonly ${propertyName(name)}${required.has(name) ? '' : '?'}: ${renderType(child, level + 1)};`,
-                )
-                .join('\n')}\n${closing}}`;
-        }
-    } else if (type === 'array' || schema.items) {
-        rendered = `readonly (${renderType(schema.items, level)})[]`;
-    } else if (type === 'integer' || type === 'number') {
-        rendered = 'number';
-    } else if (type === 'boolean') {
-        rendered = 'boolean';
-    } else if (type === 'string') {
-        rendered = 'string';
-    } else {
-        rendered = 'unknown';
-    }
-    return nullable ? `${rendered} | null` : rendered;
-}
-
 function atomicPointers(schema, path = '') {
     if (!schema || typeof schema !== 'object') return [];
-    if (atomic(schema)) return [path || '/'];
+    if (isAtomicSchema(schema)) return [path || '/'];
     if (Array.isArray(schema.oneOf)) {
         return [
             ...new Set(
@@ -352,7 +281,7 @@ async function main() {
     }
     if (
         manifest.version !== lock.packageVersion ||
-        lock.packageVersion !== '1.0.0'
+        lock.packageVersion !== '1.1.0'
     ) {
         failures.push('package version');
     }

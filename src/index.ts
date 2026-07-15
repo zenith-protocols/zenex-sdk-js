@@ -350,11 +350,15 @@ export {
 } from './data/generated.js';
 export type {
     AccountFill,
+    AccountFillQuery,
     AccountFillsResponse,
     AccountLifecycle,
+    AccountLifecycleQuery,
     AccountLifecyclesResponse,
     AccountOrder,
+    AccountOrderQuery,
     AccountOrdersResponse,
+    AccountVaultOrderQuery,
     AccountVaultOrdersResponse,
     AtomicString,
     BaseMetadata,

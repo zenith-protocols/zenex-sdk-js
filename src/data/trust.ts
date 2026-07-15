@@ -17,6 +17,7 @@ import type {
     VerifiedContractDeployment,
 } from '../relay/types.js';
 import type { PriceFreeRelayConfiguration } from '../relay/price_free.js';
+import type { TradingDeployment } from '../trading/trading_snapshot.js';
 import type { PublicConfig } from './generated.js';
 
 const NETWORKS = {
@@ -31,6 +32,8 @@ const NETWORKS = {
 } as const;
 const SHA256 = /^[0-9a-f]{64}$/i;
 const U32_MAX = 4_294_967_295n;
+const MAX_DECIMAL_PLACES = 38;
+const MAX_PRICE_AGE_MS = 60_000;
 
 export class ZenexPublicConfigTrustError extends Error {
     constructor(
@@ -48,6 +51,8 @@ export interface ZenexTrustBundle {
     readonly smartAccountDeployment: SmartAccountDeploymentMetadata;
     /** Complete public-only configuration for the safe price-free builder. */
     readonly priceFree: PriceFreeRelayConfiguration;
+    /** Exact, independently validated execution metadata for each market. */
+    readonly tradingDeployments: readonly TrustedTradingDeployment[];
     readonly sessionPolicy: {
         readonly contractId: string;
         readonly capability: 'single-transfer-destination-v1';
@@ -56,6 +61,17 @@ export interface ZenexTrustBundle {
         readonly allowedContracts: readonly string[];
         readonly allowedTransferDestinations: readonly string[];
     };
+}
+
+export interface TrustedTradingDeployment extends TradingDeployment {
+    readonly marketId: string;
+    readonly collateralAssetId: string;
+    readonly collateralDecimals: number;
+    readonly tokenDecimals: number;
+    readonly priceDecimals: number;
+    readonly maxPriceAgeMs: number;
+    /** Conservative whole-second freshness bound for `loadTradingSnapshot`. */
+    readonly maxPriceAge: bigint;
 }
 
 function fail(path: string, reason: string): never {
@@ -114,6 +130,46 @@ function sameSet(left: readonly string[], right: readonly string[]): boolean {
     );
 }
 
+function checkedInteger(
+    value: number,
+    minimum: number,
+    maximum: number,
+    path: string,
+): number {
+    if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+        fail(path, `must be an integer between ${minimum} and ${maximum}`);
+    }
+    return value;
+}
+
+function checkedFeedId(value: bigint, path: string): number {
+    if (typeof value !== 'bigint' || value < 0n || value > U32_MAX) {
+        fail(path, 'must be a u32 bigint');
+    }
+    const parsed = parseInt(value.toString(), 10);
+    if (BigInt(parsed) !== value) {
+        fail(path, 'cannot be represented as an exact u32 number');
+    }
+    return parsed;
+}
+
+function requireUniqueIds(
+    values: readonly { readonly id: string }[],
+    path: string,
+): void {
+    const indexes = new Map<string, number>();
+    values.forEach((value, index) => {
+        const previous = indexes.get(value.id);
+        if (previous !== undefined) {
+            fail(
+                `${path}/${index}/id`,
+                `duplicates the logical ID at ${path}/${previous}/id`,
+            );
+        }
+        indexes.set(value.id, index);
+    });
+}
+
 /**
  * Convert decoded public config into the independent relay trust boundaries.
  * Per-user smart-account instances are accepted only as separately verified
@@ -169,6 +225,16 @@ export function createZenexTrustBundle(
         );
     }
 
+    const maxPriceAgeMs = checkedInteger(
+        config.relay.maxPriceAgeMs,
+        1,
+        MAX_PRICE_AGE_MS,
+        '/relay/maxPriceAgeMs',
+    );
+    const maxPriceAge = BigInt(maxPriceAgeMs) / 1_000n;
+    requireUniqueIds(config.collateralAssets, '/collateralAssets');
+    requireUniqueIds(config.markets, '/markets');
+
     const webauthn = cloneVerifiedDeployment(
         config.smartAccount.verifiers.webauthn,
         WEBAUTHN_VERIFIER_WASM_SHA256,
@@ -191,6 +257,8 @@ export function createZenexTrustBundle(
     const configuredIdentities: readonly (readonly [string, string])[] = [
         ['/contracts/router', config.contracts.router],
         ['/contracts/referral', config.contracts.referral],
+        ['/contracts/priceVerifier', config.contracts.priceVerifier],
+        ['/contracts/treasury', config.contracts.treasury],
         ...config.collateralAssets.map(
             (asset, index) =>
                 [
@@ -249,7 +317,7 @@ export function createZenexTrustBundle(
 
     const trading = [...new Set(marketContracts)];
     const collateralById = new Map(
-        config.collateralAssets.map((asset) => [asset.id, asset.contractId]),
+        config.collateralAssets.map((asset) => [asset.id, asset]),
     );
     const relayMarkets = config.markets.map((market, index) => {
         const collateral = collateralById.get(market.collateralAssetId);
@@ -259,7 +327,86 @@ export function createZenexTrustBundle(
                 'does not identify a configured collateral asset',
             );
         }
-        return Object.freeze({ trading: market.trading, collateral });
+        return Object.freeze({
+            trading: market.trading,
+            collateral: collateral.contractId,
+        });
+    });
+    const tradingDeployments = config.markets.map((market, index) => {
+        const path = `/markets/${index}`;
+        const collateral = collateralById.get(market.collateralAssetId);
+        if (collateral === undefined) {
+            fail(
+                `${path}/collateralAssetId`,
+                'does not identify a configured collateral asset',
+            );
+        }
+        const collateralDecimals = checkedInteger(
+            collateral.decimals,
+            0,
+            MAX_DECIMAL_PLACES,
+            `/collateralAssets/${config.collateralAssets.indexOf(collateral)}/decimals`,
+        );
+        const tokenDecimals = checkedInteger(
+            market.tokenDecimals,
+            0,
+            MAX_DECIMAL_PLACES,
+            `${path}/tokenDecimals`,
+        );
+        const priceDecimals = checkedInteger(
+            market.priceDecimals,
+            0,
+            MAX_DECIMAL_PLACES,
+            `${path}/priceDecimals`,
+        );
+        const exponent = checkedInteger(
+            market.exponent,
+            -MAX_DECIMAL_PLACES,
+            0,
+            `${path}/exponent`,
+        );
+        if (exponent !== -priceDecimals) {
+            fail(
+                `${path}/exponent`,
+                'must be the signed inverse of price decimals',
+            );
+        }
+        const vaultDecimalsOffset = checkedInteger(
+            market.vaultDecimalsOffset,
+            0,
+            MAX_DECIMAL_PLACES,
+            `${path}/vaultDecimalsOffset`,
+        );
+        const vaultShareDecimals = checkedInteger(
+            market.vaultShareDecimals,
+            0,
+            MAX_DECIMAL_PLACES,
+            `${path}/vaultShareDecimals`,
+        );
+        if (vaultShareDecimals !== collateralDecimals + vaultDecimalsOffset) {
+            fail(
+                `${path}/vaultShareDecimals`,
+                'must equal collateral decimals plus the vault offset',
+            );
+        }
+        return Object.freeze({
+            marketId: market.id,
+            collateralAssetId: market.collateralAssetId,
+            collateralDecimals,
+            tokenDecimals,
+            priceDecimals,
+            maxPriceAgeMs,
+            maxPriceAge,
+            trading: market.trading,
+            router: config.contracts.router,
+            vault: market.vault,
+            priceVerifier: config.contracts.priceVerifier,
+            treasury: config.contracts.treasury,
+            feedId: checkedFeedId(market.feedId, `${path}/feedId`),
+            exponent,
+            vaultDecimalsOffset,
+            vaultShareDecimals,
+        });
     });
     const feeTokens = [
         ...new Set(
@@ -394,6 +541,7 @@ export function createZenexTrustBundle(
     return Object.freeze({
         relayContracts,
         deployments,
+        tradingDeployments: Object.freeze(tradingDeployments),
         smartAccountDeployment: Object.freeze({
             kitVersion: '0.3.0' as const,
             deployer: SMART_ACCOUNT_DEPLOYER,

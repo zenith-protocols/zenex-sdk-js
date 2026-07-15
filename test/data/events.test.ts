@@ -240,8 +240,44 @@ describe('Zenex scoped event stream', () => {
         });
         expect((await iterator.next()).value?.id).toBe('1');
         expect((await iterator.next()).value?.id).toBe('2');
-        expect(new Headers(headers[0]).get('last-event-id')).toBeNull();
+        expect(new Headers(headers[0]).get('last-event-id')).toBe('0');
         expect(new Headers(headers[1]).get('last-event-id')).toBe('1');
+        await iterator.return();
+    });
+
+    it('closes the authoritative query-to-connect gap from cursor zero', async () => {
+        const requests: { path: string; lastEventId: string | null }[] = [];
+        const client = new ZenexDataClient({
+            baseUrl: 'https://api.example',
+            fetch: async (input, init) => {
+                const url = new URL(String(input));
+                requests.push({
+                    path: url.pathname,
+                    lastEventId: new Headers(init?.headers).get(
+                        'last-event-id',
+                    ),
+                });
+                return url.pathname === '/v1/prices/23/latest'
+                    ? latestPriceResponse()
+                    : streamResponse([sse(priceTick('1'))]);
+            },
+        });
+
+        await expect(client.getLatestPrice(23n)).resolves.toMatchObject({
+            data: { price: 100n },
+        });
+        const iterator = client.stream({
+            scopes: ['price:23'],
+            reconnectDelayMs: 0,
+        });
+        await expect(iterator.next()).resolves.toMatchObject({
+            value: { id: '1', type: 'price.tick' },
+        });
+
+        expect(requests).toEqual([
+            { path: '/v1/prices/23/latest', lastEventId: null },
+            { path: '/v1/stream', lastEventId: '0' },
+        ]);
         await iterator.return();
     });
 
@@ -318,7 +354,7 @@ describe('Zenex scoped event stream', () => {
         );
     });
 
-    it('executes resync reads, clears the cursor, and reconnects', async () => {
+    it('reconnects from the resync high-water event after state replacement', async () => {
         const streamHeaders: Headers[] = [];
         let streams = 0;
         const fetch = vi.fn(
@@ -353,7 +389,7 @@ describe('Zenex scoped event stream', () => {
         expect(onResult.mock.calls[0]?.[0].prices[0].data.price).toBe(100n);
         expect((await iterator.next()).value?.type).toBe('price.tick');
         expect(streamHeaders[0]?.get('last-event-id')).toBe('1');
-        expect(streamHeaders[1]?.get('last-event-id')).toBeNull();
+        expect(streamHeaders[1]?.get('last-event-id')).toBe('5');
         await iterator.return();
     });
 

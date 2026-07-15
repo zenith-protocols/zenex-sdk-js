@@ -41,7 +41,8 @@ const deployment: TradingDeployment = {
     treasury: TREASURY,
     feedId: 7,
     exponent: -8,
-    vaultDecimalsOffset: 3,
+    vaultDecimalsOffset: 11,
+    vaultShareDecimals: 18,
 };
 
 const request: TradingSnapshotRequest = {
@@ -370,7 +371,7 @@ describe('loadTradingSnapshot', () => {
             vault: {
                 totalAssets: 10_000n,
                 totalSupply: 9_000_000n,
-                decimalsOffset: 3,
+                decimalsOffset: 11,
             },
             treasuryRate: 30_000_000_000_000_000n,
         });
@@ -570,4 +571,44 @@ describe('loadTradingSnapshot', () => {
             reason: 'deployment must be an object',
         });
     });
+
+    it.each([
+        ['negative offset', { vaultDecimalsOffset: -1 }],
+        ['offset above 38', { vaultDecimalsOffset: 39 }],
+        ['fractional offset', { vaultDecimalsOffset: 11.5 }],
+        ['negative share decimals', { vaultShareDecimals: -1 }],
+        ['share decimals above 38', { vaultShareDecimals: 39 }],
+        ['fractional share decimals', { vaultShareDecimals: 18.5 }],
+        [
+            'share decimals below the offset',
+            { vaultDecimalsOffset: 11, vaultShareDecimals: 10 },
+        ],
+    ])('rejects %s', async (_label, override) => {
+        const malformed = {
+            ...request,
+            deployment: { ...deployment, ...override },
+        };
+
+        await expect(loadTradingSnapshot(malformed)).resolves.toEqual({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: expect.stringContaining('vault'),
+        });
+    });
+
+    it.each([-39, 1, -8.5])(
+        'rejects invalid price exponent %s',
+        async (exponent) => {
+            const malformed = {
+                ...request,
+                deployment: { ...deployment, exponent },
+            };
+
+            await expect(loadTradingSnapshot(malformed)).resolves.toEqual({
+                kind: 'unavailable',
+                code: 'INVALID_INPUT',
+                reason: expect.stringContaining('price exponent'),
+            });
+        },
+    );
 });

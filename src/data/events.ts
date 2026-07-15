@@ -434,7 +434,8 @@ async function openStream(
 /**
  * Consume durable scoped SSE events. Invalidation events never mutate SDK or
  * application state. A resync either runs the complete supplied read plan and
- * clears the cursor, or fails with `ZenexResyncRequiredError`.
+ * retains the resync event as its high-water cursor, or fails with
+ * `ZenexResyncRequiredError`.
  */
 export async function* streamZenexEvents(
     client: ZenexDataClient,
@@ -457,7 +458,7 @@ export async function* streamZenexEvents(
     const requestedScopes = new Set<string>(scopes);
     const { baseUrl, fetch } = client.transport;
     const url = streamUrl(baseUrl, scopes);
-    let cursor = cursorString(options.lastEventId);
+    let cursor = cursorString(options.lastEventId ?? 0n);
 
     while (!options.signal?.aborted) {
         let response: Response;
@@ -500,7 +501,7 @@ export async function* streamZenexEvents(
                     );
                     await options.resync.onResult(result, event);
                     resyncing = false;
-                    cursor = undefined;
+                    cursor = event.id;
                     resynced = true;
                     yield event;
                     break;

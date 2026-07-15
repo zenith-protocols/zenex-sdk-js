@@ -10,9 +10,9 @@ import {
 } from '../../src/data/generated.js';
 
 describe('generated immutable API contract', () => {
-    it('pins the v1 package and its content hashes', () => {
+    it('pins the exact API 1.1 package and its content hashes', () => {
         expect(API_VERSION).toBe('v1');
-        expect(API_CONTRACT_PACKAGE_VERSION).toBe('1.0.0');
+        expect(API_CONTRACT_PACKAGE_VERSION).toBe('1.1.0');
         expect(API_OPENAPI_SHA256).toMatch(/^[0-9a-f]{64}$/);
         expect(API_PACKAGE_CONTENT_SHA256).toMatch(/^[0-9a-f]{64}$/);
     });
@@ -81,7 +81,60 @@ describe('generated immutable API contract', () => {
                 '/data/smartAccount/sessionPolicy/maxDurationLedgers',
             ]),
         );
-        const config = JSON.stringify(API_SCHEMAS.PublicConfigResponse);
+        const configData = API_SCHEMAS.PublicConfigResponse.properties?.data;
+        expect(configData?.required).toEqual(
+            expect.arrayContaining(['contracts', 'relay', 'markets']),
+        );
+        expect(configData?.properties?.contracts).toMatchObject({
+            additionalProperties: false,
+            properties: {
+                priceVerifier: {
+                    minLength: 1,
+                    maxLength: 128,
+                    type: 'string',
+                },
+                treasury: {
+                    minLength: 1,
+                    maxLength: 128,
+                    type: 'string',
+                },
+            },
+            required: expect.arrayContaining(['priceVerifier', 'treasury']),
+            type: 'object',
+        });
+        expect(configData?.properties?.relay).toMatchObject({
+            additionalProperties: false,
+            properties: {
+                maxPriceAgeMs: {
+                    exclusiveMinimum: 0,
+                    maximum: 60_000,
+                    type: 'integer',
+                },
+            },
+            required: ['maxPriceAgeMs'],
+            type: 'object',
+        });
+        expect(configData?.properties?.markets.items).toMatchObject({
+            properties: {
+                exponent: { minimum: -38, maximum: 0, type: 'integer' },
+                vaultDecimalsOffset: {
+                    minimum: 0,
+                    maximum: 38,
+                    type: 'integer',
+                },
+                vaultShareDecimals: {
+                    minimum: 0,
+                    maximum: 38,
+                    type: 'integer',
+                },
+            },
+            required: expect.arrayContaining([
+                'exponent',
+                'vaultDecimalsOffset',
+                'vaultShareDecimals',
+            ]),
+        });
+        const config = JSON.stringify(configData);
         expect(config).toContain('accountArtifact');
         expect(config).toContain('single-transfer-destination-v1');
         expect(config).toContain('instanceExecutableHash');

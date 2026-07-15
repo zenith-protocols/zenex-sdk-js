@@ -183,6 +183,10 @@ describe('package root exports', () => {
         expect(SDK.FixedMath.SCALAR_18).toBe(10n ** 18n);
         expect(SDK.FixedMath.toFixed).toBeTypeOf('function');
         expect(SDK.FixedMath.toFloat).toBeTypeOf('function');
+        expect(SDK.FixedMath.parseAtomic).toBeTypeOf('function');
+        expect(SDK.FixedMath.formatAtomic).toBeTypeOf('function');
+        expect(SDK.parseAtomic).toBeTypeOf('function');
+        expect(SDK.formatAtomic).toBeTypeOf('function');
         expect(SDK.FixedMath.mulFloor).toBeTypeOf('function');
         expect(SDK.FixedMath.mulCeil).toBeTypeOf('function');
         expect(SDK.FixedMath.divFloor).toBeTypeOf('function');

@@ -24,21 +24,22 @@ import type { MarketData, Position, TradingConfig } from './trading_types.js';
 
 const U32_MAX = 4_294_967_295;
 const U64_MAX = 2n ** 64n - 1n;
-const MAX_DECIMALS_OFFSET = 10;
+const MAX_DECIMAL_PLACES = 38;
 const EXPECTED_RESULT_COUNT = 16;
 const SIMULATION_ACCOUNT =
     'GDMVSPSKEUOTRFSJH2SXVUNB2JGORKDTWBMOP5OZJZP4GKRQUQWFJO4Y';
 const SIMULATION_SEQUENCE = '123';
 
 export interface TradingDeployment {
-    trading: string;
-    router: string;
-    vault: string;
-    priceVerifier: string;
-    treasury: string;
-    feedId: number;
-    exponent: number;
-    vaultDecimalsOffset: number;
+    readonly trading: string;
+    readonly router: string;
+    readonly vault: string;
+    readonly priceVerifier: string;
+    readonly treasury: string;
+    readonly feedId: number;
+    readonly exponent: number;
+    readonly vaultDecimalsOffset: number;
+    readonly vaultShareDecimals: number;
 }
 
 export interface TradingSnapshot {
@@ -177,22 +178,32 @@ function validateRequest(request: TradingSnapshotRequest): {
     const feedId = checkedU32(source.feedId, 'feed id');
     if (
         !Number.isInteger(source.exponent) ||
-        source.exponent < -18 ||
+        source.exponent < -MAX_DECIMAL_PLACES ||
         source.exponent > 0
     ) {
         throw new SnapshotUnavailableError(
             'INVALID_INPUT',
-            'price exponent must be between -18 and 0',
+            `price exponent must be between -${MAX_DECIMAL_PLACES} and 0`,
         );
     }
     if (
         !Number.isSafeInteger(source.vaultDecimalsOffset) ||
         source.vaultDecimalsOffset < 0 ||
-        source.vaultDecimalsOffset > MAX_DECIMALS_OFFSET
+        source.vaultDecimalsOffset > MAX_DECIMAL_PLACES
     ) {
         throw new SnapshotUnavailableError(
             'INVALID_INPUT',
-            `vault decimals offset must be between 0 and ${MAX_DECIMALS_OFFSET}`,
+            `vault decimals offset must be between 0 and ${MAX_DECIMAL_PLACES}`,
+        );
+    }
+    if (
+        !Number.isSafeInteger(source.vaultShareDecimals) ||
+        source.vaultShareDecimals < source.vaultDecimalsOffset ||
+        source.vaultShareDecimals > MAX_DECIMAL_PLACES
+    ) {
+        throw new SnapshotUnavailableError(
+            'INVALID_INPUT',
+            `vault share decimals must be between the offset and ${MAX_DECIMAL_PLACES}`,
         );
     }
 
@@ -209,6 +220,7 @@ function validateRequest(request: TradingSnapshotRequest): {
             feedId,
             exponent: source.exponent,
             vaultDecimalsOffset: source.vaultDecimalsOffset,
+            vaultShareDecimals: source.vaultShareDecimals,
         },
         user: checkedUserAddress(request.user),
         isLong: request.isLong,
