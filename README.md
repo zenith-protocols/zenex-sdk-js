@@ -47,6 +47,77 @@ if (execution.kind !== 'exact') throw new Error(execution.reason);
 are not transaction inputs. Use the exact position, margin, market-capacity,
 and vault quote APIs for transaction construction.
 
+## Exact position decrease intent
+
+Quote a close or partial decrease from the same coherent `TradingSnapshot`
+that will be supplied to the execution builder. Size, collateral return,
+slippage, and absolute expiration stay in bigint and ledger arithmetic inside
+the SDK.
+
+```ts
+import {
+    buildPositionDecreaseIntentExecution,
+    quotePositionDecreaseIntent,
+} from '@zenith-protocols/zenex-sdk';
+
+const quote = quotePositionDecreaseIntent({
+    snapshot,
+    isLong,
+    size: {
+        kind: 'fraction',
+        ratio: { numerator: 1n, denominator: 3n },
+    },
+    collateralReturn: { kind: 'proRata' },
+    execution: {
+        transport: 'direct',
+        executionFee: snapshot.config.execFee,
+    },
+    maximumSlippage: { numerator: 1n, denominator: 200n },
+    validForLedgers: 60,
+});
+if (quote.kind !== 'exact') throw new Error(quote.reason);
+
+const execution = buildPositionDecreaseIntentExecution({
+    snapshot,
+    user,
+    quote,
+    policy: {
+        kind: 'fillOrKill',
+        transport: 'direct',
+        keeper: user,
+        price: snapshot.priceUpdate,
+    },
+});
+if (execution.kind !== 'exact') throw new Error(execution.reason);
+```
+
+Fractional notional rounds down in atomic units. Pro-rata collateral then
+rounds down from that resolved atomic notional, not independently from the
+original fraction. Explicit partial collateral may be zero but cannot exceed
+the position collateral; `quotePositionAction` applies the surviving-position
+health gates after fee settlement.
+
+Use `size: { kind: 'full' }` for every whole-position request. It accepts no
+`collateralReturn` and always builds the `FULL_CLOSE` sentinel. An explicit
+notional or fraction that resolves to the whole position fails closed and
+directs the caller to the full size form, so collateral intent is never
+silently ignored.
+
+Maximum slippage is an exact ratio below one. A long decrease gets a
+conservatively rounded lower bid bound; a short decrease gets a conservatively
+rounded upper ask bound. `validForLedgers` is from 1 through the exported
+`POSITION_DECREASE_MAX_VALIDITY_LEDGERS` value of 60, and the SDK derives the
+inclusive absolute expiration. The snapshot price update must be nonempty and
+no larger than 32 KiB.
+
+`executionFee` must equal `snapshot.config.execFee`. It is an upfront order
+escrow rather than a position-margin debit. An atomic direct fill pays it to
+the selected keeper, so choosing the user as self-keeper returns that escrow
+to the same user. A relay quote uses `transport: 'relay'` and a `relayFee`
+equal to the policy's signed `maxFeeAmount`; that conservative external wallet
+charge and the policy fee expiration are both bound into the exact preview.
+Both direct and relay execution require `fillOrKill`.
+
 ## Exact vault action intent
 
 Keep a vault fill estimate explicit when deriving `minOut`. The SDK applies an
@@ -212,9 +283,10 @@ operations use the normal relay submission route; there is no public
 
 Close all is an application controller sequence, not one atomic cross-market
 batch. Take a deterministic snapshot of visible positions, assign a unique UUID
-to one `fillOrKill` request per position, submit them one at a time, and record
-each result. After every ambiguous handoff, read the durable relay status before
-continuing or retrying. Keep prior successes and failures in the final result.
+to one `fillOrKill` request per position, quote each with
+`size: { kind: 'full' }`, and build and submit them one at a time. After every
+ambiguous handoff, read the durable relay status before continuing or retrying.
+Keep prior successes and failures in the final result.
 
 The smart-account session capability is
 `single-transfer-destination-v1`. Multi-market session setup is unavailable
