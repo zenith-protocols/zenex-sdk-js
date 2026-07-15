@@ -207,6 +207,13 @@ describe('package root exports', () => {
         expect(SDK.buildOrderOperation).toBeTypeOf('function');
         expect(SDK.buildPositionActionExecution).toBeTypeOf('function');
         expect(SDK.buildMarginAdjustmentExecution).toBeTypeOf('function');
+        expect(SDK.isIncreaseOrderKind).toBeTypeOf('function');
+        expect(SDK.isDecreaseOrderKind).toBeTypeOf('function');
+        expect(SDK.isMarketOrderKind).toBeTypeOf('function');
+        expect(SDK.isRestingOrderKind).toBeTypeOf('function');
+        expect(SDK.isTriggerOrderKind).toBeTypeOf('function');
+        expect(SDK.orderKindCrossing).toBeTypeOf('function');
+        expect(SDK.orderKindFiresAbove).toBeTypeOf('function');
         expect(SDK.buildRelayCallRequest).toBeTypeOf('function');
         expect(SDK.buildPriceFreeRelayOperation).toBeTypeOf('function');
         expect(SDK.buildSmartAccountDeploymentRequest).toBeTypeOf('function');

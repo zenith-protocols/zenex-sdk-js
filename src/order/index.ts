@@ -10,6 +10,17 @@ export type {
 } from './validation.js';
 
 export {
+    isDecreaseOrderKind,
+    isIncreaseOrderKind,
+    isMarketOrderKind,
+    isRestingOrderKind,
+    isTriggerOrderKind,
+    orderKindCrossing,
+    orderKindFiresAbove,
+} from './kinds.js';
+export type { OrderKindCrossing } from './kinds.js';
+
+export {
     buildMarginAdjustmentExecution,
     buildOrderOperation,
     buildPositionActionExecution,

@@ -8,6 +8,11 @@ import {
     type TradingConfig,
 } from '../trading/trading_types.js';
 import type { Call, OrderParams } from '../trading-router/router_types.js';
+import {
+    isIncreaseOrderKind,
+    isMarketOrderKind,
+    isTriggerOrderKind,
+} from './kinds.js';
 
 const U32_MAX = 4_294_967_295;
 const U64_MAX = 2n ** 64n - 1n;
@@ -93,30 +98,12 @@ function checkedAtomic(
     }
 }
 
-function isIncrease(kind: OrderKind): boolean {
-    return (
-        kind === OrderKind.MarketIncrease ||
-        kind === OrderKind.LimitIncrease ||
-        kind === OrderKind.StopIncrease
-    );
-}
-
-function isMarket(kind: OrderKind): boolean {
-    return (
-        kind === OrderKind.MarketIncrease || kind === OrderKind.MarketDecrease
-    );
-}
-
-function isTrigger(kind: OrderKind): boolean {
-    return !isMarket(kind);
-}
-
 export function orderExecutionPrice(
     kind: OrderKind,
     isLong: boolean,
     price: VerifiedPrice,
 ): bigint {
-    if (isIncrease(kind)) return isLong ? price.ask : price.bid;
+    if (isIncreaseOrderKind(kind)) return isLong ? price.ask : price.bid;
     return isLong ? price.bid : price.ask;
 }
 
@@ -301,7 +288,7 @@ export function validateOrder(
 
     if (knownKind) {
         const kind = params.kind as OrderKind;
-        if (isTrigger(kind) && triggerPrice === 0n) {
+        if (isTriggerOrderKind(kind) && triggerPrice === 0n) {
             issues.push(
                 issue(
                     732,
@@ -311,7 +298,7 @@ export function validateOrder(
             );
         }
         if (
-            isIncrease(kind) &&
+            isIncreaseOrderKind(kind) &&
             notional !== undefined &&
             maxPositionNotional !== undefined &&
             notional > maxPositionNotional
@@ -350,7 +337,7 @@ export function validateOrder(
         if (
             priceIssues.length === 0 &&
             knownKind &&
-            isMarket(params.kind as OrderKind) &&
+            isMarketOrderKind(params.kind as OrderKind) &&
             priceBound !== undefined &&
             priceBound > 0n
         ) {
@@ -359,7 +346,8 @@ export function validateOrder(
                 params.isLong,
                 context.price,
             );
-            const buy = isIncrease(params.kind as OrderKind) === params.isLong;
+            const buy =
+                isIncreaseOrderKind(params.kind as OrderKind) === params.isLong;
             const within = buy
                 ? executionPrice <= priceBound
                 : executionPrice >= priceBound;
