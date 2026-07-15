@@ -24,13 +24,19 @@ export {
     quoteVaultOrderCreation,
     quoteVaultRedeem,
     quoteVaultRedeemFill,
+    deriveVaultMinimumOutput,
 } from './quote.js';
 
 export type {
+    DeriveVaultMinimumOutputInput,
+    ExactVaultOrderCreationQuote,
     ExactVaultRestingOrderCreationQuote,
     VaultAtomicState,
+    VaultEstimatedOutputReference,
+    VaultMinimumOutput,
     VaultOrderCreationOutcome,
     VaultOrderCreationQuoteInput,
+    VaultRationalSlippageBound,
     VaultRestingOrderCreation,
     VaultRetiredImmediateRedeem,
     VaultQuoteOutcome,

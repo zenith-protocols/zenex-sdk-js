@@ -14,6 +14,15 @@ describe('package root type exports', () => {
                 AccountVaultOrderQuery,
                 AccountLifecycleQuery,
                 RankingDenomination,
+                BuildVaultActionExecutionInput,
+                DeriveVaultMinimumOutputInput,
+                ExactVaultOrderCreationQuote,
+                PreparedVaultActionExecution,
+                PreparedVaultRestingExecution,
+                PreparedVaultRetiredImmediateRedeemExecution,
+                VaultEstimatedOutputReference,
+                VaultMinimumOutput,
+                VaultRationalSlippageBound,
             } from '../src/index.js';
 
             export const queries: readonly [
@@ -26,6 +35,62 @@ describe('package root type exports', () => {
             export const denomination: RankingDenomination = {
                 collateralAssetId: 'xlm',
                 decimals: 7,
+            };
+
+            const reference: VaultEstimatedOutputReference = {
+                kind: 'estimate',
+                output: 100n,
+            };
+            const maximumSlippage: VaultRationalSlippageBound = {
+                numerator: 1n,
+                denominator: 100n,
+            };
+            export const minimumOutputInput: DeriveVaultMinimumOutputInput = {
+                reference,
+                maximumSlippage,
+            };
+            export const minimumOutput: VaultMinimumOutput = {
+                reference,
+                maximumSlippage,
+                rounding: 'floor',
+                minOut: 99n,
+            };
+
+            export const vaultQuote: ExactVaultOrderCreationQuote = {
+                kind: 'exact',
+                ledger: 1,
+                priceTime: 2n,
+                value: {
+                    kind: 'retiredImmediateRedeem',
+                    policy: 'direct',
+                    action: 'redeem',
+                    shares: 100n,
+                    assets: 99n,
+                    minOutApplied: false,
+                    executionFee: 0n,
+                },
+            };
+            export const retiredExecution: PreparedVaultRetiredImmediateRedeemExecution = {
+                action: 'retiredImmediateRedeem',
+                policy: 'retiredImmediateRedeem',
+                transport: 'direct',
+                operationXdr: 'AAAA',
+            };
+            export const restingExecution: PreparedVaultRestingExecution = {
+                action: 'resting',
+                vaultAction: 'redeem',
+                policy: 'restOnly',
+                transport: 'direct',
+                operationXdr: 'AAAA',
+            };
+            export const executions: readonly PreparedVaultActionExecution[] = [
+                restingExecution,
+                retiredExecution,
+            ];
+            export const vaultBuildInput: BuildVaultActionExecutionInput = {
+                tradingAddress: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+                user: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+                quote: vaultQuote,
             };
         `;
         const options: ts.CompilerOptions = {

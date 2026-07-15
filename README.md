@@ -47,6 +47,49 @@ if (execution.kind !== 'exact') throw new Error(execution.reason);
 are not transaction inputs. Use the exact position, margin, market-capacity,
 and vault quote APIs for transaction construction.
 
+## Exact vault action intent
+
+Keep a vault fill estimate explicit when deriving `minOut`. The SDK applies an
+exact rational slippage bound with bigint floor rounding, but returns estimate
+provenance because a keeper fills the order against later state.
+
+```ts
+import {
+    buildVaultActionExecution,
+    deriveVaultMinimumOutput,
+    quoteVaultOrderCreation,
+} from '@zenith-protocols/zenex-sdk';
+
+const minimum = deriveVaultMinimumOutput({
+    reference: { kind: 'estimate', output: estimatedOutputAtomic },
+    maximumSlippage: { numerator: 1n, denominator: 200n },
+});
+if (minimum.kind === 'unavailable') throw new Error(minimum.reason);
+if (minimum.kind !== 'estimate') throw new Error('unexpected vault provenance');
+
+const creation = quoteVaultOrderCreation({
+    ...creationContext,
+    minOut: minimum.value.minOut,
+});
+if (creation.kind === 'unavailable') throw new Error(creation.reason);
+if (creation.kind !== 'exact') throw new Error('exact vault state is required');
+
+const execution = buildVaultActionExecution(
+    creation.value.kind === 'retiredImmediateRedeem'
+        ? { ...executionContext, quote: creation }
+        : {
+              ...executionContext,
+              quote: creation,
+              policy: { kind: 'restOnly', transport: 'direct' },
+          },
+);
+if (execution.kind === 'unavailable') throw new Error(execution.reason);
+```
+
+Active, OnIce, and Delisted vault actions create resting orders. A Retired
+redeem is a distinct direct-only action. It charges no execution fee and does
+not apply the estimate-derived minimum output.
+
 ## Public data
 
 `ZenexDataClient` validates the exact v1 response schema for each route. It

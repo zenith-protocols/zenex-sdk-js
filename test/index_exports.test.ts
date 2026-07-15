@@ -206,9 +206,11 @@ describe('package root exports', () => {
         expect(SDK.quoteVaultOrderCreation).toBeTypeOf('function');
         expect(SDK.quoteVaultRedeem).toBeTypeOf('function');
         expect(SDK.quoteVaultRedeemFill).toBeTypeOf('function');
+        expect(SDK.deriveVaultMinimumOutput).toBeTypeOf('function');
         expect(SDK.loadTradingSnapshot).toBeTypeOf('function');
         expect(SDK.buildOrderOperation).toBeTypeOf('function');
         expect(SDK.buildVaultOrderOperation).toBeTypeOf('function');
+        expect(SDK.buildVaultActionExecution).toBeTypeOf('function');
         expect(SDK.buildPositionActionExecution).toBeTypeOf('function');
         expect(SDK.buildMarginAdjustmentExecution).toBeTypeOf('function');
         expect(SDK.isIncreaseOrderKind).toBeTypeOf('function');

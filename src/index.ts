@@ -315,6 +315,7 @@ export * from './relay/index.js';
 export {
     convertVaultAssetsToShares,
     convertVaultSharesToAssets,
+    deriveVaultMinimumOutput,
     quoteVaultDeposit,
     quoteVaultDepositFill,
     quoteVaultOrderCreation,
@@ -327,10 +328,15 @@ export {
     VaultProtocolGateError,
 } from './vault/gates.js';
 export type {
+    DeriveVaultMinimumOutputInput,
+    ExactVaultOrderCreationQuote,
     ExactVaultRestingOrderCreationQuote,
     VaultAtomicState,
+    VaultEstimatedOutputReference,
+    VaultMinimumOutput,
     VaultOrderCreationOutcome,
     VaultOrderCreationQuoteInput,
+    VaultRationalSlippageBound,
     VaultRestingOrderCreation,
     VaultRetiredImmediateRedeem,
     VaultQuoteOutcome,
