@@ -167,6 +167,30 @@ function clonePosition(position: Position): Position {
     };
 }
 
+function requirePositionWithinMarket(
+    position: Position,
+    market: MarketData,
+    isLong: boolean,
+): void {
+    const aggregates = [
+        ['notional', pairValue(market.notional, isLong), position.notional],
+        ['tokens', pairValue(market.tokens, isLong), position.tokens],
+        [
+            'collateral',
+            pairValue(market.collateral, isLong),
+            position.collateral,
+        ],
+    ] as const;
+
+    for (const [label, aggregate, positionValue] of aggregates) {
+        if (nonnegative(aggregate, `market ${label}`) < positionValue) {
+            throw new RangeError(
+                `position exceeds its market-side ${label} aggregate`,
+            );
+        }
+    }
+}
+
 function zeroPosition(): Position {
     return {
         collateral: 0n,
@@ -611,6 +635,7 @@ function runTransition(input: PositionActionInput): TransitionResult {
     ) {
         throw new RangeError('position fields must be nonnegative');
     }
+    requirePositionWithinMarket(position, market, input.isLong);
 
     let transition: TransitionResult;
     if (input.action.kind === 'increase') {

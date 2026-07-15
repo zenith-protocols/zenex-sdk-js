@@ -618,6 +618,38 @@ describe('haircuts and protocol gates', () => {
 });
 
 describe('typed public quote failures', () => {
+    it.each(['notional', 'tokens', 'collateral'] as const)(
+        'rejects a position larger than the market %s aggregate',
+        (field) => {
+            const open = position({
+                notional: 100n,
+                tokens: 100n,
+                collateral: 20n,
+            });
+            const aggregate = market({
+                notional: pair(100n, 0n),
+                tokens: pair(100n, 0n),
+                collateral: pair(20n, 0n),
+                fundingUpdate: 1n,
+                borrowingUpdate: 1n,
+            });
+            aggregate[field].long -= 1n;
+
+            expect(
+                quotePositionAction(
+                    input({
+                        position: open,
+                        market: aggregate,
+                        action: { kind: 'close' },
+                    }),
+                ),
+            ).toMatchObject({
+                kind: 'unavailable',
+                code: 'INVALID_INPUT',
+            });
+        },
+    );
+
     it('maps checked i128 overflow and invalid chronology separately', () => {
         const overflowing = quotePositionAction(
             input({
