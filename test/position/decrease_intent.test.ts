@@ -247,6 +247,27 @@ describe('quotePositionDecreaseIntent', () => {
         });
     });
 
+    it('uses the close action for an explicit full size intent', () => {
+        const input = directInput({
+            size: { kind: 'full' },
+        }) as unknown as Record<string, unknown>;
+        delete input.collateralReturn;
+
+        expect(
+            quotePositionDecreaseIntent(
+                input as unknown as QuotePositionDecreaseIntentInput,
+            ),
+        ).toMatchObject({
+            kind: 'exact',
+            value: {
+                action: { kind: 'close' },
+                resolvedNotional: 1_001n,
+                resolvedCollateralReturn: null,
+                outcome: { action: { kind: 'close' } },
+            },
+        });
+    });
+
     it.each([
         [
             'an explicit whole notional',
@@ -259,19 +280,15 @@ describe('quotePositionDecreaseIntent', () => {
                 ratio: { numerator: 10n, denominator: 10n },
             },
         ],
-    ])('canonicalizes %s to the close action', (_label, size) => {
+    ])('rejects %s before collateral can be ignored', (_label, size) => {
         const result = quotePositionDecreaseIntent(
             directInput({ size, collateralReturn: { kind: 'proRata' } }),
         );
 
         expect(result).toMatchObject({
-            kind: 'exact',
-            value: {
-                action: { kind: 'close' },
-                resolvedNotional: 1_001n,
-                resolvedCollateralReturn: null,
-                outcome: { action: { kind: 'close' } },
-            },
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: "whole-position decrease must use size kind 'full'",
         });
     });
 

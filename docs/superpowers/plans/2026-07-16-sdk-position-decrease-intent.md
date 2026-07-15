@@ -14,7 +14,8 @@
 - Export `POSITION_DECREASE_MAX_VALIDITY_LEDGERS` with the exact value `60`.
 - Full size rejects `collateralReturn`; partial size requires explicit or pro-rata collateral intent.
 - Fraction and pro-rata resolution use documented bigint floor rounding.
-- Every whole-position resolution uses `{ kind: 'close' }` and `FULL_CLOSE` on the wire.
+- Only `{ kind: 'full' }` may request the whole position; it uses `{ kind: 'close' }` and `FULL_CLOSE` on the wire.
+- Explicit notional or fraction inputs resolving to the whole position fail closed so their collateral intent is never ignored.
 - Price-bound rounding is conservative: long lower bound uses ceil, short upper bound uses floor.
 - Both transports require `fillOrKill`; transport, relay-fee bound, and relay expiration fail closed on mismatch.
 - Preserve exact snapshot ledger and price timestamp provenance.
@@ -257,15 +258,15 @@ Expected: all focused position tests pass.
 Assert a 1 percent long bound at bid `9_901n` is `9_802n`, a 1 percent short
 bound at ask `10_099n` is `10_199n`, normalized zero slippage equals the exact
 execution price, and `validForLedgers` rejects `0`, `61`, non-integers, and u32
-overflow. Assert fraction `1/1` and explicit full notional both yield
-`{ kind: 'close' }`, while the nested quote retains exact ledger and price
-time.
+overflow. Assert fraction `1/1` and explicit full notional both fail closed
+with guidance to use `{ kind: 'full' }`. Assert an explicit full intent yields
+`{ kind: 'close' }`, while the nested quote retains exact ledger and price time.
 
 - [ ] **Step 6: Run the new cases and verify RED**
 
 Run: `npx vitest run test/position/decrease_intent.test.ts`
 
-Expected: the new slippage, expiration, or canonicalization assertions fail.
+Expected: the new slippage, expiration, or whole-size assertions fail.
 
 - [ ] **Step 7: Implement conservative bounds and bounded expiration**
 

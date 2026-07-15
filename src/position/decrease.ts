@@ -297,6 +297,11 @@ function resolvePositionDecreaseIntent(
     );
     const resolvedSize = resolveNotional(input.size, positionNotional);
     const full = resolvedSize.notional === positionNotional;
+    if (input.size.kind !== 'full' && full) {
+        throw new RangeError(
+            "whole-position decrease must use size kind 'full'",
+        );
+    }
 
     let collateralReturn: PositionDecreaseCollateralReturnIntent | null;
     let resolvedCollateralReturn: bigint | null;

@@ -89,11 +89,12 @@ floor(position.notional * numerator / denominator)
 ```
 
 A fraction that resolves to zero atomic units is rejected. An explicit
-notional equal to the full position and a fraction equal to one are
-canonicalized to `{ kind: 'close' }`. A full request always uses that close
-action. The execution builder therefore always encodes `FULL_CLOSE` for every
-whole-position result and never relies on an explicit notional to trigger the
-contract's implicit full-close branch.
+notional equal to the full position and any fraction resolving to the full
+position are also rejected with instructions to use `{ kind: 'full' }`. This
+prevents their required partial `collateralReturn` from being silently ignored
+by close semantics. A full request always uses `{ kind: 'close' }`, and the
+execution builder always encodes `FULL_CLOSE` for it. The SDK never relies on
+an explicit notional to trigger the contract's implicit full-close branch.
 
 For a partial request, explicit collateral may be zero but must not exceed the
 snapshot position collateral. Pro-rata collateral resolves as:
