@@ -56,7 +56,16 @@ export type ContractExecutionPolicy =
           keeper: string;
           price: Uint8Array;
       }
-    | { kind: 'restOnly'; transport: 'direct' };
+    | { kind: 'restOnly'; transport: 'direct' }
+    | {
+          kind: 'restOnly';
+          transport: 'relay';
+          feeToken: ExactRelayFeeToken;
+          maxFeeAmount: bigint;
+          feeExpiration: number;
+          feeAmount: bigint;
+          feeRecipient: string;
+      };
 
 export interface PreparedExecution {
     policy: ContractExecutionPolicy['kind'];
@@ -65,7 +74,7 @@ export interface PreparedExecution {
 
 export interface BuildOrderOperationInput {
     tradingAddress: string;
-    /** Required only for fill-or-kill execution. */
+    /** Required for fill-or-kill and relayed rest-only execution. */
     routerAddress?: string;
     user: string;
     order: OrderParams;
@@ -219,8 +228,13 @@ function validatePolicy(
     policy: ContractExecutionPolicy,
     context: OrderValidationContext,
 ): string | undefined {
-    if (policy.kind === 'restOnly' && policy.transport === 'direct')
-        return undefined;
+    if (policy.kind === 'restOnly') {
+        if (policy.transport === 'direct') return undefined;
+        if (policy.transport === 'relay') {
+            return validateRelayFeePolicy(policy, context.ledger);
+        }
+        return 'unsupported contract execution transport';
+    }
     if (policy.kind !== 'fillOrKill') {
         return 'unsupported contract execution policy';
     }
@@ -304,20 +318,50 @@ export function buildOrderOperation(
                     'rest-only execution cannot ignore a call batch',
                 );
             }
-            const trading = new TradingContract(input.tradingAddress);
+            if (
+                input.order.kind === OrderKind.MarketIncrease ||
+                input.order.kind === OrderKind.MarketDecrease
+            ) {
+                return invalid(
+                    'rest-only execution requires a limit or stop order',
+                );
+            }
+            let operationXdr: string;
+            if (input.policy.transport === 'direct') {
+                const trading = new TradingContract(input.tradingAddress);
+                operationXdr = trading.createOrder(
+                    input.order.user,
+                    input.order.isLong,
+                    input.order.kind,
+                    input.order.notional,
+                    input.order.collateral,
+                    input.order.triggerPrice,
+                    input.order.priceBound,
+                    input.order.expiration,
+                );
+            } else {
+                if (
+                    typeof input.routerAddress !== 'string' ||
+                    !validContract(input.routerAddress)
+                ) {
+                    return invalid('routerAddress must be a valid contract ID');
+                }
+                operationXdr = new TradingRouterContract(
+                    input.routerAddress,
+                ).multicallWithFee({
+                    calls: [createOrderCall(input.order)],
+                    user: input.user,
+                    feeToken: input.policy.feeToken.contractId,
+                    maxFeeAmount: input.policy.maxFeeAmount,
+                    feeExpiration: input.policy.feeExpiration,
+                    feeAmount: input.policy.feeAmount,
+                    feeRecipient: input.policy.feeRecipient,
+                });
+            }
             return exact(
                 {
                     policy: 'restOnly',
-                    operationXdr: trading.createOrder(
-                        input.order.user,
-                        input.order.isLong,
-                        input.order.kind,
-                        input.order.notional,
-                        input.order.collateral,
-                        input.order.triggerPrice,
-                        input.order.priceBound,
-                        input.order.expiration,
-                    ),
+                    operationXdr,
                 },
                 input.validation.ledger,
                 priceTime(input.validation),

@@ -366,16 +366,11 @@ function validateFillOrKillArguments(
     }
 }
 
-function validateRestOnlyArguments(
-    target: string,
-    functionName: string,
-    args: xdr.ScVal[],
-): void {
-    if (functionName === 'create_order') {
-        requireCreateOrderShape({ contract: target, func: functionName, args });
-        return;
-    }
+function requireCreateVaultOrderShape(call: Call): string {
+    const args = call.args;
     if (
+        call.func !== 'create_vault_order' ||
+        args.length !== 4 ||
         args[0].switch().name !== 'scvAddress' ||
         args[1].switch().name !== 'scvU32' ||
         args[2].switch().name !== 'scvI128' ||
@@ -383,13 +378,60 @@ function validateRestOnlyArguments(
     ) {
         throw new TypeError('create_vault_order does not match the exact ABI');
     }
+    const user = scAddress(args[0], 'vault order user');
     const kind = requireU32(args[1], 'vault order kind');
     const amount = scI128(args[2], 'vault order amount');
     const minOut = scI128(args[3], 'vault order minimum output');
-    scAddress(args[0], 'vault order user');
     if ((kind !== 0 && kind !== 1) || amount <= 0n || minOut < 0n) {
         throw new TypeError('create_vault_order contains invalid values');
     }
+    return user;
+}
+
+function validateRestOnlyArguments(
+    args: xdr.ScVal[],
+    contracts: RelayContractIdentities,
+): void {
+    const calls = callVector(args[0]);
+    if (calls.length !== 1) {
+        throw new TypeError('restOnly requires exactly one resting order call');
+    }
+    const user = validateFeeEnvelope(args, contracts);
+    const call = calls[0];
+    if (!contracts.trading.includes(call.contract)) {
+        throw new TypeError(
+            'restOnly order must target a trusted Trading contract',
+        );
+    }
+    if (call.func === 'create_order') {
+        requireCreateOrderShape(call);
+        const order = decodeCreateOrderCall(call);
+        if (order.user !== user) {
+            throw new TypeError(
+                'restOnly order user does not match the relay fee payer',
+            );
+        }
+        if (
+            order.kind === OrderKind.MarketIncrease ||
+            order.kind === OrderKind.MarketDecrease
+        ) {
+            throw new TypeError(
+                'restOnly requires a limit or stop resting order',
+            );
+        }
+        return;
+    }
+    if (call.func === 'create_vault_order') {
+        if (requireCreateVaultOrderShape(call) !== user) {
+            throw new TypeError(
+                'restOnly vault order user does not match the relay fee payer',
+            );
+        }
+        return;
+    }
+    throw new TypeError(
+        'restOnly permits only one Trading create_order or create_vault_order call',
+    );
 }
 
 function validatePriceFreeArguments(
@@ -416,16 +458,10 @@ function validateRelayFunction(
         throw new TypeError(`${policy} must invoke a contract address`);
     }
     const target = Address.fromScAddress(invoke.contractAddress()).toString();
-    if (
-        (policy === 'fillOrKill' || policy === 'priceFree') &&
-        target !== contracts.router
-    ) {
+    if (target !== contracts.router) {
         throw new TypeError(
             `${policy} must target the trusted Router contract`,
         );
-    }
-    if (policy === 'restOnly' && !contracts.trading.includes(target)) {
-        throw new TypeError('restOnly must target a trusted Trading contract');
     }
     const functionName = invoke.functionName().toString();
     const argumentCount = invoke.args().length;
@@ -440,13 +476,10 @@ function validateRelayFunction(
     }
     if (
         policy === 'restOnly' &&
-        !(
-            (functionName === 'create_order' && argumentCount === 8) ||
-            (functionName === 'create_vault_order' && argumentCount === 4)
-        )
+        (functionName !== 'multicall_with_fee' || argumentCount !== 7)
     ) {
         throw new TypeError(
-            'restOnly requires create_order or create_vault_order with its exact ABI',
+            'restOnly requires the Router multicall_with_fee function',
         );
     }
     if (
@@ -460,7 +493,7 @@ function validateRelayFunction(
     if (policy === 'fillOrKill') {
         validateFillOrKillArguments(invoke.args(), contracts);
     } else if (policy === 'restOnly') {
-        validateRestOnlyArguments(target, functionName, invoke.args());
+        validateRestOnlyArguments(invoke.args(), contracts);
     } else {
         validatePriceFreeArguments(invoke.args(), contracts);
     }

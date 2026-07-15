@@ -1,9 +1,20 @@
 import { tradingRouterSpec } from '../generated/contract_specs.js';
-import { Address, Contract, contract, xdr, nativeToScVal, scValToNative } from '@stellar/stellar-sdk';
+import {
+    Address,
+    Contract,
+    contract,
+    xdr,
+    nativeToScVal,
+    scValToNative,
+} from '@stellar/stellar-sdk';
 import { i128, u32 } from '../index.js';
 import {
-    Call, CallOutcome, OrderParams,
-    callToScVal, createOrderCall, parseCallOutcome,
+    Call,
+    CallOutcome,
+    OrderParams,
+    callToScVal,
+    createOrderCall,
+    parseCallOutcome,
 } from './router_types.js';
 
 /** Coerce a `Buffer | Uint8Array` price update into a `Buffer` for `scvBytes`. */
@@ -82,7 +93,9 @@ export class TradingRouterContract extends Contract {
         multicall: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         multicallTry: (result: string): CallOutcome[] =>
-            (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(parseCallOutcome),
+            (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
+                parseCallOutcome,
+            ),
         multicallWithFee: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // --- create-and-fill flows ---
@@ -103,9 +116,13 @@ export class TradingRouterContract extends Contract {
         // contract code) when the fill did not land. Every earlier element is
         // a strict success (`ok: true`).
         createAndTryFill: (result: string): CallOutcome[] =>
-            (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(parseCallOutcome),
+            (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
+                parseCallOutcome,
+            ),
         createAndTryFillWithFee: (result: string): CallOutcome[] =>
-            (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(parseCallOutcome),
+            (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
+                parseCallOutcome,
+            ),
     };
 
     /**
@@ -150,9 +167,8 @@ export class TradingRouterContract extends Contract {
      * A pure fee-wrapped batch with no fill convention, no keeper, and no
      * price: the fee leg runs first (strict), then the calls run strictly
      * front to back, so either every call lands or none do. This is the
-     * gasless envelope for cancels-only batches (for example the exit creator
-     * deleting every level), which the fill-bearing create-and-* entries
-     * cannot carry.
+     * gasless envelope for policy-checked resting orders or cancels-only
+     * batches, which the fill-bearing create-and-* entries cannot carry.
      *
      * The user's authorization covers the signed prefix
      * `(calls, feeToken, maxFeeAmount, feeExpiration)`; the replaceable tail

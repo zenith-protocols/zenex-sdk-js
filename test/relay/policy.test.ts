@@ -164,6 +164,32 @@ function fillOrKillFunc(): string {
 
 function restOnlyFunc(): string {
     return hostFunction(
+        new TradingRouterContract(ROUTER).multicallWithFee({
+            calls: [
+                TradingRouterContract.createOrderCall({
+                    trading: TRADING,
+                    user: USER,
+                    isLong: true,
+                    kind: OrderKind.LimitIncrease,
+                    notional: 100n,
+                    collateral: 20n,
+                    triggerPrice: 90n,
+                    priceBound: 101n,
+                    expiration: 1_000,
+                }),
+            ],
+            user: USER,
+            feeToken: COLLATERAL,
+            maxFeeAmount: 1_000n,
+            feeExpiration: 1_000,
+            feeAmount: 100n,
+            feeRecipient: RECIPIENT,
+        }),
+    );
+}
+
+function directRestOnlyFunc(): string {
+    return hostFunction(
         new TradingContract(TRADING).createOrder(
             USER,
             true,
@@ -289,6 +315,47 @@ describe('buildRelayCallRequest', () => {
                 contracts: TRUSTED_CONTRACTS,
             }),
         ).toThrow(/priceFree/);
+        expect(() =>
+            buildRelayCallRequest({
+                requestId: REQUEST_ID,
+                policy: 'restOnly',
+                func: directRestOnlyFunc(),
+                auth: [authEntry()],
+                contracts: TRUSTED_CONTRACTS,
+            }),
+        ).toThrow(/trusted Router/);
+    });
+
+    it('keeps resting orders and price-free cancellations in distinct Router policies', () => {
+        const marketOrder = hostFunction(
+            new TradingRouterContract(ROUTER).multicallWithFee({
+                calls: [primaryCall()],
+                user: USER,
+                feeToken: COLLATERAL,
+                maxFeeAmount: 1_000n,
+                feeExpiration: 1_000,
+                feeAmount: 100n,
+                feeRecipient: RECIPIENT,
+            }),
+        );
+        expect(() =>
+            buildRelayCallRequest({
+                requestId: REQUEST_ID,
+                policy: 'restOnly',
+                func: marketOrder,
+                auth: [authEntry()],
+                contracts: TRUSTED_CONTRACTS,
+            }),
+        ).toThrow(/resting/);
+        expect(() =>
+            buildRelayCallRequest({
+                requestId: REQUEST_ID,
+                policy: 'priceFree',
+                func: restOnlyFunc(),
+                auth: [authEntry()],
+                contracts: TRUSTED_CONTRACTS,
+            }),
+        ).toThrow(/cancellations/);
     });
 
     it('rejects a lookalike function on an untrusted contract', () => {

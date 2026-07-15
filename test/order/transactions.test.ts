@@ -134,6 +134,16 @@ const relayPolicy: ContractExecutionPolicy = {
     price: new Uint8Array([4, 5, 6]),
 };
 
+const restRelayPolicy = {
+    kind: 'restOnly' as const,
+    transport: 'relay' as const,
+    feeToken,
+    maxFeeAmount: 9_007_199_254_740_999n,
+    feeExpiration: 10_010,
+    feeAmount: 123_456_789_012_345n,
+    feeRecipient: RECIPIENT,
+};
+
 describe('buildOrderOperation', () => {
     it('maps direct fill-or-kill exactly to router create_and_fill', () => {
         const trailing = createOrderCall(
@@ -211,6 +221,36 @@ describe('buildOrderOperation', () => {
         const invoke = decodeInvoke(result.value.operationXdr);
         expect(invoke.contract).toBe(TRADING);
         expect(invoke.fn).toBe('create_order');
+    });
+
+    it('maps relayed rest-only to Router multicall_with_fee', () => {
+        const result = buildOrderOperation({
+            tradingAddress: TRADING,
+            routerAddress: ROUTER,
+            user: USER,
+            order: order({
+                kind: OrderKind.LimitIncrease,
+                triggerPrice: 90n,
+                priceBound: 101n,
+            }),
+            policy: restRelayPolicy as ContractExecutionPolicy,
+            validation,
+        });
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        const invoke = decodeInvoke(result.value.operationXdr);
+        expect(invoke.contract).toBe(ROUTER);
+        expect(invoke.fn).toBe('multicall_with_fee');
+        expect(invoke.args).toHaveLength(7);
+        expect(invoke.args[0]).toHaveLength(1);
+        expect(invoke.args.slice(1)).toEqual([
+            USER,
+            FEE_TOKEN,
+            9_007_199_254_740_999n,
+            10_010,
+            123_456_789_012_345n,
+            RECIPIENT,
+        ]);
     });
 
     it('does not downgrade malformed fill-or-kill or ignore rest-only batches', () => {
