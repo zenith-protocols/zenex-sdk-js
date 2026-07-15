@@ -9,13 +9,25 @@ export type { VaultConstructorArgs } from './vault_contract.js';
 export type { VaultStateData } from './vault_state.js';
 
 // Events
-export {
-    VaultEventType,
-    decodeVaultEvent,
-} from './vault_events.js';
+export { VaultEventType, decodeVaultEvent } from './vault_events.js';
 
 export type {
     BaseVaultEvent,
     VaultStrategyWithdrawEvent,
     VaultEvent,
 } from './vault_events.js';
+
+// Exact transaction quote math
+export { quoteVaultDeposit, quoteVaultRedeem } from './quote.js';
+
+export type {
+    VaultAtomicState,
+    VaultQuoteOutcome,
+    VaultQuoteContext,
+    VaultDepositQuoteInput,
+    VaultRedeemQuoteInput,
+    VaultGateInput,
+} from './quote.js';
+
+export { checkVaultWithdrawGates } from './gates.js';
+export type { VaultWithdrawHeadroom } from './gates.js';
