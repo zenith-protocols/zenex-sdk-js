@@ -119,11 +119,16 @@ export type VaultOrderCreationOutcome =
     | VaultRestingOrderCreation
     | VaultRetiredImmediateRedeem;
 
-export interface ExactVaultRestingOrderCreationQuote {
+export interface ExactVaultOrderCreationQuote {
     kind: 'exact';
-    value: VaultRestingOrderCreation;
+    value: VaultOrderCreationOutcome;
     ledger: number;
     priceTime: bigint;
+}
+
+export interface ExactVaultRestingOrderCreationQuote
+    extends ExactVaultOrderCreationQuote {
+    value: VaultRestingOrderCreation;
 }
 
 export interface VaultQuoteOutcome {

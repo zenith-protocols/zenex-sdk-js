@@ -22,7 +22,10 @@ import {
     type Call,
     type OrderParams,
 } from '../trading-router/router_types.js';
-import type { ExactVaultRestingOrderCreationQuote } from '../vault/quote.js';
+import type {
+    ExactVaultOrderCreationQuote,
+    ExactVaultRestingOrderCreationQuote,
+} from '../vault/quote.js';
 import {
     decodeCreateOrderCall,
     orderExecutionPrice,
@@ -129,6 +132,33 @@ export interface BuildVaultOrderOperationInput {
     user: string;
     quote: ExactVaultRestingOrderCreationQuote;
     policy: VaultRestOnlyExecutionPolicy;
+}
+
+export type PreparedVaultRestingExecution = PreparedExecution & {
+    action: 'resting';
+    vaultAction: 'deposit' | 'redeem';
+    policy: 'restOnly';
+};
+
+export interface PreparedVaultRetiredImmediateRedeemExecution {
+    action: 'retiredImmediateRedeem';
+    policy: 'retiredImmediateRedeem';
+    transport: 'direct';
+    operationXdr: string;
+}
+
+export type PreparedVaultActionExecution =
+    | PreparedVaultRestingExecution
+    | PreparedVaultRetiredImmediateRedeemExecution;
+
+export interface BuildVaultActionExecutionInput {
+    tradingAddress: string;
+    /** Accepted only for a relayed resting action. */
+    routerAddress?: string;
+    user: string;
+    quote: ExactVaultOrderCreationQuote;
+    /** Required for a resting action and forbidden for Retired redemption. */
+    policy?: VaultRestOnlyExecutionPolicy;
 }
 
 function validContract(value: string): boolean {
@@ -269,6 +299,49 @@ function validateVaultCreationQuote(
         value.redeemUnlockAt < value.createdAt
     ) {
         return 'vault redeem quote escrow or cooldown is inconsistent';
+    }
+    return undefined;
+}
+
+function validateRetiredVaultCreationQuote(
+    quote: ExactVaultOrderCreationQuote,
+): string | undefined {
+    if (!quote || typeof quote !== 'object' || quote.kind !== 'exact') {
+        return 'an exact vault action quote is required';
+    }
+    try {
+        decodeLedgerSequence(quote.ledger);
+    } catch (error) {
+        return error instanceof Error
+            ? error.message
+            : 'quote ledger is invalid';
+    }
+    if (!validU64(quote.priceTime)) {
+        return 'vault action quote timestamp is invalid';
+    }
+
+    const value = quote.value;
+    if (
+        !value ||
+        typeof value !== 'object' ||
+        value.kind !== 'retiredImmediateRedeem' ||
+        value.policy !== 'direct' ||
+        value.action !== 'redeem' ||
+        value.minOutApplied !== false ||
+        value.executionFee !== 0n
+    ) {
+        return 'Retired vault action quote is inconsistent';
+    }
+    try {
+        const shares = checkedI128(value.shares);
+        const assets = checkedI128(value.assets);
+        if (shares <= 0n || assets < 0n) {
+            return 'Retired vault action atomics are invalid';
+        }
+    } catch (error) {
+        return error instanceof Error
+            ? error.message
+            : 'Retired vault action atomics are invalid';
     }
     return undefined;
 }
@@ -647,6 +720,124 @@ export function buildVaultOrderOperation(
             error instanceof Error
                 ? error.message
                 : 'could not build vault order operation',
+        );
+    }
+}
+
+function invalidVaultAction(
+    reason: string,
+): QuoteResult<PreparedVaultActionExecution> {
+    return unavailable('INVALID_INPUT', reason);
+}
+
+/**
+ * Prepare one exact vault action without conflating a resting order with the
+ * direct-only Retired redemption path.
+ */
+export function buildVaultActionExecution(
+    input: BuildVaultActionExecutionInput,
+): QuoteResult<PreparedVaultActionExecution> {
+    try {
+        if (!input || typeof input !== 'object') {
+            return invalidVaultAction('vault action input is required');
+        }
+        if (Object.prototype.hasOwnProperty.call(input, 'calls')) {
+            return invalidVaultAction(
+                'vault action execution does not accept a call batch',
+            );
+        }
+        const quote = input.quote;
+        if (
+            !quote ||
+            typeof quote !== 'object' ||
+            quote.kind !== 'exact' ||
+            !quote.value ||
+            typeof quote.value !== 'object'
+        ) {
+            return invalidVaultAction('an exact vault action quote is required');
+        }
+
+        const creation = quote.value;
+        if (creation.kind === 'resting') {
+            if (input.policy === undefined) {
+                return invalidVaultAction(
+                    'resting vault action requires rest-only execution',
+                );
+            }
+            const restingQuote: ExactVaultRestingOrderCreationQuote = {
+                ...quote,
+                value: creation,
+            };
+            const prepared = buildVaultOrderOperation({
+                tradingAddress: input.tradingAddress,
+                routerAddress: input.routerAddress,
+                user: input.user,
+                quote: restingQuote,
+                policy: input.policy,
+            });
+            if (prepared.kind === 'unavailable') return prepared;
+            if (prepared.kind === 'estimate') {
+                return invalidVaultAction(
+                    'resting vault operation must have exact provenance',
+                );
+            }
+            return exact(
+                {
+                    ...prepared.value,
+                    action: 'resting',
+                    vaultAction: creation.action,
+                    policy: 'restOnly',
+                },
+                prepared.ledger,
+                prepared.priceTime,
+            );
+        }
+
+        if (creation.kind !== 'retiredImmediateRedeem') {
+            return invalidVaultAction('vault action kind is unknown');
+        }
+        if (
+            Object.prototype.hasOwnProperty.call(input, 'policy') ||
+            Object.prototype.hasOwnProperty.call(input, 'routerAddress')
+        ) {
+            return invalidVaultAction(
+                'Retired vault redemption is direct only and accepts no execution policy or Router',
+            );
+        }
+        if (!validContract(input.tradingAddress)) {
+            return invalidVaultAction(
+                'tradingAddress must be a valid contract ID',
+            );
+        }
+        if (!validAddress(input.user)) {
+            return invalidVaultAction('user must be a valid Stellar address');
+        }
+        const quoteError = validateRetiredVaultCreationQuote(quote);
+        if (quoteError !== undefined) return invalidVaultAction(quoteError);
+
+        const operationXdr = new TradingContract(
+            input.tradingAddress,
+        ).createVaultOrder(
+            input.user,
+            VaultOrderKind.Redeem,
+            creation.shares,
+            0n,
+        );
+        return exact(
+            {
+                action: 'retiredImmediateRedeem',
+                policy: 'retiredImmediateRedeem',
+                transport: 'direct',
+                operationXdr,
+            },
+            quote.ledger,
+            quote.priceTime,
+        );
+    } catch (error) {
+        return invalidVaultAction(
+            error instanceof Error
+                ? error.message
+                : 'could not build vault action execution',
         );
     }
 }
