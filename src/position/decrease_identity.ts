@@ -32,9 +32,13 @@ function canonicalValueInner(value: unknown, stack: WeakSet<object>): string {
             ).join('')};`;
         }
         if (Array.isArray(value)) {
-            return `array:${value.length}:[${value
-                .map((entry) => canonicalValueInner(entry, stack))
-                .join('')}]`;
+            let entries = '';
+            for (let index = 0; index < value.length; index += 1) {
+                entries += Object.prototype.hasOwnProperty.call(value, index)
+                    ? canonicalValueInner(value[index], stack)
+                    : 'hole;';
+            }
+            return `array:${value.length}:[${entries}]`;
         }
         const prototype = Object.getPrototypeOf(value);
         if (prototype !== Object.prototype && prototype !== null) {

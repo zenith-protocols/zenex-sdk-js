@@ -953,6 +953,11 @@ export function buildPositionDecreaseIntentExecution(
         if (!input || typeof input !== 'object') {
             return invalid('position decrease execution input is required');
         }
+        if (Object.prototype.hasOwnProperty.call(input, 'calls')) {
+            return invalid(
+                'position decrease intent execution does not accept calls',
+            );
+        }
         if (
             !input.snapshot ||
             typeof input.snapshot !== 'object' ||

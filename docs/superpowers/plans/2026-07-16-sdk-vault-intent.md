@@ -23,10 +23,12 @@
 ### Task 1: Exact Minimum Output From an Estimated Reference
 
 **Files:**
+
 - Modify: `src/vault/quote.ts`
 - Test: `test/vault/vault_minimum_output.test.ts`
 
 **Interfaces:**
+
 - Consumes: `checkedI128`, `mulDivFloor`, `estimate`, and `unavailable`.
 - Produces: `VaultEstimatedOutputReference`, `VaultRationalSlippageBound`, `VaultMinimumOutput`, `DeriveVaultMinimumOutputInput`, and `deriveVaultMinimumOutput`.
 
@@ -43,6 +45,7 @@ expect(result).toEqual({
     assumptions: [
         'minimum output is derived from a caller-supplied estimated fill output',
         'vault order fill output can change before keeper execution',
+        'minimum output is rounded down in atomic units',
     ],
     value: {
         reference: { kind: 'estimate', output: 20_000_000_000_000_003n },
@@ -116,12 +119,14 @@ git commit -m "feat(vault): derive exact minimum output"
 ### Task 2: Discriminated Vault Action Execution
 
 **Files:**
+
 - Modify: `src/vault/quote.ts`
 - Modify: `src/order/transactions.ts`
 - Test: `test/order/vault_action_execution.test.ts`
 - Test: `test/order/vault_order_transactions.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ExactVaultOrderCreationQuote`, `buildVaultOrderOperation`, `TradingContract.createVaultOrder`, and `VaultOrderKind.Redeem`.
 - Produces: `PreparedVaultRestingExecution`, `PreparedVaultRetiredImmediateRedeemExecution`, `PreparedVaultActionExecution`, `BuildVaultActionExecutionInput`, and `buildVaultActionExecution`.
 
@@ -231,6 +236,7 @@ git commit -m "feat(vault): prepare exact action executions"
 ### Task 3: Public Exports and Consumer Documentation
 
 **Files:**
+
 - Modify: `src/vault/index.ts`
 - Modify: `src/order/index.ts`
 - Modify: `src/index.ts`
@@ -239,6 +245,7 @@ git commit -m "feat(vault): prepare exact action executions"
 - Modify: `README.md`
 
 **Interfaces:**
+
 - Consumes: all types and functions produced by Tasks 1 and 2.
 - Produces: package-root runtime and type exports for integrators.
 
@@ -285,9 +292,11 @@ git commit -m "docs(vault): expose exact action intent flow"
 ### Task 4: Full Verification and Review
 
 **Files:**
+
 - Verify: all changed files
 
 **Interfaces:**
+
 - Consumes: complete implementation from Tasks 1 through 3.
 - Produces: a reviewed local branch ready for parent integration.
 

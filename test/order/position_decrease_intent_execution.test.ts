@@ -514,6 +514,25 @@ describe('buildPositionDecreaseIntentExecution', () => {
         ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT' });
     });
 
+    it('rejects a trailing call batch supplied through untyped input', () => {
+        const source = snapshot();
+        const input = {
+            snapshot: source,
+            user: USER,
+            quote: exactQuote(source),
+            policy: directPolicy,
+            calls: [],
+        } as unknown as Parameters<
+            typeof buildPositionDecreaseIntentExecution
+        >[0];
+
+        expect(buildPositionDecreaseIntentExecution(input)).toMatchObject({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: 'position decrease intent execution does not accept calls',
+        });
+    });
+
     it('rejects an execution user that differs from the snapshot subject', () => {
         const source = snapshot();
 
