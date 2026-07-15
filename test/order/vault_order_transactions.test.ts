@@ -121,6 +121,7 @@ describe('buildVaultOrderOperation', () => {
             expect(result.ledger).toBe(20_000);
             expect(result.priceTime).toBe(30_000n);
             expect(result.value.policy).toBe('restOnly');
+            expect(result.value.transport).toBe('direct');
             expect(decodeInvoke(result.value.operationXdr)).toEqual({
                 contract: TRADING,
                 fn: 'create_vault_order',
@@ -146,6 +147,7 @@ describe('buildVaultOrderOperation', () => {
 
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
+        expect(result.value.transport).toBe('relay');
         const invoke = decodeInvoke(result.value.operationXdr);
         expect(invoke.contract).toBe(ROUTER);
         expect(invoke.fn).toBe('multicall_with_fee');

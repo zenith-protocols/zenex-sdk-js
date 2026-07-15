@@ -74,10 +74,14 @@ export type ContractExecutionPolicy =
           feeExpiration: number;
       };
 
-export interface PreparedExecution {
+interface PreparedExecutionBase {
     policy: ContractExecutionPolicy['kind'];
     operationXdr: string;
 }
+
+export type PreparedExecution =
+    | (PreparedExecutionBase & { transport: 'direct' })
+    | (PreparedExecutionBase & { transport: 'relay' });
 
 export interface BuildOrderOperationInput {
     tradingAddress: string;
@@ -167,6 +171,16 @@ function priceTime(context: OrderValidationContext): bigint {
 
 function invalid(reason: string): QuoteResult<PreparedExecution> {
     return unavailable('INVALID_INPUT', reason);
+}
+
+function preparedExecution(
+    policy: ContractExecutionPolicy,
+    operationXdr: string,
+): PreparedExecution {
+    if (policy.transport === 'direct') {
+        return { policy: policy.kind, transport: 'direct', operationXdr };
+    }
+    return { policy: policy.kind, transport: 'relay', operationXdr };
 }
 
 function validU64(value: unknown): value is bigint {
@@ -468,10 +482,7 @@ export function buildOrderOperation(
                 });
             }
             return exact(
-                {
-                    policy: 'restOnly',
-                    operationXdr,
-                },
+                preparedExecution(input.policy, operationXdr),
                 input.validation.ledger,
                 priceTime(input.validation),
             );
@@ -540,7 +551,7 @@ export function buildOrderOperation(
             return invalid('unsupported contract execution policy');
         }
         return exact(
-            { policy: 'fillOrKill', operationXdr },
+            preparedExecution(input.policy, operationXdr),
             input.validation.ledger,
             priceTime(input.validation),
         );
@@ -627,7 +638,7 @@ export function buildVaultOrderOperation(
         }
 
         return exact(
-            { policy: 'restOnly', operationXdr },
+            preparedExecution(input.policy, operationXdr),
             input.quote.ledger,
             input.quote.priceTime,
         );

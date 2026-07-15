@@ -159,6 +159,7 @@ describe('buildOrderOperation', () => {
         });
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
+        expect(result.value.transport).toBe('direct');
         const invoke = decodeInvoke(result.value.operationXdr);
         expect(invoke.contract).toBe(ROUTER);
         expect(invoke.fn).toBe('create_and_fill');
@@ -179,6 +180,7 @@ describe('buildOrderOperation', () => {
         });
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
+        expect(result.value.transport).toBe('relay');
         const invoke = decodeInvoke(result.value.operationXdr);
         expect(invoke.fn).toBe('create_and_fill_with_fee');
         expect(invoke.args).toHaveLength(9);

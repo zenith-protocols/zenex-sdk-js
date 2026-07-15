@@ -228,6 +228,7 @@ describe('buildPriceFreeRelayOperation', () => {
 
         expect(result.kind).toBe('ready');
         if (result.kind !== 'ready') return;
+        expect(result.value.transport).toBe('relay');
         const call = decode(result.value.operationXdr);
         expect(call.contract).toBe(ROUTER);
         expect(call.fn).toBe('multicall_with_fee');

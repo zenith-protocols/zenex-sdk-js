@@ -85,6 +85,7 @@ export interface BuildPriceFreeRelayOperationInput {
 
 export interface PreparedPriceFreeRelayOperation {
     readonly policy: 'priceFree';
+    readonly transport: 'relay';
     readonly operationXdr: string;
 }
 
@@ -459,6 +460,7 @@ export function buildPriceFreeRelayOperation(
             kind: 'ready',
             value: {
                 policy: 'priceFree',
+                transport: 'relay',
                 operationXdr: new TradingRouterContract(
                     input.configuration.router,
                 ).multicallWithFee({
