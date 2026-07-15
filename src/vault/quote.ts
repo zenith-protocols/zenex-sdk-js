@@ -8,7 +8,12 @@ import {
 import { marketSidePnl, sideCapacity } from '../market/capacity.js';
 import { advanceMarketAccruals } from '../market/rates.js';
 import type { VerifiedPrice } from '../market/types.js';
-import { decodeLedgerSequence, exact, unavailable } from '../quote/result.js';
+import {
+    decodeLedgerSequence,
+    estimate,
+    exact,
+    unavailable,
+} from '../quote/result.js';
 import type { QuoteResult } from '../quote/result.js';
 import {
     Status,
@@ -47,6 +52,28 @@ export interface VaultAtomicState {
     totalAssets: bigint;
     totalSupply: bigint;
     decimalsOffset: number;
+}
+
+export interface VaultEstimatedOutputReference {
+    readonly kind: 'estimate';
+    readonly output: bigint;
+}
+
+export interface VaultRationalSlippageBound {
+    readonly numerator: bigint;
+    readonly denominator: bigint;
+}
+
+export interface VaultMinimumOutput {
+    readonly reference: VaultEstimatedOutputReference;
+    readonly maximumSlippage: VaultRationalSlippageBound;
+    readonly rounding: 'floor';
+    readonly minOut: bigint;
+}
+
+export interface DeriveVaultMinimumOutputInput {
+    readonly reference: VaultEstimatedOutputReference;
+    readonly maximumSlippage: VaultRationalSlippageBound;
 }
 
 export interface VaultOrderCreationQuoteInput {
@@ -313,6 +340,91 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
         'INVALID_INPUT',
         error instanceof Error ? error.message : 'invalid vault quote input',
     );
+}
+
+function greatestCommonDivisor(left: bigint, right: bigint): bigint {
+    let divisor = left;
+    let remainder = right;
+    while (remainder !== 0n) {
+        const next = divisor % remainder;
+        divisor = remainder;
+        remainder = next;
+    }
+    return divisor;
+}
+
+/**
+ * Derive an atomic vault-order minimum from a caller-supplied fill estimate.
+ * The arithmetic is exact, but the result retains estimate provenance because
+ * the keeper prices the eventual fill against later state.
+ */
+export function deriveVaultMinimumOutput(
+    input: DeriveVaultMinimumOutputInput,
+): QuoteResult<VaultMinimumOutput> {
+    try {
+        if (!input || typeof input !== 'object') {
+            throw new TypeError('vault minimum output input is required');
+        }
+        const reference = input.reference;
+        if (
+            !reference ||
+            typeof reference !== 'object' ||
+            reference.kind !== 'estimate'
+        ) {
+            throw new TypeError(
+                'vault output reference must be an explicit estimate',
+            );
+        }
+        const output = checkedI128(reference.output);
+        if (output < 0n) {
+            throw new RangeError(
+                'vault estimated output must be nonnegative',
+            );
+        }
+
+        const bound = input.maximumSlippage;
+        if (!bound || typeof bound !== 'object') {
+            throw new TypeError('maximum slippage bound is required');
+        }
+        const numerator = checkedI128(bound.numerator);
+        const denominator = checkedI128(bound.denominator);
+        if (denominator <= 0n) {
+            throw new RangeError(
+                'maximum slippage denominator must be positive',
+            );
+        }
+        if (numerator < 0n || numerator > denominator) {
+            throw new RangeError(
+                'maximum slippage must be between zero and one',
+            );
+        }
+
+        const divisor = greatestCommonDivisor(numerator, denominator);
+        const maximumSlippage = {
+            numerator: numerator / divisor,
+            denominator: denominator / divisor,
+        } as const;
+        const minOut = mulDivFloor(
+            output,
+            denominator - numerator,
+            denominator,
+        );
+
+        return estimate(
+            {
+                reference: { kind: 'estimate', output },
+                maximumSlippage,
+                rounding: 'floor',
+                minOut,
+            },
+            [
+                'minimum output is derived from a caller-supplied estimated fill output',
+                'vault order fill output can change before keeper execution',
+            ],
+        );
+    } catch (error) {
+        return caughtUnavailable(error);
+    }
 }
 
 function checkedStatus(value: Status): Status {
