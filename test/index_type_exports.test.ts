@@ -11,6 +11,8 @@ describe('package root type exports', () => {
             import type {
                 AccountOrderQuery,
                 AccountFillQuery,
+                AccountFillNetPnlInput,
+                AccountFillNetPnlResult,
                 AccountVaultOrderQuery,
                 AccountLifecycleQuery,
                 RankingDenomination,
@@ -77,6 +79,26 @@ describe('package root type exports', () => {
             export const denomination: RankingDenomination = {
                 collateralAssetId: 'xlm',
                 decimals: 7,
+            };
+
+            export const fillEconomicsInput: AccountFillNetPnlInput = {
+                economicsCompleteness: 'complete',
+                pnlAtomic: 50n,
+                fees: {
+                    baseAtomic: 5n,
+                    impactAtomic: 2n,
+                    fundingAtomic: -3n,
+                    borrowingAtomic: 1n,
+                    liquidationAtomic: 0n,
+                    forfeitAtomic: 0n,
+                    keeperExecutionAtomic: 11n,
+                    relayAtomic: 13n,
+                },
+            };
+            export const fillEconomicsResult: AccountFillNetPnlResult = {
+                kind: 'exact',
+                grossPnlAtomic: 50n,
+                netPnlAtomic: 21n,
             };
 
             const reference: VaultEstimatedOutputReference = {

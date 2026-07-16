@@ -13,6 +13,31 @@ Atomic token, price, ledger, and source-time values are `bigint`. Convert them
 to decimal display text only at the UI boundary. Never convert a transaction
 input through `number`, `parseFloat`, or display formatting.
 
+## Exact account-fill economics
+
+The account-fill API field `pnlAtomic` is **gross PnL**, not the amount left
+after fees and settlement. Use `deriveAccountFillNetPnl` before displaying or
+aggregating fill-level net PnL:
+
+```ts
+import { deriveAccountFillNetPnl } from '@zenith-protocols/zenex-sdk';
+
+const result = deriveAccountFillNetPnl(fill);
+if (result.kind === 'unavailable') {
+    // Render an unavailable state. Never replace missing components with zero.
+    console.log(result.economicsCompleteness, result.missingComponents);
+} else {
+    console.log(result.grossPnlAtomic, result.netPnlAtomic);
+}
+```
+
+Net PnL is returned only when `economicsCompleteness === 'complete'` and gross,
+base, impact, funding, borrowing, liquidation, forfeit, keeper-execution, and
+relay atomics are all present. The exact signed formula subtracts every listed
+component; therefore negative funding or impact is a trader credit. Bad debt is
+audited separately and is not subtracted from trader PnL. All values and
+arithmetic remain checked signed-i128 `bigint` operations.
+
 ## Exact margin adjustment
 
 Load one coherent snapshot, quote the action, and pass the quote directly to

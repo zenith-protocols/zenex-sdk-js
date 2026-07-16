@@ -351,6 +351,7 @@ export type { VaultWithdrawHeadroom } from './vault/gates.js';
 
 export * from './data/client.js';
 export * from './data/events.js';
+export * from './data/fill_economics.js';
 export * from './data/price.js';
 export * from './data/resync.js';
 export * from './data/trust.js';

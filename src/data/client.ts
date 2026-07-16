@@ -575,6 +575,12 @@ export class ZenexDataClient {
         );
     }
 
+    /**
+     * Fetch decoded account fills.
+     *
+     * Each fill's `pnlAtomic` is gross PnL. Use
+     * `deriveAccountFillNetPnl` for complete, checked net economics.
+     */
     async getAccountFills(
         account: string,
         query: AccountFillQuery = {},

@@ -1,4 +1,5 @@
 export * from './generated.js';
+export * from './fill_economics.js';
 export * from './codec.js';
 export * from './client.js';
 export * from './events.js';

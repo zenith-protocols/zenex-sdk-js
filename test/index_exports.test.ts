@@ -241,6 +241,7 @@ describe('package root exports', () => {
         expect(SDK.executeZenexResync).toBeTypeOf('function');
         expect(SDK.createZenexTrustBundle).toBeTypeOf('function');
         expect(SDK.decodeApiSchema).toBeTypeOf('function');
+        expect(SDK.deriveAccountFillNetPnl).toBeTypeOf('function');
         expect(SDK.decodeLatestPriceUpdate).toBeTypeOf('function');
         expect(SDK.API_VERSION).toBe('v1');
     });
