@@ -202,6 +202,8 @@ describe('package root exports', () => {
         expect(SDK.quotePositionAction).toBeTypeOf('function');
         expect(SDK.quotePositionDecreaseIntent).toBeTypeOf('function');
         expect(SDK.POSITION_DECREASE_MAX_VALIDITY_LEDGERS).toBe(60);
+        expect(SDK.quotePositionIncreaseIntent).toBeTypeOf('function');
+        expect(SDK.POSITION_INCREASE_MAX_VALIDITY_LEDGERS).toBe(60);
         expect(SDK.quoteMarginAdjustment).toBeTypeOf('function');
         expect(SDK.quoteVaultDeposit).toBeTypeOf('function');
         expect(SDK.quoteVaultDepositFill).toBeTypeOf('function');
@@ -215,6 +217,7 @@ describe('package root exports', () => {
         expect(SDK.buildVaultActionExecution).toBeTypeOf('function');
         expect(SDK.buildPositionActionExecution).toBeTypeOf('function');
         expect(SDK.buildPositionDecreaseIntentExecution).toBeTypeOf('function');
+        expect(SDK.buildPositionIncreaseIntentExecution).toBeTypeOf('function');
         expect(SDK.buildMarginAdjustmentExecution).toBeTypeOf('function');
         expect(SDK.isIncreaseOrderKind).toBeTypeOf('function');
         expect(SDK.isDecreaseOrderKind).toBeTypeOf('function');

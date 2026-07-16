@@ -20,12 +20,17 @@ import type { VaultAtomicState } from '../vault/quote.js';
 import type { Network } from '../index.js';
 import { TradingContract } from './trading_contract.js';
 import { Status } from './trading_types.js';
-import type { MarketData, Position, TradingConfig } from './trading_types.js';
+import type {
+    AdlState,
+    MarketData,
+    Position,
+    TradingConfig,
+} from './trading_types.js';
 
 const U32_MAX = 4_294_967_295;
 const U64_MAX = 2n ** 64n - 1n;
 const MAX_DECIMAL_PLACES = 38;
-const EXPECTED_RESULT_COUNT = 16;
+const EXPECTED_RESULT_COUNT = 17;
 const SIMULATION_ACCOUNT =
     'GDMVSPSKEUOTRFSJH2SXVUNB2JGORKDTWBMOP5OZJZP4GKRQUQWFJO4Y';
 const SIMULATION_SEQUENCE = '123';
@@ -49,6 +54,10 @@ export interface TradingSnapshotSubject {
 
 export interface TradingSnapshot {
     readonly subject?: TradingSnapshotSubject;
+    /** Present on snapshots loaded by `loadTradingSnapshot`. */
+    readonly adl?: AdlState;
+    /** Canonical settlement-token contract returned by the trading market. */
+    readonly collateralToken?: string;
     ledger: number;
     ledgerTime: bigint;
     deployment: TradingDeployment;
@@ -70,6 +79,8 @@ export interface TradingSnapshot {
 
 export type SubjectBoundTradingSnapshot = TradingSnapshot & {
     readonly subject: TradingSnapshotSubject;
+    readonly adl: AdlState;
+    readonly collateralToken: string;
 };
 
 export interface TradingSnapshotRequest {
@@ -264,6 +275,7 @@ function snapshotCalls(
         viewCall(deployment.vault, 'query_asset'),
         viewCall(deployment.vault, 'get_strategy'),
         viewCall(deployment.treasury, 'get_rate'),
+        viewCall(deployment.trading, 'get_adl'),
         viewCall(deployment.priceVerifier, 'verify_price', [
             xdr.ScVal.scvBytes(Buffer.from(priceUpdate)),
             xdr.ScVal.scvU32(deployment.feedId),
@@ -432,7 +444,7 @@ function decodeSnapshot(
     maxPriceAge: bigint,
     priceUpdate: Uint8Array,
 ): SubjectBoundTradingSnapshot {
-    for (let index = 0; index < 15; index += 1) {
+    for (let index = 0; index < 16; index += 1) {
         requireSuccessfulCall(values[index], `snapshot state ${index}`);
     }
     const config = TradingContract.parsers.getConfig(resultXdr(values, 0));
@@ -466,6 +478,7 @@ function decodeSnapshot(
     const treasuryRate = checkedI128(
         TreasuryContract.parsers.getRate(resultXdr(values, 14)),
     );
+    const adl = TradingContract.parsers.getAdl(resultXdr(values, 15));
 
     sameIdentity(vaultAddress, deployment.vault, 'vault address');
     sameIdentity(treasuryAddress, deployment.treasury, 'treasury address');
@@ -505,14 +518,16 @@ function decodeSnapshot(
             source: 'terminal',
         };
     } else {
-        requireSuccessfulCall(values[15], 'price verifier');
-        const verifiedPrice = parseVerifiedPrice(resultXdr(values, 15));
+        requireSuccessfulCall(values[16], 'price verifier');
+        const verifiedPrice = parseVerifiedPrice(resultXdr(values, 16));
         requirePriceIdentity(verifiedPrice, deployment);
         price = pythPrice(verifiedPrice, ledgerTime, maxPriceAge);
     }
 
     return {
         subject: { ...subject },
+        adl,
+        collateralToken: collateral,
         ledger,
         ledgerTime,
         deployment: { ...deployment },

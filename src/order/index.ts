@@ -25,6 +25,7 @@ export {
     buildOrderOperation,
     buildPositionActionExecution,
     buildPositionDecreaseIntentExecution,
+    buildPositionIncreaseIntentExecution,
     buildVaultActionExecution,
     buildVaultOrderOperation,
 } from './transactions.js';
@@ -34,6 +35,7 @@ export type {
     BuildOrderOperationInput,
     BuildPositionActionExecutionInput,
     BuildPositionDecreaseIntentExecutionInput,
+    BuildPositionIncreaseIntentExecutionInput,
     BuildVaultActionExecutionInput,
     BuildVaultOrderOperationInput,
     ContractExecutionPolicy,
@@ -43,6 +45,7 @@ export type {
     PreparedVaultRestingExecution,
     PreparedVaultRetiredImmediateRedeemExecution,
     PositionDecreaseFillOrKillPolicy,
+    PositionIncreaseFillOrKillPolicy,
     RelayFeeToken,
     VaultRestOnlyExecutionPolicy,
 } from './transactions.js';

@@ -36,6 +36,7 @@ const FEE_TOKEN = StrKey.encodeContract(Buffer.alloc(32, 17));
 const OTHER_TRADING = StrKey.encodeContract(Buffer.alloc(32, 18));
 const OTHER_ROUTER = StrKey.encodeContract(Buffer.alloc(32, 19));
 const OTHER_USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 20));
+const COLLATERAL = StrKey.encodeContract(Buffer.alloc(32, 21));
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -117,6 +118,8 @@ function snapshot(
     const open = overrides.position ?? position();
     return {
         subject: { user: USER, isLong: true },
+        adl: { long: false, short: false },
+        collateralToken: COLLATERAL,
         ledger: 10_000,
         ledgerTime: 20_000n,
         deployment: {

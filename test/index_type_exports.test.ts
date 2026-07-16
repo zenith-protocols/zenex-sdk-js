@@ -15,18 +15,24 @@ describe('package root type exports', () => {
                 AccountLifecycleQuery,
                 RankingDenomination,
                 BuildPositionDecreaseIntentExecutionInput,
+                BuildPositionIncreaseIntentExecutionInput,
                 BuildVaultActionExecutionInput,
                 DeriveVaultMinimumOutputInput,
                 ExactPositionDecreaseIntentQuote,
+                ExactPositionIncreaseIntentQuote,
                 ExactRatio,
                 ExactVaultOrderCreationQuote,
                 NormalizedPositionDecreaseIntent,
+                NormalizedPositionIncreaseIntent,
                 PositionDecreaseCollateralReturnIntent,
                 PositionDecreaseExecutionIntent,
                 PositionDecreaseFillOrKillPolicy,
                 PositionDecreaseIntentOutcome,
                 PositionDecreasePartialSizeIntent,
                 PositionDecreaseSizeIntent,
+                PositionIncreaseExecutionIntent,
+                PositionIncreaseFillOrKillPolicy,
+                PositionIncreaseIntentOutcome,
                 PreparedVaultActionExecution,
                 PreparedVaultRestingExecution,
                 PreparedVaultRetiredImmediateRedeemExecution,
@@ -34,6 +40,7 @@ describe('package root type exports', () => {
                 VaultMinimumOutput,
                 VaultRationalSlippageBound,
                 QuotePositionDecreaseIntentInput,
+                QuotePositionIncreaseIntentInput,
             } from '../src/index.js';
 
             export type PositionDecreasePublicTypes = readonly [
@@ -48,6 +55,16 @@ describe('package root type exports', () => {
                 PositionDecreasePartialSizeIntent,
                 PositionDecreaseSizeIntent,
                 QuotePositionDecreaseIntentInput,
+            ];
+
+            export type PositionIncreasePublicTypes = readonly [
+                BuildPositionIncreaseIntentExecutionInput,
+                ExactPositionIncreaseIntentQuote,
+                NormalizedPositionIncreaseIntent,
+                PositionIncreaseExecutionIntent,
+                PositionIncreaseFillOrKillPolicy,
+                PositionIncreaseIntentOutcome,
+                QuotePositionIncreaseIntentInput,
             ];
 
             export const queries: readonly [
@@ -174,6 +191,8 @@ describe('package root type exports', () => {
             export const bound: SubjectBoundTradingSnapshot = {
                 ...legacyFields,
                 subject,
+                adl: { long: false, short: false },
+                collateralToken: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
             };
             export const tradingEntryBound: TradingEntryBoundSnapshot = bound;
             export const loaded: Promise<QuoteResult<SubjectBoundTradingSnapshot>> =

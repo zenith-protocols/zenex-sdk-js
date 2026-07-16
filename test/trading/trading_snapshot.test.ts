@@ -18,6 +18,7 @@ import {
     tradingConfigToScVal,
 } from '../../src/trading/trading_types.js';
 import type {
+    AdlState,
     MarketData,
     Position,
     SidePair,
@@ -127,6 +128,11 @@ const expectedPosition: Position = {
     decreaseOrders: [2, 4],
 };
 
+const expectedAdl: AdlState = {
+    long: false,
+    short: true,
+};
+
 function entry(key: string, value: xdr.ScVal): xdr.ScMapEntry {
     return new xdr.ScMapEntry({
         key: xdr.ScVal.scvSymbol(key),
@@ -184,6 +190,13 @@ function positionScVal(value: Position): xdr.ScVal {
     ]);
 }
 
+function adlScVal(value: AdlState): xdr.ScVal {
+    return xdr.ScVal.scvMap([
+        entry('long', xdr.ScVal.scvBool(value.long)),
+        entry('short', xdr.ScVal.scvBool(value.short)),
+    ]);
+}
+
 function address(value: string): xdr.ScVal {
     return Address.fromString(value).toScVal();
 }
@@ -230,7 +243,8 @@ const indexes = {
     vaultAsset: 12,
     vaultStrategy: 13,
     treasuryRate: 14,
-    price: 15,
+    adl: 15,
+    price: 16,
 } as const;
 
 function snapshotValues(): xdr.ScVal[] {
@@ -253,6 +267,7 @@ function snapshotValues(): xdr.ScVal[] {
         address(COLLATERAL),
         address(TRADING),
         i128(30_000_000_000_000_000n),
+        adlScVal(expectedAdl),
         priceScVal(),
     ];
 }
@@ -318,7 +333,7 @@ describe('loadTradingSnapshot', () => {
         const decoded = decodedMulticall(simulate.mock.calls[0][0]);
         expect(decoded.contract).toBe(ROUTER);
         expect(decoded.func).toBe('multicall_try');
-        expect(decoded.calls).toHaveLength(16);
+        expect(decoded.calls).toHaveLength(17);
         expect(decoded.calls.map((call) => call.func)).toEqual([
             'get_config',
             'get_market_data',
@@ -335,13 +350,14 @@ describe('loadTradingSnapshot', () => {
             'query_asset',
             'get_strategy',
             'get_rate',
+            'get_adl',
             'verify_price',
         ]);
         expect(decoded.calls[2]).toMatchObject({
             contract: TRADING,
             args: [USER, true],
         });
-        expect(decoded.calls[15]).toMatchObject({
+        expect(decoded.calls[16]).toMatchObject({
             contract: VERIFIER,
             args: [Buffer.from([1, 2, 3]), 7, -8],
         });
@@ -357,6 +373,8 @@ describe('loadTradingSnapshot', () => {
             deployment,
             status: Status.Active,
             retirement: undefined,
+            adl: expectedAdl,
+            collateralToken: COLLATERAL,
             config: config(),
             market: expectedMarket,
             position: expectedPosition,
@@ -549,7 +567,7 @@ describe('loadTradingSnapshot', () => {
         expect(result).toEqual({
             kind: 'unavailable',
             code: 'MISSING_STATE',
-            reason: expect.stringContaining('16 results'),
+            reason: expect.stringContaining('17 results'),
         });
     });
 

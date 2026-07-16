@@ -24,6 +24,7 @@ const VAULT = StrKey.encodeContract(Buffer.alloc(32, 3));
 const VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 4));
 const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 5));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
+const COLLATERAL = StrKey.encodeContract(Buffer.alloc(32, 7));
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -109,6 +110,8 @@ function snapshot(
     const open = overrides.position ?? position();
     return {
         subject: { user: USER, isLong },
+        adl: { long: false, short: false },
+        collateralToken: COLLATERAL,
         ledger: 10_000,
         ledgerTime: 20_000n,
         deployment: {

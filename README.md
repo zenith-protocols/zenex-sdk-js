@@ -47,6 +47,61 @@ if (execution.kind !== 'exact') throw new Error(execution.reason);
 are not transaction inputs. Use the exact position, margin, market-capacity,
 and vault quote APIs for transaction construction.
 
+## Exact position open and increase intent
+
+Load a `SubjectBoundTradingSnapshot`, then request the exact margin that must
+remain after the fill debits base, impact, borrowing, and paid funding fees.
+The SDK derives the gross order collateral and binds the quote to the
+snapshot's user, side, ADL flags, collateral token, verified price update, and
+all other coherent state. The caller does not supply a second user or side.
+
+```ts
+import {
+    buildPositionIncreaseIntentExecution,
+    quotePositionIncreaseIntent,
+} from '@zenith-protocols/zenex-sdk';
+
+const quote = quotePositionIncreaseIntent({
+    snapshot,
+    notional: 1_000_000_000n,
+    desiredPostFeeMarginDelta: 200_000_000n,
+    execution: {
+        transport: 'direct',
+        executionFee: snapshot.config.execFee,
+    },
+    maximumSlippage: { numerator: 1n, denominator: 200n },
+    validForLedgers: 60,
+});
+if (quote.kind !== 'exact') throw new Error(quote.reason);
+
+const execution = buildPositionIncreaseIntentExecution({
+    snapshot,
+    quote,
+    policy: {
+        kind: 'fillOrKill',
+        transport: 'direct',
+        keeper: snapshot.subject.user,
+        price: snapshot.priceUpdate,
+    },
+});
+if (execution.kind !== 'exact') throw new Error(execution.reason);
+```
+
+`grossOrderCollateral` equals `desiredPostFeeMarginDelta` plus the exact
+position-margin debit. `walletMaximumDebit` additionally includes the keeper
+execution escrow and, for relay execution, the configured signed fee-token
+maximum. Relay quotes take the full exact one-to-one USD-peg fee-token config,
+require its contract and decimals to match the snapshot collateral, and derive
+the reserve from `maxSignedFeeAtomic`; callers cannot supply separate relay
+fee arithmetic.
+
+Only size-growing market orders are accepted. The market must be Active and
+the selected side must not have ADL enabled. Both direct and relay builders
+produce a single `fillOrKill` Router operation using `create_and_fill` or
+`create_and_fill_with_fee`; there is no resting, try-fill, TP/SL, or Max form
+on this intent surface. `validForLedgers` is bounded by the exported maximum
+of 60 ledgers.
+
 ## Exact position decrease intent
 
 Quote a close or partial decrease from the same coherent

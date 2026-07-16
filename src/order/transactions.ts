@@ -8,6 +8,10 @@ import {
     type QuotePositionDecreaseIntentInput,
 } from '../position/decrease.js';
 import { canonicalIdentity } from '../position/decrease_identity.js';
+import {
+    quotePositionIncreaseIntent,
+    type ExactPositionIncreaseIntentQuote,
+} from '../position/increase.js';
 import type { PositionActionOutcome } from '../position/quote.js';
 import {
     decodeLedgerSequence,
@@ -40,26 +44,16 @@ import {
     validateOrder,
     type OrderValidationContext,
 } from './validation.js';
+import {
+    exactRelayFeeTokenIssue,
+    type ExactRelayFeeToken,
+    type RelayFeeToken,
+} from './fee_token.js';
+
+export type { ExactRelayFeeToken, RelayFeeToken } from './fee_token.js';
 
 const U32_MAX = 4_294_967_295;
 const U64_MAX = 2n ** 64n - 1n;
-
-export interface RelayFeeToken {
-    collateralAssetId: string;
-    contractId: string;
-    decimals: number;
-    pricing: { kind: 'usdPeg'; numerator: '1'; denominator: '1' };
-    minForwardChargeAtomic: string;
-    maxSignedFeeAtomic: string;
-}
-
-export interface ExactRelayFeeToken extends Omit<
-    RelayFeeToken,
-    'minForwardChargeAtomic' | 'maxSignedFeeAtomic'
-> {
-    minForwardChargeAtomic: bigint;
-    maxSignedFeeAtomic: bigint;
-}
 
 export type ContractExecutionPolicy =
     | {
@@ -126,6 +120,17 @@ export interface BuildPositionDecreaseIntentExecutionInput {
     user: string;
     quote: ExactPositionDecreaseIntentQuote;
     policy: PositionDecreaseFillOrKillPolicy;
+}
+
+export type PositionIncreaseFillOrKillPolicy = Extract<
+    ContractExecutionPolicy,
+    { kind: 'fillOrKill' }
+>;
+
+export interface BuildPositionIncreaseIntentExecutionInput {
+    snapshot: SubjectBoundTradingSnapshot;
+    quote: ExactPositionIncreaseIntentQuote;
+    policy: PositionIncreaseFillOrKillPolicy;
 }
 
 export interface BuildMarginAdjustmentExecutionInput {
@@ -383,34 +388,15 @@ function validateRelayFeePolicy(
     ledger: number,
 ): string | undefined {
     const token = policy.feeToken;
-    if (
-        typeof token.collateralAssetId !== 'string' ||
-        token.collateralAssetId.length === 0 ||
-        !validContract(token.contractId)
-    ) {
-        return 'relay fee token identity is invalid';
-    }
-    if (
-        !Number.isSafeInteger(token.decimals) ||
-        token.decimals < 0 ||
-        token.decimals > 38
-    ) {
-        return 'relay fee token decimals must be an integer from 0 through 38';
-    }
-    if (
-        token.pricing?.kind !== 'usdPeg' ||
-        token.pricing.numerator !== '1' ||
-        token.pricing.denominator !== '1'
-    ) {
-        return 'relay fee token must use exact one-to-one USD-peg pricing';
-    }
+    const tokenIssue = exactRelayFeeTokenIssue(token);
+    if (tokenIssue !== undefined) return tokenIssue;
 
     let minimum: bigint;
     let maximum: bigint;
     let signedMaximum: bigint;
     try {
-        minimum = checkedI128(token.minForwardChargeAtomic);
-        maximum = checkedI128(token.maxSignedFeeAtomic);
+        minimum = token.minForwardChargeAtomic;
+        maximum = token.maxSignedFeeAtomic;
         signedMaximum = checkedI128(policy.maxFeeAmount);
     } catch (error) {
         return error instanceof Error
@@ -1098,6 +1084,145 @@ export function buildPositionDecreaseIntentExecution(
             error instanceof Error
                 ? error.message
                 : 'could not build position decrease execution',
+        );
+    }
+}
+
+/** Prepare one exact snapshot-bound open or increase through Router fill-or-kill. */
+export function buildPositionIncreaseIntentExecution(
+    input: BuildPositionIncreaseIntentExecutionInput,
+): QuoteResult<PreparedExecution> {
+    try {
+        if (!input || typeof input !== 'object') {
+            return invalid('position increase execution input is required');
+        }
+        for (const forbidden of ['calls', 'user', 'isLong'] as const) {
+            if (Object.prototype.hasOwnProperty.call(input, forbidden)) {
+                return invalid(
+                    'position increase execution derives calls, user, and side from its exact quote and snapshot',
+                );
+            }
+        }
+        if (
+            !input.snapshot ||
+            typeof input.snapshot !== 'object' ||
+            !input.snapshot.subject ||
+            typeof input.snapshot.subject !== 'object'
+        ) {
+            return invalid('snapshot subject provenance is required');
+        }
+        const policyError = requireFillOrKill(input.policy);
+        if (policyError !== undefined) return policyError;
+        const quote = input.quote;
+        if (!quote || typeof quote !== 'object' || quote.kind !== 'exact') {
+            return invalid(
+                'an exact position increase intent quote is required',
+            );
+        }
+        const value = quote.value;
+        if (
+            !value ||
+            typeof value !== 'object' ||
+            value.kind !== 'positionIncrease' ||
+            !value.intent ||
+            typeof value.intent !== 'object'
+        ) {
+            return invalid('position increase intent quote value is invalid');
+        }
+
+        const intent = value.intent;
+        const expected = quotePositionIncreaseIntent({
+            snapshot: input.snapshot,
+            notional: intent.notional,
+            desiredPostFeeMarginDelta: intent.desiredPostFeeMarginDelta,
+            execution: intent.execution,
+            maximumSlippage: intent.maximumSlippage,
+            validForLedgers: intent.validForLedgers,
+        });
+        if (expected.kind !== 'exact') {
+            return invalid(
+                'position increase quote does not match the supplied snapshot',
+            );
+        }
+        if (canonicalIdentity(expected) !== canonicalIdentity(quote)) {
+            return invalid(
+                'position increase quote does not match the supplied snapshot or normalized intent',
+            );
+        }
+        if (input.policy.transport !== intent.execution.transport) {
+            return invalid(
+                'position increase quote transport does not match execution policy',
+            );
+        }
+        if (input.policy.transport === 'relay') {
+            if (intent.execution.transport !== 'relay') {
+                return invalid(
+                    'relay policy requires a relay position increase quote',
+                );
+            }
+            if (
+                canonicalIdentity(input.policy.feeToken) !==
+                canonicalIdentity(intent.execution.feeToken)
+            ) {
+                return invalid(
+                    'relay fee token must equal the quoted exact fee-token configuration',
+                );
+            }
+            if (
+                checkedI128(input.policy.maxFeeAmount) !==
+                intent.execution.feeToken.maxSignedFeeAtomic
+            ) {
+                return invalid(
+                    'signed relay fee maximum must equal the quoted token maximum',
+                );
+            }
+            if (input.policy.feeExpiration !== expected.value.expiration) {
+                return invalid(
+                    'relay fee expiration must equal the quoted order expiration',
+                );
+            }
+        }
+
+        const action = expected.value.outcome.action;
+        if (
+            action.kind !== 'increase' ||
+            action.notional !== expected.value.intent.notional ||
+            action.collateral !== expected.value.grossOrderCollateral
+        ) {
+            return invalid('position increase quote action is inconsistent');
+        }
+        const snapshot = input.snapshot;
+        const user = snapshot.subject.user;
+        return buildOrderOperation({
+            tradingAddress: snapshot.deployment.trading,
+            routerAddress: snapshot.deployment.router,
+            user,
+            order: {
+                trading: snapshot.deployment.trading,
+                user,
+                isLong: snapshot.subject.isLong,
+                kind: OrderKind.MarketIncrease,
+                notional: action.notional,
+                collateral: action.collateral,
+                triggerPrice: 0n,
+                priceBound: expected.value.priceBound,
+                expiration: expected.value.expiration,
+            },
+            policy: input.policy,
+            validation: {
+                ledger: snapshot.ledger,
+                now: snapshot.ledgerTime,
+                status: snapshot.status,
+                config: snapshot.config,
+                price: snapshot.price,
+                priceUpdate: snapshot.priceUpdate,
+            },
+        });
+    } catch (error) {
+        return invalid(
+            error instanceof Error
+                ? error.message
+                : 'could not build position increase execution',
         );
     }
 }

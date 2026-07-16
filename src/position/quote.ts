@@ -11,7 +11,6 @@ import {
     exactPositionPnl,
     exitPrice,
     marketSidePnl,
-    quoteTradeFees,
     sideCapacity,
     sideReserved,
 } from '../market/capacity.js';
@@ -25,6 +24,7 @@ import type {
     SidePair,
     TradingConfig,
 } from '../trading/trading_types.js';
+import { quotePositionFees, type PositionFeeBreakdown } from './fees.js';
 
 const U64_MAX = 2n ** 64n - 1n;
 const MAX_TREASURY_RATE = SCALAR_18 / 2n;
@@ -60,18 +60,7 @@ export type PositionAction =
           amount: bigint;
       };
 
-export interface FeeBreakdown {
-    base: bigint;
-    impact: bigint;
-    funding: bigint;
-    borrowing: bigint;
-    /** Upfront order escrow paid to the keeper, never part of marginDebit. */
-    execution: bigint;
-    /** Conservative external relay wallet leg, never part of marginDebit. */
-    relay: bigint;
-    /** Position-margin debit: trade fees and paid accruals only. */
-    marginDebit: bigint;
-}
+export type FeeBreakdown = PositionFeeBreakdown;
 
 export interface MarginState {
     initialRequired: bigint;
@@ -208,14 +197,6 @@ function zeroPosition(): Position {
     };
 }
 
-function accruedAmount(
-    notional: bigint,
-    marketIndex: bigint,
-    positionIndex: bigint,
-): bigint {
-    return mulDivCeil(notional, subI128(marketIndex, positionIndex), SCALAR_18);
-}
-
 function validateAction(action: PositionAction): void {
     if (action.kind === 'close') return;
     if (action.kind === 'adjustCollateral') {
@@ -247,32 +228,18 @@ function settleFees(
     executionFee: bigint,
     relayFee: bigint,
 ): SettledFees {
-    const notional = nonnegative(position.notional, 'position notional');
-    const funding = accruedAmount(
-        notional,
-        pairValue(market.fundingIdx, isLong),
-        position.fundingIdx,
-    );
-    const borrowing = accruedAmount(
-        notional,
-        pairValue(market.borrowingIdx, isLong),
-        position.borrowingIdx,
-    );
-    if (borrowing < 0n) throw new RangeError('borrowing index moved backwards');
-
-    const trade = quoteTradeFees(
+    const quoted = quotePositionFees({
+        position,
         market,
         config,
         isLong,
         signedNotional,
         signedTokens,
-    );
-    const paidFunding = funding > 0n ? funding : 0n;
-    const earnedFunding = funding < 0n ? subI128(0n, funding) : 0n;
-    const marginDebit = addI128(
-        addI128(trade.base, trade.impact),
-        addI128(borrowing, paidFunding),
-    );
+        executionFee,
+        relayFee,
+    });
+    const { funding } = quoted.fees;
+    const earnedFunding = quoted.claimableFundingDelta;
 
     if (funding > 0n) market.fundingPool = addI128(market.fundingPool, funding);
     if (earnedFunding > 0n)
@@ -281,15 +248,7 @@ function settleFees(
     position.borrowingIdx = pairValue(market.borrowingIdx, isLong);
 
     return {
-        fees: {
-            base: trade.base,
-            impact: trade.impact,
-            funding,
-            borrowing,
-            execution: nonnegative(executionFee, 'execution fee'),
-            relay: nonnegative(relayFee, 'relay fee'),
-            marginDebit,
-        },
+        fees: quoted.fees,
         claimableFundingDelta: earnedFunding,
     };
 }
