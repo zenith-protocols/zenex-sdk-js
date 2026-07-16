@@ -528,6 +528,14 @@ export function quoteMaximumPositionIncreaseIntent(
         if (!input || typeof input !== 'object') {
             throw new TypeError('maximum position increase input is required');
         }
+        if (
+            Object.prototype.hasOwnProperty.call(input, 'user') ||
+            Object.prototype.hasOwnProperty.call(input, 'isLong')
+        ) {
+            throw new TypeError(
+                'position increase user and side come from snapshot subject provenance',
+            );
+        }
         const quantum = checkedI128(input.quantum);
         if (quantum <= 0n) {
             throw new RangeError('position increase quantum must be positive');
@@ -622,6 +630,12 @@ export function quoteMaximumPositionIncreaseIntent(
                   { kind: 'exact' }
               >
             | undefined;
+        let lastUnavailable:
+            | Extract<
+                  QuoteResult<PositionIncreaseIntentOutcome>,
+                  { kind: 'unavailable' }
+              >
+            | undefined;
         while (low <= high) {
             const middle = low + (high - low) / 2n;
             const notional = checkedI128(middle * quantum);
@@ -641,6 +655,9 @@ export function quoteMaximumPositionIncreaseIntent(
                 low = middle + 1n;
                 continue;
             }
+            if (result.kind === 'unavailable') {
+                lastUnavailable = result;
+            }
             if (
                 result.kind === 'unavailable' &&
                 result.code === 'INVALID_INPUT' &&
@@ -650,10 +667,18 @@ export function quoteMaximumPositionIncreaseIntent(
                 low = middle + 1n;
                 continue;
             }
+            if (
+                result.kind === 'unavailable' &&
+                result.code === 'INVALID_INPUT' &&
+                !result.reason.includes('outside the i128 range')
+            ) {
+                return result;
+            }
             high = middle - 1n;
         }
         return (
             best ??
+            lastUnavailable ??
             unavailable(
                 'CONTRACT_GATE',
                 'no exact position increase fits the requested quantum and wallet debit',
