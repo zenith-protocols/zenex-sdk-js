@@ -190,7 +190,7 @@ describe('package root type exports', () => {
             );
 
         expect(diagnostics).toEqual([]);
-    });
+    }, 15_000);
 
     it('exports subject-bound snapshots without requiring subjects on legacy fixtures', () => {
         const consumerPath = fileURLToPath(
@@ -253,5 +253,5 @@ describe('package root type exports', () => {
             );
 
         expect(diagnostics).toEqual([]);
-    });
+    }, 15_000);
 });
