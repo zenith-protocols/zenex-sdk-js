@@ -4,6 +4,7 @@ import { SCALAR_18 } from '../../src/math/fixed.js';
 import type { ExactRelayFeeToken } from '../../src/order/transactions.js';
 import {
     POSITION_DECREASE_MAX_VALIDITY_LEDGERS,
+    quoteMaximumPositionDecreaseIntent,
     quotePositionDecreaseIntent,
     type QuotePositionDecreaseIntentInput,
 } from '../../src/position/decrease.js';
@@ -179,6 +180,51 @@ function directInput(
 }
 
 describe('quotePositionDecreaseIntent', () => {
+    it('rounds an exact 10.006 reducible cap down to the requested 0.01 quantum', () => {
+        const open = position({
+            collateral: 10_000n,
+            notional: 10_007n,
+            tokens: (10_007n * SCALAR_18) / 10_000n,
+            lockedNotional: 0n,
+            unlocksAt: 0n,
+        });
+        const source = snapshot({
+            config: config({
+                minPositionNotional: 1n,
+                minOrderNotional: 1n,
+                execFee: 0n,
+                feeDom: 0n,
+                feeNonDom: 0n,
+                impactScalar: 10n ** 30n,
+            }),
+            market: market(open, true),
+            position: open,
+            price: {
+                feedId: 7,
+                exponent: -4,
+                bid: 10_000n,
+                ask: 10_000n,
+                publishTime: 19_999n,
+                source: 'pyth',
+            },
+        });
+
+        expect(
+            quoteMaximumPositionDecreaseIntent({
+                snapshot: source,
+                isLong: true,
+                collateralReturn: { kind: 'explicit', amount: 0n },
+                execution: { transport: 'direct', executionFee: 0n },
+                maximumSlippage: { numerator: 1n, denominator: 100n },
+                validForLedgers: POSITION_DECREASE_MAX_VALIDITY_LEDGERS,
+                quantum: 10n,
+            }),
+        ).toMatchObject({
+            kind: 'exact',
+            value: { resolvedNotional: 10_000n },
+        });
+    });
+
     it('resolves fraction and pro-rata collateral from atomic notional', () => {
         const result = quotePositionDecreaseIntent(directInput());
 

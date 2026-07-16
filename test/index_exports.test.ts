@@ -201,8 +201,10 @@ describe('package root exports', () => {
     it('exports exact quote, transaction, relay, and data boundaries', () => {
         expect(SDK.quotePositionAction).toBeTypeOf('function');
         expect(SDK.quotePositionDecreaseIntent).toBeTypeOf('function');
+        expect(SDK.quoteMaximumPositionDecreaseIntent).toBeTypeOf('function');
         expect(SDK.POSITION_DECREASE_MAX_VALIDITY_LEDGERS).toBe(60);
         expect(SDK.quotePositionIncreaseIntent).toBeTypeOf('function');
+        expect(SDK.quoteMaximumPositionIncreaseIntent).toBeTypeOf('function');
         expect(SDK.POSITION_INCREASE_MAX_VALIDITY_LEDGERS).toBe(60);
         expect(SDK.quoteMarginAdjustment).toBeTypeOf('function');
         expect(SDK.quoteVaultDeposit).toBeTypeOf('function');

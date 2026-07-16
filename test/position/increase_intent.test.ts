@@ -4,6 +4,7 @@ import { SCALAR_18 } from '../../src/math/fixed.js';
 import type { ExactRelayFeeToken } from '../../src/order/transactions.js';
 import {
     POSITION_INCREASE_MAX_VALIDITY_LEDGERS,
+    quoteMaximumPositionIncreaseIntent,
     quotePositionIncreaseIntent,
 } from '../../src/position/increase.js';
 import type {
@@ -163,6 +164,190 @@ const feeToken: ExactRelayFeeToken = {
     minForwardChargeAtomic: 1n,
     maxSignedFeeAtomic: 100n,
 };
+
+describe('quoteMaximumPositionIncreaseIntent', () => {
+    it('rounds an exact 10.006 cap down to the requested 0.01 quantum', () => {
+        const exactCap = 10_006n;
+        const quantum = 10n;
+        const maxSnapshot = snapshot({
+            config: config({
+                feeDom: 0n,
+                feeNonDom: 0n,
+                impactScalar: 10n ** 30n,
+                minPositionNotional: 1n,
+                maxPositionNotional: exactCap,
+                maxOpenInterest: exactCap,
+                minOrderNotional: 1n,
+                minOrderCollateral: 1n,
+                execFee: 0n,
+            }),
+            price: {
+                feedId: 7,
+                exponent: -4,
+                bid: 10_000n,
+                ask: 10_000n,
+                publishTime: 19_999n,
+                source: 'pyth',
+            },
+        });
+
+        const result = quoteMaximumPositionIncreaseIntent({
+            snapshot: maxSnapshot,
+            desiredPostFeeMarginDelta: exactCap,
+            execution: { transport: 'direct', executionFee: 0n },
+            maximumSlippage: { numerator: 1n, denominator: 100n },
+            validForLedgers: POSITION_INCREASE_MAX_VALIDITY_LEDGERS,
+            maximumWalletDebit: 1_000_000n,
+            quantum,
+        });
+
+        expect(result).toMatchObject({
+            kind: 'exact',
+            value: {
+                intent: { notional: 10_000n },
+            },
+        });
+    });
+
+    it('returns the highest quantum whose exact fee quote fits the wallet ceiling', () => {
+        const open = zeroPosition({
+            collateral: 1_000n,
+            notional: 1_000n,
+            tokens: (1_000n * SCALAR_18) / 10_000n,
+        });
+        const maxSnapshot = snapshot({
+            config: config({
+                feeDom: SCALAR_18 / 10n,
+                feeNonDom: SCALAR_18 / 10n,
+                impactScalar: 10n ** 30n,
+                minPositionNotional: 1n,
+                maxPositionNotional: 10_000n,
+                maxOpenInterest: 10_000n,
+                minOrderNotional: 1n,
+                minOrderCollateral: 1n,
+                execFee: 0n,
+            }),
+            market: market(open, true),
+            position: open,
+            price: {
+                feedId: 7,
+                exponent: -4,
+                bid: 10_000n,
+                ask: 10_000n,
+                publishTime: 19_999n,
+                source: 'pyth',
+            },
+        });
+
+        const result = quoteMaximumPositionIncreaseIntent({
+            snapshot: maxSnapshot,
+            desiredPostFeeMarginDelta: 0n,
+            execution: { transport: 'direct', executionFee: 0n },
+            maximumSlippage: { numerator: 1n, denominator: 100n },
+            validForLedgers: POSITION_INCREASE_MAX_VALIDITY_LEDGERS,
+            maximumWalletDebit: 50n,
+            quantum: 10n,
+        });
+
+        expect(result).toMatchObject({
+            kind: 'exact',
+            value: {
+                intent: { notional: 490n },
+                walletMaximumDebit: 50n,
+            },
+        });
+    });
+
+    it('stops at the highest quantum allowed by exact maintenance economics', () => {
+        const open = zeroPosition({
+            collateral: 2_000n,
+            notional: 10_000n,
+            tokens: SCALAR_18,
+        });
+        const maxSnapshot = snapshot({
+            config: config({
+                feeDom: 0n,
+                feeNonDom: 0n,
+                impactScalar: 10n ** 30n,
+                minPositionNotional: 1n,
+                maxPositionNotional: 20_000n,
+                maxOpenInterest: 20_000n,
+                minOrderNotional: 1n,
+                minOrderCollateral: 1n,
+                execFee: 0n,
+            }),
+            market: market(open, true),
+            position: open,
+            price: {
+                feedId: 7,
+                exponent: -4,
+                bid: 9_000n,
+                ask: 10_000n,
+                publishTime: 19_999n,
+                source: 'pyth',
+            },
+        });
+
+        const result = quoteMaximumPositionIncreaseIntent({
+            snapshot: maxSnapshot,
+            desiredPostFeeMarginDelta: 0n,
+            execution: { transport: 'direct', executionFee: 0n },
+            maximumSlippage: { numerator: 1n, denominator: 100n },
+            validForLedgers: POSITION_INCREASE_MAX_VALIDITY_LEDGERS,
+            maximumWalletDebit: 10n,
+            quantum: 10n,
+        });
+
+        expect(result).toMatchObject({
+            kind: 'exact',
+            value: { intent: { notional: 3_330n } },
+        });
+        const next = quotePositionIncreaseIntent({
+            snapshot: maxSnapshot,
+            notional: 3_340n,
+            desiredPostFeeMarginDelta: 0n,
+            execution: { transport: 'direct', executionFee: 0n },
+            maximumSlippage: { numerator: 1n, denominator: 100n },
+            validForLedgers: POSITION_INCREASE_MAX_VALIDITY_LEDGERS,
+        });
+        expect(next).toMatchObject({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+        });
+    });
+
+    it('returns no capacity when current exposure already exceeds a configured cap', () => {
+        const open = zeroPosition({
+            collateral: 2_000n,
+            notional: 10_001n,
+            tokens: SCALAR_18,
+        });
+        const maxSnapshot = snapshot({
+            config: config({
+                maxPositionNotional: 10_000n,
+                maxOpenInterest: 20_000n,
+            }),
+            market: market(open, true),
+            position: open,
+        });
+
+        expect(
+            quoteMaximumPositionIncreaseIntent({
+                snapshot: maxSnapshot,
+                desiredPostFeeMarginDelta: 0n,
+                execution: { transport: 'direct', executionFee: 2n },
+                maximumSlippage: { numerator: 1n, denominator: 100n },
+                validForLedgers: POSITION_INCREASE_MAX_VALIDITY_LEDGERS,
+                maximumWalletDebit: 1_000n,
+                quantum: 10n,
+            }),
+        ).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: 'no position increase fits the requested quantum',
+        });
+    });
+});
 
 function directInput(overrides: Record<string, unknown> = {}) {
     return {

@@ -83,8 +83,24 @@ all other coherent state. The caller does not supply a second user or side.
 ```ts
 import {
     buildPositionIncreaseIntentExecution,
+    quoteMaximumPositionIncreaseIntent,
     quotePositionIncreaseIntent,
 } from '@zenith-protocols/zenex-sdk';
+
+const maximum = quoteMaximumPositionIncreaseIntent({
+    snapshot,
+    desiredPostFeeMarginDelta: 0n,
+    execution: {
+        transport: 'direct',
+        executionFee: snapshot.config.execFee,
+    },
+    maximumSlippage: { numerator: 1n, denominator: 200n },
+    validForLedgers: 60,
+    maximumWalletDebit: walletBalance,
+    // 0.01 collateral tokens when the deployment uses 7 decimals.
+    quantum: 100_000n,
+});
+if (maximum.kind !== 'exact') throw new Error(maximum.reason);
 
 const quote = quotePositionIncreaseIntent({
     snapshot,
@@ -120,6 +136,11 @@ require its contract and decimals to match the snapshot collateral, and derive
 the reserve from `maxSignedFeeAtomic`; callers cannot supply separate relay
 fee arithmetic.
 
+`quoteMaximumPositionIncreaseIntent` searches only exact, quantum-aligned
+atomic inputs against the same snapshot-bound quote gates. It returns the
+greatest quote that also fits `maximumWalletDebit`, so UI Max controls never
+round a display number above the admissible transaction amount.
+
 Only size-growing market orders are accepted. The market must be Active and
 the selected side must not have ADL enabled. Both direct and relay builders
 produce a single `fillOrKill` Router operation using `create_and_fill` or
@@ -140,8 +161,24 @@ bigint and ledger arithmetic inside the SDK.
 ```ts
 import {
     buildPositionDecreaseIntentExecution,
+    quoteMaximumPositionDecreaseIntent,
     quotePositionDecreaseIntent,
 } from '@zenith-protocols/zenex-sdk';
+
+const maximum = quoteMaximumPositionDecreaseIntent({
+    snapshot,
+    isLong,
+    collateralReturn: { kind: 'explicit', amount: 0n },
+    execution: {
+        transport: 'direct',
+        executionFee: snapshot.config.execFee,
+    },
+    maximumSlippage: { numerator: 1n, denominator: 200n },
+    validForLedgers: 60,
+    // 0.01 collateral tokens when the deployment uses 7 decimals.
+    quantum: 100_000n,
+});
+if (maximum.kind !== 'exact') throw new Error(maximum.reason);
 
 const quote = quotePositionDecreaseIntent({
     snapshot,
@@ -179,6 +216,11 @@ rounds down from that resolved atomic notional, not independently from the
 original fraction. Explicit partial collateral may be zero but cannot exceed
 the position collateral; `quotePositionAction` applies the surviving-position
 health gates after fee settlement.
+
+`quoteMaximumPositionDecreaseIntent` keeps the live locked notional and minimum
+position remainder in exact atomic units, aligns candidates downward to the
+requested quantum, and returns the greatest candidate accepted by the same
+snapshot-bound decrease quote.
 
 Use `size: { kind: 'full' }` for every whole-position request. It accepts no
 `collateralReturn` and always builds the `FULL_CLOSE` sentinel. An explicit
