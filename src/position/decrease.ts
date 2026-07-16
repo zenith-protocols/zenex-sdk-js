@@ -67,6 +67,12 @@ export type QuotePositionDecreaseIntentInput =
           readonly collateralReturn: PositionDecreaseCollateralReturnIntent;
       });
 
+export interface QuoteMaximumPositionDecreaseIntentInput
+    extends PositionDecreaseIntentBase {
+    readonly collateralReturn: PositionDecreaseCollateralReturnIntent;
+    readonly quantum: bigint;
+}
+
 export type CanonicalPositionDecreaseAction = Extract<
     PositionAction,
     { kind: 'decrease' | 'close' }
@@ -551,6 +557,111 @@ export function quotePositionDecreaseIntent(
             error instanceof Error
                 ? error.message
                 : 'invalid position decrease intent',
+        );
+    }
+}
+
+/**
+ * Return the greatest exact partial-decrease quote aligned to `quantum` while
+ * preserving the snapshot's live decrease lock and minimum position notional.
+ */
+export function quoteMaximumPositionDecreaseIntent(
+    input: QuoteMaximumPositionDecreaseIntentInput,
+): QuoteResult<PositionDecreaseIntentOutcome> {
+    try {
+        if (!input || typeof input !== 'object') {
+            throw new TypeError('maximum position decrease input is required');
+        }
+        const quantum = checkedI128(input.quantum);
+        if (quantum <= 0n) {
+            throw new RangeError('position decrease quantum must be positive');
+        }
+        validateSnapshotSubject(input.snapshot, input.isLong);
+        validateSnapshotBoundary(input.snapshot);
+        const positionNotional = nonnegativeAtomic(
+            input.snapshot.position.notional,
+            'position notional',
+        );
+        const configuredMinimum = nonnegativeAtomic(
+            input.snapshot.config.minPositionNotional,
+            'minimum position notional',
+        );
+        const lockedNotional = nonnegativeAtomic(
+            input.snapshot.position.lockedNotional,
+            'locked position notional',
+        );
+        const unlocksAt = input.snapshot.position.unlocksAt;
+        if (
+            typeof unlocksAt !== 'bigint' ||
+            unlocksAt < 0n ||
+            unlocksAt > U64_MAX
+        ) {
+            throw new RangeError('position unlock timestamp must be a u64 bigint');
+        }
+        const liveLocked =
+            input.snapshot.ledgerTime < unlocksAt ? lockedNotional : 0n;
+        const requiredRemainder =
+            liveLocked > configuredMinimum ? liveLocked : configuredMinimum;
+        if (positionNotional <= requiredRemainder) {
+            return unavailable(
+                'CONTRACT_GATE',
+                'no partial position decrease fits the requested quantum',
+            );
+        }
+        const hardHeadroom = subI128(positionNotional, requiredRemainder);
+        let high = hardHeadroom / quantum;
+        const minimumOrder = nonnegativeAtomic(
+            input.snapshot.config.minOrderNotional,
+            'minimum order notional',
+        );
+        let low = minimumOrder / quantum;
+        if (minimumOrder % quantum !== 0n) low += 1n;
+        if (low < 1n) low = 1n;
+        if (low > high) {
+            return unavailable(
+                'CONTRACT_GATE',
+                'no partial position decrease fits the requested quantum',
+            );
+        }
+
+        let best:
+            | Extract<
+                  QuoteResult<PositionDecreaseIntentOutcome>,
+                  { kind: 'exact' }
+              >
+            | undefined;
+        while (low <= high) {
+            const middle = low + (high - low) / 2n;
+            const notional = checkedI128(middle * quantum);
+            const result = quotePositionDecreaseIntent({
+                snapshot: input.snapshot,
+                isLong: input.isLong,
+                size: { kind: 'notional', notional },
+                collateralReturn: input.collateralReturn,
+                execution: input.execution,
+                maximumSlippage: input.maximumSlippage,
+                validForLedgers: input.validForLedgers,
+            });
+            if (result.kind === 'exact') {
+                best = result;
+                low = middle + 1n;
+            } else {
+                high = middle - 1n;
+            }
+        }
+        return (
+            best ??
+            unavailable(
+                'CONTRACT_GATE',
+                'no exact partial position decrease fits the requested quantum',
+            )
+        );
+    } catch (error) {
+        return unavailable(
+            'INVALID_INPUT',
+            error instanceof Error
+                ? error.message
+                : 'invalid maximum position decrease input',
         );
     }
 }

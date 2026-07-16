@@ -42,6 +42,8 @@ describe('package root type exports', () => {
                 VaultMinimumOutput,
                 VaultRationalSlippageBound,
                 QuotePositionDecreaseIntentInput,
+                QuoteMaximumPositionDecreaseIntentInput,
+                QuoteMaximumPositionIncreaseIntentInput,
                 QuotePositionIncreaseIntentInput,
             } from '../src/index.js';
 
@@ -56,6 +58,7 @@ describe('package root type exports', () => {
                 PositionDecreaseIntentOutcome,
                 PositionDecreasePartialSizeIntent,
                 PositionDecreaseSizeIntent,
+                QuoteMaximumPositionDecreaseIntentInput,
                 QuotePositionDecreaseIntentInput,
             ];
 
@@ -66,6 +69,7 @@ describe('package root type exports', () => {
                 PositionIncreaseExecutionIntent,
                 PositionIncreaseFillOrKillPolicy,
                 PositionIncreaseIntentOutcome,
+                QuoteMaximumPositionIncreaseIntentInput,
                 QuotePositionIncreaseIntentInput,
             ];
 

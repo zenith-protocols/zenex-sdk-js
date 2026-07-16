@@ -50,6 +50,18 @@ export interface QuotePositionIncreaseIntentInput {
     readonly validForLedgers: number;
 }
 
+/**
+ * Exact inputs for selecting a fillable position increase on a caller-chosen
+ * atomic quantum (for example `100_000n` for a 0.01 token display step at 7
+ * decimals). The wallet ceiling includes collateral, execution fee, and the
+ * relay maximum exactly as reported by the returned quote.
+ */
+export interface QuoteMaximumPositionIncreaseIntentInput
+    extends Omit<QuotePositionIncreaseIntentInput, 'notional'> {
+    readonly maximumWalletDebit: bigint;
+    readonly quantum: bigint;
+}
+
 export interface NormalizedPositionIncreaseIntent {
     readonly notional: bigint;
     readonly desiredPostFeeMarginDelta: bigint;
@@ -501,6 +513,158 @@ export function quotePositionIncreaseIntent(
             error instanceof Error
                 ? error.message
                 : 'invalid position increase intent',
+        );
+    }
+}
+
+/**
+ * Return the greatest exact position-increase quote aligned to `quantum` that
+ * fits the snapshot's hard position/open-interest ceilings and wallet debit.
+ */
+export function quoteMaximumPositionIncreaseIntent(
+    input: QuoteMaximumPositionIncreaseIntentInput,
+): QuoteResult<PositionIncreaseIntentOutcome> {
+    try {
+        if (!input || typeof input !== 'object') {
+            throw new TypeError('maximum position increase input is required');
+        }
+        const quantum = checkedI128(input.quantum);
+        if (quantum <= 0n) {
+            throw new RangeError('position increase quantum must be positive');
+        }
+        const maximumWalletDebit = nonnegativeAtomic(
+            input.maximumWalletDebit,
+            'maximum wallet debit',
+        );
+        validateSnapshot(input.snapshot);
+        const snapshot = input.snapshot;
+        const sideNotional = snapshot.subject.isLong
+            ? snapshot.market.notional.long
+            : snapshot.market.notional.short;
+        const maximumPositionNotional = nonnegativeAtomic(
+            snapshot.config.maxPositionNotional,
+            'maximum position notional',
+        );
+        const positionNotional = nonnegativeAtomic(
+            snapshot.position.notional,
+            'position notional',
+        );
+        const maximumOpenInterest = nonnegativeAtomic(
+            snapshot.config.maxOpenInterest,
+            'maximum open interest',
+        );
+        const marketSideNotional = nonnegativeAtomic(
+            sideNotional,
+            'market side notional',
+        );
+        if (
+            positionNotional >= maximumPositionNotional ||
+            marketSideNotional >= maximumOpenInterest
+        ) {
+            return unavailable(
+                'CONTRACT_GATE',
+                'no position increase fits the requested quantum',
+            );
+        }
+        const positionHeadroom = subI128(
+            maximumPositionNotional,
+            positionNotional,
+        );
+        const marketHeadroom = subI128(
+            maximumOpenInterest,
+            marketSideNotional,
+        );
+        const hardHeadroom =
+            positionHeadroom < marketHeadroom
+                ? positionHeadroom
+                : marketHeadroom;
+        let high = hardHeadroom / quantum;
+        if (high <= 0n) {
+            return unavailable(
+                'CONTRACT_GATE',
+                'no position increase fits the requested quantum',
+            );
+        }
+
+        const minimumOrderNotional = nonnegativeAtomic(
+            snapshot.config.minOrderNotional,
+            'minimum order notional',
+        );
+        const minimumPositionIncrease =
+            positionNotional === 0n
+                ? nonnegativeAtomic(
+                      snapshot.config.minPositionNotional,
+                      'minimum position notional',
+                  )
+                : 0n;
+        const minimumNotional =
+            minimumOrderNotional > minimumPositionIncrease
+                ? minimumOrderNotional
+                : minimumPositionIncrease;
+        let low = minimumNotional / quantum;
+        if (minimumNotional % quantum !== 0n) low += 1n;
+        if (low < 1n) low = 1n;
+        if (low > high) {
+            return unavailable(
+                'CONTRACT_GATE',
+                'no position increase fits the requested quantum',
+            );
+        }
+
+        // With one frozen snapshot, margin, reserve, OI, and wallet-debit gates
+        // form an upper boundary as notional grows. The only lower boundary is
+        // the configured order/position dust floor (plus collateral dust), so
+        // a bigint binary search can select the greatest admissible quantum
+        // without converting transaction inputs through JavaScript numbers.
+        let best:
+            | Extract<
+                  QuoteResult<PositionIncreaseIntentOutcome>,
+                  { kind: 'exact' }
+              >
+            | undefined;
+        while (low <= high) {
+            const middle = low + (high - low) / 2n;
+            const notional = checkedI128(middle * quantum);
+            const result = quotePositionIncreaseIntent({
+                snapshot,
+                notional,
+                desiredPostFeeMarginDelta: input.desiredPostFeeMarginDelta,
+                execution: input.execution,
+                maximumSlippage: input.maximumSlippage,
+                validForLedgers: input.validForLedgers,
+            });
+            if (
+                result.kind === 'exact' &&
+                result.value.walletMaximumDebit <= maximumWalletDebit
+            ) {
+                best = result;
+                low = middle + 1n;
+                continue;
+            }
+            if (
+                result.kind === 'unavailable' &&
+                result.code === 'INVALID_INPUT' &&
+                (result.reason.includes('notional is below') ||
+                    result.reason.includes('collateral is below'))
+            ) {
+                low = middle + 1n;
+                continue;
+            }
+            high = middle - 1n;
+        }
+        return (
+            best ??
+            unavailable(
+                'CONTRACT_GATE',
+                'no exact position increase fits the requested quantum and wallet debit',
+            )
+        );
+    } catch (error) {
+        return unavailable(
+            'INVALID_INPUT',
+            error instanceof Error
+                ? error.message
+                : 'invalid maximum position increase input',
         );
     }
 }
