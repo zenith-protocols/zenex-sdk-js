@@ -225,6 +225,42 @@ describe('quotePositionDecreaseIntent', () => {
         });
     });
 
+    it('propagates malformed shared Max input instead of masking it as exhausted capacity', () => {
+        expect(
+            quoteMaximumPositionDecreaseIntent({
+                snapshot: snapshot(),
+                isLong: true,
+                collateralReturn: { kind: 'explicit', amount: 0n },
+                execution: { transport: 'direct', executionFee: -1n },
+                maximumSlippage: { numerator: 1n, denominator: 100n },
+                validForLedgers: POSITION_DECREASE_MAX_VALIDITY_LEDGERS,
+                quantum: 10n,
+            }),
+        ).toEqual({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: 'execution fee must be nonnegative',
+        });
+    });
+
+    it('preserves the delegated market-status reason when no Max candidate is exact', () => {
+        expect(
+            quoteMaximumPositionDecreaseIntent({
+                snapshot: snapshot({ status: Status.Frozen }),
+                isLong: true,
+                collateralReturn: { kind: 'explicit', amount: 0n },
+                execution: { transport: 'direct', executionFee: 2n },
+                maximumSlippage: { numerator: 1n, denominator: 100n },
+                validForLedgers: POSITION_DECREASE_MAX_VALIDITY_LEDGERS,
+                quantum: 10n,
+            }),
+        ).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('contract error'),
+        });
+    });
+
     it('resolves fraction and pro-rata collateral from atomic notional', () => {
         const result = quotePositionDecreaseIntent(directInput());
 

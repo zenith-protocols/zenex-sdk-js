@@ -630,6 +630,12 @@ export function quoteMaximumPositionDecreaseIntent(
                   { kind: 'exact' }
               >
             | undefined;
+        let lastUnavailable:
+            | Extract<
+                  QuoteResult<PositionDecreaseIntentOutcome>,
+                  { kind: 'unavailable' }
+              >
+            | undefined;
         while (low <= high) {
             const middle = low + (high - low) / 2n;
             const notional = checkedI128(middle * quantum);
@@ -646,11 +652,21 @@ export function quoteMaximumPositionDecreaseIntent(
                 best = result;
                 low = middle + 1n;
             } else {
+                if (result.kind === 'unavailable') {
+                    lastUnavailable = result;
+                    if (
+                        result.code === 'INVALID_INPUT' &&
+                        !result.reason.includes('outside the i128 range')
+                    ) {
+                        return result;
+                    }
+                }
                 high = middle - 1n;
             }
         }
         return (
             best ??
+            lastUnavailable ??
             unavailable(
                 'CONTRACT_GATE',
                 'no exact partial position decrease fits the requested quantum',

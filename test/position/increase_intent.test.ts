@@ -347,6 +347,46 @@ describe('quoteMaximumPositionIncreaseIntent', () => {
             reason: 'no position increase fits the requested quantum',
         });
     });
+
+    it.each([
+        { user: USER },
+        { isLong: true },
+    ])('rejects caller-owned subject fields on Max input', (subjectOverride) => {
+        const result = quoteMaximumPositionIncreaseIntent({
+            snapshot: snapshot(),
+            desiredPostFeeMarginDelta: 0n,
+            execution: { transport: 'direct', executionFee: 2n },
+            maximumSlippage: { numerator: 1n, denominator: 100n },
+            validForLedgers: POSITION_INCREASE_MAX_VALIDITY_LEDGERS,
+            maximumWalletDebit: 1_000n,
+            quantum: 10n,
+            ...subjectOverride,
+        });
+
+        expect(result).toEqual({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: 'position increase user and side come from snapshot subject provenance',
+        });
+    });
+
+    it('preserves the delegated market-status reason when no Max candidate is exact', () => {
+        expect(
+            quoteMaximumPositionIncreaseIntent({
+                snapshot: snapshot({ status: Status.OnIce }),
+                desiredPostFeeMarginDelta: 0n,
+                execution: { transport: 'direct', executionFee: 2n },
+                maximumSlippage: { numerator: 1n, denominator: 100n },
+                validForLedgers: POSITION_INCREASE_MAX_VALIDITY_LEDGERS,
+                maximumWalletDebit: 1_000n,
+                quantum: 10n,
+            }),
+        ).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('contract error #705'),
+        });
+    });
 });
 
 function directInput(overrides: Record<string, unknown> = {}) {
