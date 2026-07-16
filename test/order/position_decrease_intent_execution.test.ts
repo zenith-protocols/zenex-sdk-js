@@ -206,11 +206,11 @@ const directPolicy: ContractExecutionPolicy = {
 
 const feeToken: ExactRelayFeeToken = {
     collateralAssetId: 'usdc',
-    contractId: FEE_TOKEN,
+    contractId: COLLATERAL,
     decimals: 7,
     pricing: { kind: 'usdPeg', numerator: '1', denominator: '1' },
     minForwardChargeAtomic: 1n,
-    maxSignedFeeAtomic: 10_000n,
+    maxSignedFeeAtomic: 100n,
 };
 
 const relayPolicy: ContractExecutionPolicy = {
@@ -270,7 +270,7 @@ describe('buildPositionDecreaseIntentExecution', () => {
             execution: {
                 transport: 'relay',
                 executionFee: 2n,
-                relayFee: 100n,
+                feeToken,
             },
         });
 
@@ -308,7 +308,7 @@ describe('buildPositionDecreaseIntentExecution', () => {
         });
         expect(invoke.args.slice(1, 8)).toEqual([
             USER,
-            FEE_TOKEN,
+            COLLATERAL,
             100n,
             quote.value.expiration,
             1n,
@@ -571,7 +571,7 @@ describe('buildPositionDecreaseIntentExecution', () => {
             execution: {
                 transport: 'relay',
                 executionFee: 2n,
-                relayFee: 100n,
+                feeToken,
             },
         });
 
@@ -601,14 +601,14 @@ describe('buildPositionDecreaseIntentExecution', () => {
     });
 
     it.each([99n, 101n])(
-        'rejects relay fee quote %s that differs from the signed maximum',
-        (relayFee) => {
+        'rejects signed relay maximum %s that differs from the quoted token maximum',
+        (maxFeeAmount) => {
             const source = snapshot();
             const quote = exactQuote(source, {
                 execution: {
                     transport: 'relay',
                     executionFee: 2n,
-                    relayFee,
+                    feeToken,
                 },
             });
 
@@ -617,11 +617,38 @@ describe('buildPositionDecreaseIntentExecution', () => {
                     snapshot: source,
                     user: USER,
                     quote,
-                    policy: relayPolicy,
+                    policy: { ...relayPolicy, maxFeeAmount },
                 }),
             ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT' });
         },
     );
+
+    it('rejects substituting another valid fee-token contract at execution', () => {
+        const source = snapshot();
+        const quote = exactQuote(source, {
+            execution: {
+                transport: 'relay',
+                executionFee: 2n,
+                feeToken,
+            },
+        });
+
+        expect(
+            buildPositionDecreaseIntentExecution({
+                snapshot: source,
+                user: USER,
+                quote,
+                policy: {
+                    ...relayPolicy,
+                    feeToken: { ...feeToken, contractId: FEE_TOKEN },
+                },
+            }),
+        ).toMatchObject({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: 'relay fee token must equal the quoted exact fee-token configuration',
+        });
+    });
 
     it('requires exact relay fee-expiration identity', () => {
         const source = snapshot();
@@ -629,7 +656,7 @@ describe('buildPositionDecreaseIntentExecution', () => {
             execution: {
                 transport: 'relay',
                 executionFee: 2n,
-                relayFee: 100n,
+                feeToken,
             },
         });
 

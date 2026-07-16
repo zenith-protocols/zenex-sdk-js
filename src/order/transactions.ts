@@ -1026,11 +1026,20 @@ export function buildPositionDecreaseIntentExecution(
                     'relay policy requires a relay position decrease quote',
                 );
             }
-            const quotedRelayFee = checkedI128(intent.execution.relayFee);
-            const signedMaximum = checkedI128(input.policy.maxFeeAmount);
-            if (quotedRelayFee !== signedMaximum) {
+            if (
+                canonicalIdentity(input.policy.feeToken) !==
+                canonicalIdentity(intent.execution.feeToken)
+            ) {
                 return invalid(
-                    'quoted relay fee must equal the signed policy maximum',
+                    'relay fee token must equal the quoted exact fee-token configuration',
+                );
+            }
+            if (
+                checkedI128(input.policy.maxFeeAmount) !==
+                intent.execution.feeToken.maxSignedFeeAtomic
+            ) {
+                return invalid(
+                    'signed relay fee maximum must equal the quoted token maximum',
                 );
             }
             if (input.policy.feeExpiration !== expected.value.expiration) {

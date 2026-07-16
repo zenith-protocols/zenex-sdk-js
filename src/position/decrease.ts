@@ -3,6 +3,11 @@ import { MAX_SIGNED_PRICE_UPDATE_BYTES } from '../data/price.js';
 import { addI128, checkedI128, mulDivFloor, subI128 } from '../math/fixed.js';
 import { normalizeExactRatio, type ExactRatio } from '../math/ratio.js';
 import {
+    cloneExactRelayFeeToken,
+    exactRelayFeeTokenIssue,
+    type ExactRelayFeeToken,
+} from '../order/fee_token.js';
+import {
     decodeLedgerSequence,
     exact,
     unavailable,
@@ -41,7 +46,7 @@ export type PositionDecreaseExecutionIntent =
     | {
           readonly transport: 'relay';
           readonly executionFee: bigint;
-          readonly relayFee: bigint;
+          readonly feeToken: ExactRelayFeeToken;
       };
 
 interface PositionDecreaseIntentBase {
@@ -216,8 +221,23 @@ function nonnegativeAtomic(value: bigint, label: string): bigint {
     return checked;
 }
 
+function snapshotAssetDecimals(snapshot: SubjectBoundTradingSnapshot): number {
+    const { vaultDecimalsOffset, vaultShareDecimals } = snapshot.deployment;
+    if (
+        !Number.isSafeInteger(vaultDecimalsOffset) ||
+        !Number.isSafeInteger(vaultShareDecimals) ||
+        vaultDecimalsOffset < 0 ||
+        vaultShareDecimals < vaultDecimalsOffset ||
+        vaultShareDecimals > 38
+    ) {
+        throw new RangeError('snapshot vault decimal provenance is invalid');
+    }
+    return vaultShareDecimals - vaultDecimalsOffset;
+}
+
 function normalizeExecution(
     execution: PositionDecreaseExecutionIntent,
+    snapshot: SubjectBoundTradingSnapshot,
 ): PositionDecreaseExecutionIntent {
     if (!execution || typeof execution !== 'object') {
         throw new TypeError('position decrease execution intent is required');
@@ -227,18 +247,44 @@ function normalizeExecution(
         'execution fee',
     );
     if (execution.transport === 'direct') {
-        if (Object.prototype.hasOwnProperty.call(execution, 'relayFee')) {
-            throw new TypeError('direct execution does not accept relayFee');
+        if (
+            Object.prototype.hasOwnProperty.call(execution, 'feeToken') ||
+            Object.prototype.hasOwnProperty.call(execution, 'relayFee') ||
+            Object.prototype.hasOwnProperty.call(execution, 'maxFeeAmount')
+        ) {
+            throw new TypeError(
+                'direct execution does not accept relay fee configuration',
+            );
         }
         return { transport: 'direct', executionFee };
     }
     if (execution.transport !== 'relay') {
         throw new TypeError('position decrease transport is unknown');
     }
+    if (
+        Object.prototype.hasOwnProperty.call(execution, 'relayFee') ||
+        Object.prototype.hasOwnProperty.call(execution, 'maxFeeAmount')
+    ) {
+        throw new TypeError(
+            'relay maximum is derived from the exact fee-token configuration',
+        );
+    }
+    const issue = exactRelayFeeTokenIssue(execution.feeToken);
+    if (issue !== undefined) throw new TypeError(issue);
+    if (execution.feeToken.contractId !== snapshot.collateralToken) {
+        throw new RangeError(
+            'relay fee token must equal the snapshot collateral token',
+        );
+    }
+    if (execution.feeToken.decimals !== snapshotAssetDecimals(snapshot)) {
+        throw new RangeError(
+            'relay fee token decimals do not match snapshot collateral decimals',
+        );
+    }
     return {
         transport: 'relay',
         executionFee,
-        relayFee: nonnegativeAtomic(execution.relayFee, 'relay fee'),
+        feeToken: cloneExactRelayFeeToken(execution.feeToken),
     };
 }
 
@@ -391,7 +437,7 @@ function resolvePositionDecreaseIntent(
               };
     }
 
-    const execution = normalizeExecution(input.execution);
+    const execution = normalizeExecution(input.execution, input.snapshot);
     const configuredExecutionFee = nonnegativeAtomic(
         input.snapshot.config.execFee,
         'snapshot config execution fee',
@@ -422,7 +468,10 @@ function resolvePositionDecreaseIntent(
         resolvedNotional: resolvedSize.notional,
         resolvedCollateralReturn: full ? null : resolvedCollateralReturn,
         executionFee: execution.executionFee,
-        relayFee: execution.transport === 'relay' ? execution.relayFee : 0n,
+        relayFee:
+            execution.transport === 'relay'
+                ? execution.feeToken.maxSignedFeeAtomic
+                : 0n,
     };
 }
 

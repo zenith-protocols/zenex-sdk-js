@@ -1,6 +1,7 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import { describe, expect, it } from 'vitest';
 import { SCALAR_18 } from '../../src/math/fixed.js';
+import type { ExactRelayFeeToken } from '../../src/order/transactions.js';
 import {
     POSITION_DECREASE_MAX_VALIDITY_LEDGERS,
     quotePositionDecreaseIntent,
@@ -25,6 +26,16 @@ const VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 4));
 const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 5));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
 const COLLATERAL = StrKey.encodeContract(Buffer.alloc(32, 7));
+const OTHER_TOKEN = StrKey.encodeContract(Buffer.alloc(32, 8));
+
+const feeToken: ExactRelayFeeToken = {
+    collateralAssetId: 'usdc',
+    contractId: COLLATERAL,
+    decimals: 7,
+    pricing: { kind: 'usdPeg', numerator: '1', denominator: '1' },
+    minForwardChargeAtomic: 1n,
+    maxSignedFeeAtomic: 100n,
+};
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -225,6 +236,66 @@ describe('quotePositionDecreaseIntent', () => {
             });
         },
     );
+
+    it('binds the full exact relay fee-token configuration into the quote', () => {
+        const configuredFeeToken = structuredClone(feeToken);
+        const result = quotePositionDecreaseIntent(
+            directInput({
+                execution: {
+                    transport: 'relay',
+                    executionFee: 2n,
+                    feeToken: configuredFeeToken,
+                },
+            }),
+        );
+        configuredFeeToken.collateralAssetId = 'mutated';
+
+        expect(result).toMatchObject({
+            kind: 'exact',
+            value: {
+                intent: {
+                    execution: {
+                        transport: 'relay',
+                        executionFee: 2n,
+                        feeToken,
+                    },
+                },
+                outcome: { fees: { relay: 100n } },
+            },
+        });
+    });
+
+    it.each([
+        [
+            'different collateral contract',
+            { ...feeToken, contractId: OTHER_TOKEN },
+        ],
+        ['wrong decimals', { ...feeToken, decimals: 6 }],
+        [
+            'non-unit pricing',
+            {
+                ...feeToken,
+                pricing: {
+                    kind: 'usdPeg',
+                    numerator: '99',
+                    denominator: '100',
+                },
+            },
+        ],
+        ['invalid configured bounds', { ...feeToken, maxSignedFeeAtomic: 0n }],
+    ])('rejects a relay fee token with %s', (_label, configuredFeeToken) => {
+        expect(
+            quotePositionDecreaseIntent(
+                directInput({
+                    execution: {
+                        transport: 'relay',
+                        executionFee: 2n,
+                        feeToken: configuredFeeToken,
+                    },
+                }),
+            ),
+        ).toMatchObject({ kind: 'unavailable', code: 'INVALID_INPUT' });
+    });
 
     it('rejects explicit collateral above the snapshot position', () => {
         expect(

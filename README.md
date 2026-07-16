@@ -171,10 +171,13 @@ nonempty and no larger than 32 KiB.
 `executionFee` must equal `snapshot.config.execFee`. It is an upfront order
 escrow rather than a position-margin debit. An atomic direct fill pays it to
 the selected keeper, so choosing the user as self-keeper returns that escrow
-to the same user. A relay quote uses `transport: 'relay'` and a `relayFee`
-equal to the policy's signed `maxFeeAmount`; that conservative external wallet
-charge and the policy fee expiration are both bound into the exact preview.
-Both direct and relay execution require `fillOrKill`.
+to the same user. A relay quote uses `transport: 'relay'` and the complete
+`ExactRelayFeeToken` as `feeToken`. The quote validates and retains the token
+contract, collateral identity, decimals, exact one-to-one pricing, and atomic
+fee bounds. Execution requires the same token configuration, its quoted
+`maxSignedFeeAtomic` as the policy `maxFeeAmount`, and the quote expiration as
+the policy fee expiration. Both direct and relay execution require
+`fillOrKill`.
 
 ## Exact vault action intent
 
