@@ -419,13 +419,11 @@ function pythPrice(
             'verified Pyth price must be positive uncrossed',
         );
     }
-    if (price.publishTime > ledgerTime) {
-        throw new SnapshotUnavailableError(
-            'INVALID_INPUT',
-            'verified Pyth price postdates the snapshot ledger',
-        );
-    }
-    const age = ledgerTime - price.publishTime;
+    // Match the deployed verifier: a signed publish time at or ahead of the
+    // latest closed ledger has zero age. This is normal between Stellar's
+    // ledger closes while Pyth continues publishing once per second.
+    const age =
+        ledgerTime > price.publishTime ? ledgerTime - price.publishTime : 0n;
     if (age > maxPriceAge) {
         throw new SnapshotUnavailableError(
             'STALE_PRICE',

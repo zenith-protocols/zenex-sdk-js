@@ -542,6 +542,20 @@ describe('loadTradingSnapshot', () => {
         });
     });
 
+    it('accepts a signed Pyth publish time ahead of the closed ledger', async () => {
+        const values = snapshotValues();
+        values[indexes.price] = priceScVal({ publishTime: 103n });
+        mockSuccess(values);
+
+        const result = await loadTradingSnapshot(request);
+
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        expect(result.value.ledgerTime).toBe(100n);
+        expect(result.value.price.publishTime).toBe(103n);
+        expect(result.priceTime).toBe(103n);
+    });
+
     it('rejects malformed or crossed verified prices', async () => {
         const values = snapshotValues();
         values[indexes.price] = priceScVal({
