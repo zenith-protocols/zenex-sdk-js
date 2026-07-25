@@ -1,19 +1,22 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
     ContractError,
     ContractErrorType,
     TradingError,
     contractErrorFromCode,
+    parseContractErrorCode,
     tradingErrorMessages,
 } from '../src/errors.js';
 
 // =============================================================================
 // Error enums are hand-checked against the contract sources:
 //   trading/src/errors.rs          (TradingError, 700-772)
-//   price-verifier/src/error.rs    (PriceVerifierError, 780-791)
+//   price-verifier/src/error.rs    (PriceVerifierError, 780-792)
 //   strategy-vault/src/strategy.rs (StrategyVaultError, 800-801)
 //   governance/src/errors.rs       (GovernanceError, 810-812)
 //   treasury/src/lib.rs            (TreasuryError, 900)
+//   OpenZeppelin fee-abstraction   (FeeAbstractionError::InvalidFeeBounds, 5003)
 // The namespaces are disjoint, so contractErrorFromCode takes no hint.
 // =============================================================================
 
@@ -86,7 +89,7 @@ describe('TradingError (v2 trading/src/errors.rs)', () => {
 });
 
 describe('ContractErrorType periphery codes (v2 contracts)', () => {
-    it('price-verifier covers 780-791 including the feed-anchor pair', () => {
+    it('price-verifier covers 780-792 including the feed-anchor pair', () => {
         expect(ContractErrorType.PVInvalidData).toBe(780);
         expect(ContractErrorType.PVInvalidPrice).toBe(781);
         expect(ContractErrorType.PVPriceStale).toBe(782);
@@ -99,6 +102,11 @@ describe('ContractErrorType periphery codes (v2 contracts)', () => {
         expect(ContractErrorType.PVInvalidMarketSession).toBe(789);
         expect(ContractErrorType.PVFeedNotFound).toBe(790);
         expect(ContractErrorType.PVWrongExponent).toBe(791);
+        expect(ContractErrorType.PVInvalidConfidence).toBe(792);
+    });
+
+    it('fee-abstraction InvalidFeeBounds is 5003 (OpenZeppelin, not a Zenex contract)', () => {
+        expect(ContractErrorType.FeeAbstractionInvalidFeeBounds).toBe(5003);
     });
 
     it('strategy-vault is the 800-801 pair from strategy.rs', () => {
@@ -172,11 +180,21 @@ describe('contractErrorFromCode (hint-free resolution)', () => {
         expect(contractErrorFromCode(812).type).toBe(ContractErrorType.GovInvalidDelay);
     });
 
-    it('resolves strategy-vault 800-801 and price-verifier 790-791', () => {
+    it('resolves strategy-vault 800-801 and price-verifier 790-792', () => {
         expect(contractErrorFromCode(800).type).toBe(ContractErrorType.StrategyInvalidAmount);
         expect(contractErrorFromCode(801).type).toBe(ContractErrorType.StrategyPnlExceedsAssets);
         expect(contractErrorFromCode(790).type).toBe(ContractErrorType.PVFeedNotFound);
         expect(contractErrorFromCode(791).type).toBe(ContractErrorType.PVWrongExponent);
+        expect(contractErrorFromCode(792).type).toBe(ContractErrorType.PVInvalidConfidence);
+        expect(contractErrorFromCode(792).message).toBe(
+            'Price confidence bound rejects every feed'
+        );
+    });
+
+    it('resolves fee-abstraction 5003 with the relay fee-bounds message', () => {
+        const error = contractErrorFromCode(5003);
+        expect(error.type).toBe(ContractErrorType.FeeAbstractionInvalidFeeBounds);
+        expect(error.message).toBe('Relayer fee is outside the signed fee bounds');
     });
 
     it('falls back to UnknownError for codes in no namespace', () => {
@@ -189,5 +207,50 @@ describe('contractErrorFromCode (hint-free resolution)', () => {
         const error = contractErrorFromCode(741);
         expect(error).toBeInstanceOf(ContractError);
         expect(error.type).toBe(741);
+    });
+});
+
+describe('parseContractErrorCode (strict Error(Contract, #N) shape)', () => {
+    it('parses the Error(Contract, #N) pattern anywhere in the diagnostic', () => {
+        expect(parseContractErrorCode('HostError: Error(Contract, #713)')).toBe(713);
+        expect(
+            parseContractErrorCode(
+                'host invocation failed\n\nCaused by:\n    Error(Contract, #741)\n    Event log'
+            )
+        ).toBe(741);
+    });
+
+    it('rejects everything else, including bare #N and non-contract errors', () => {
+        expect(parseContractErrorCode('generic rpc timeout')).toBeUndefined();
+        expect(parseContractErrorCode('simulation failed: #721')).toBeUndefined();
+        expect(parseContractErrorCode('Error(WasmVm, InvalidAction)')).toBeUndefined();
+        expect(parseContractErrorCode('Error(Contract, #)')).toBeUndefined();
+        expect(parseContractErrorCode('')).toBeUndefined();
+    });
+
+    it('accepts codes up to u32::MAX and rejects anything larger', () => {
+        expect(parseContractErrorCode('Error(Contract, #4294967295)')).toBe(4_294_967_295);
+        // 10 digits but past u32::MAX: parses, then the bound guard rejects it.
+        expect(parseContractErrorCode('Error(Contract, #4294967296)')).toBeUndefined();
+        // 11+ digits never match the pattern at all.
+        expect(parseContractErrorCode('Error(Contract, #42949672950)')).toBeUndefined();
+    });
+});
+
+describe('package exports', () => {
+    it('exposes ./errors as a standalone subpath (types + cjs + esm)', () => {
+        const packageJson = JSON.parse(
+            readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+        ) as { exports: Record<string, Record<string, string>> };
+        expect(packageJson.exports['./errors']).toEqual({
+            types: './dist/types/errors.d.ts',
+            require: './dist/cjs/errors.js',
+            import: './dist/esm/errors.js',
+        });
+    });
+
+    it('keeps errors.ts import-free so the subpath stays lean', () => {
+        const source = readFileSync(new URL('../src/errors.ts', import.meta.url), 'utf8');
+        expect(source).not.toMatch(/^\s*import /m);
     });
 });

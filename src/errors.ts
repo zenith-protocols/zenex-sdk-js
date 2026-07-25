@@ -76,7 +76,7 @@ export enum ContractErrorType {
     // trading/src/errors.rs exactly; see below). `contractErrorFromCode` falls
     // through to it automatically.
 
-    // Price Verifier Errors (780-791)
+    // Price Verifier Errors (780-792)
     PVInvalidData = 780,
     PVInvalidPrice = 781,
     PVPriceStale = 782,
@@ -89,6 +89,7 @@ export enum ContractErrorType {
     PVInvalidMarketSession = 789,
     PVFeedNotFound = 790,
     PVWrongExponent = 791,
+    PVInvalidConfidence = 792,
 
     // Strategy Vault Errors (800-801)
     StrategyInvalidAmount = 800,
@@ -101,6 +102,12 @@ export enum ContractErrorType {
 
     // Treasury Errors (900)
     TreasuryInvalidRate = 900,
+
+    // Fee Abstraction Errors (5003)
+    // Emitted by OpenZeppelin's stellar-fee-abstraction contract (the relay's
+    // fee-bump gateway), not by the Zenex trading contracts; mirrored here so
+    // relay simulations decode end-to-end.
+    FeeAbstractionInvalidFeeBounds = 5003,
 }
 
 const errorMessages: Record<number, string> = {
@@ -193,6 +200,7 @@ const errorMessages: Record<number, string> = {
     [789]: 'Price update payload market session is invalid',
     [790]: 'Price update does not carry the requested feed id',
     [791]: 'Price update exponent does not match the market anchor',
+    [792]: 'Price confidence bound rejects every feed',
 
     // Strategy Vault
     [800]: 'Invalid amount for strategy operation',
@@ -205,6 +213,9 @@ const errorMessages: Record<number, string> = {
 
     // Treasury
     [900]: 'Fee rate out of range (must be between 0 and 50%)',
+
+    // Fee Abstraction (OpenZeppelin stellar-fee-abstraction)
+    [5003]: 'Relayer fee is outside the signed fee bounds',
 };
 
 export class ContractError extends Error {
@@ -220,9 +231,10 @@ export class ContractError extends Error {
  * Resolve a raw on-chain error code to a ContractError.
  *
  * The per-contract code namespaces are disjoint (trading 700-772,
- * price-verifier 780-791, strategy-vault 800-801, governance 810-812,
- * treasury 900), so every code resolves without a hint: from the merged
- * `ContractErrorType` first, then the standalone `TradingError` enum.
+ * price-verifier 780-792, strategy-vault 800-801, governance 810-812,
+ * treasury 900, fee-abstraction 5003), so every code resolves without a
+ * hint: from the merged `ContractErrorType` first, then the standalone
+ * `TradingError` enum.
  */
 export function contractErrorFromCode(code: number): ContractError {
     if (code in ContractErrorType) {
@@ -232,6 +244,25 @@ export function contractErrorFromCode(code: number): ContractError {
         return new ContractError(code as TradingError, tradingErrorMessages[code]);
     }
     return new ContractError(ContractErrorType.UnknownError);
+}
+
+// Soroban contract error codes are u32; anything larger is not a real code.
+const MAXIMUM_ERROR_CODE = 4_294_967_295;
+
+// Strictly the host's `Error(Contract, #N)` shape — bare `#N` fragments in
+// diagnostics are NOT trusted as contract codes.
+const CONTRACT_ERROR_PATTERN = /Error\(Contract, #(\d{1,10})\)/;
+
+/**
+ * The contract error code inside a raw RPC simulation or diagnostic string,
+ * or `undefined` when the strict `Error(Contract, #N)` shape is absent or the
+ * number is not a valid u32. Feed the result to `contractErrorFromCode`.
+ */
+export function parseContractErrorCode(rpcError: string): number | undefined {
+    const match = CONTRACT_ERROR_PATTERN.exec(rpcError);
+    if (match?.[1] === undefined) return undefined;
+    const code = Number(match[1]);
+    return Number.isSafeInteger(code) && code <= MAXIMUM_ERROR_CODE ? code : undefined;
 }
 
 /**
