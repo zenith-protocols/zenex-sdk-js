@@ -154,10 +154,8 @@ export interface MarketData {
     borrowingIdx: SidePair;
     /** Signed funding rate, + = longs pay (SCALAR_18, per second). */
     fundingRate: i128;
-    /** Last funding accrual timestamp. */
-    fundingUpdate: u64;
-    /** Last borrowing accrual timestamp (independent of funding). */
-    borrowingUpdate: u64;
+    /** Last accrual timestamp, shared by both indices. */
+    accruedAt: u64;
     /** Internal funding pool, token-dec. */
     fundingPool: i128;
     /** Total funding owed to traders, token-dec. */
@@ -359,8 +357,7 @@ export function parseMarketData(raw: Record<string, unknown>): MarketData {
         fundingIdx: parseSidePair(raw.funding_idx as Record<string, unknown>),
         borrowingIdx: parseSidePair(raw.borrowing_idx as Record<string, unknown>),
         fundingRate: big(raw.funding_rate),
-        fundingUpdate: big(raw.funding_update),
-        borrowingUpdate: big(raw.borrowing_update),
+        accruedAt: big(raw.accrued_at),
         fundingPool: big(raw.funding_pool),
         fundingOwed: big(raw.funding_owed),
     };

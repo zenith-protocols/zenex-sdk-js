@@ -24,8 +24,7 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
         fundingIdx: pair(),
         borrowingIdx: pair(),
         fundingRate: 0n,
-        fundingUpdate: 0n,
-        borrowingUpdate: 0n,
+        accruedAt: 0n,
         fundingPool: 0n,
         fundingOwed: 0n,
         ...overrides,
@@ -96,7 +95,7 @@ describe('exact borrowing advancement', () => {
         );
 
         expect(empty.borrowingIdx).toEqual(pair());
-        expect(empty.borrowingUpdate).toBe(10n);
+        expect(empty.accruedAt).toBe(0n);
         expect(full.borrowingIdx).toEqual(pair(300_000_000_000n, 0n));
     });
 
@@ -115,15 +114,15 @@ describe('exact borrowing advancement', () => {
         expect(advanced.borrowingIdx).toEqual(pair(0n, 1_500_000_000n));
     });
 
-    it('advances only the timestamp when elapsed time is zero', () => {
+    it('returns an untouched clone when elapsed is zero', () => {
         const original = market({
             borrowingIdx: pair(10n, 20n),
-            borrowingUpdate: 50n,
+            accruedAt: 50n,
         });
-        const advanced = advanceBorrowing(original, config(), price(), 1_000n, 50n);
+        const advanced = advanceBorrowing(original, config(), price(), 1_000n, 0n);
 
         expect(advanced.borrowingIdx).toEqual(pair(10n, 20n));
-        expect(advanced.borrowingUpdate).toBe(50n);
+        expect(advanced.accruedAt).toBe(50n);
         expect(advanced.borrowingIdx).not.toBe(original.borrowingIdx);
     });
 });
@@ -197,9 +196,9 @@ describe('exact funding advancement', () => {
     it('resets an empty market rate and no-ops at zero elapsed', () => {
         const empty = advanceFunding(market({ fundingRate: 12_345n }), config(), 10n);
         const noElapsed = advanceFunding(
-            market({ fundingRate: 5_000n, fundingUpdate: 10n, fundingIdx: pair(1n, 2n) }),
+            market({ fundingRate: 5_000n, fundingIdx: pair(1n, 2n) }),
             config(),
-            10n,
+            0n,
         );
 
         expect(empty.fundingRate).toBe(0n);
@@ -213,29 +212,26 @@ describe('coherent market accrual ordering and chronology', () => {
         const original = market({
             notional: pair(200_000_000n, 50_000_000n),
             tokens: pair(200_000_000_000_000_000n, 0n),
-            borrowingUpdate: 2n,
-            fundingUpdate: 4n,
+            accruedAt: 2n,
         });
         const before = structuredClone(original);
         const result = advanceMarketAccruals(original, config(), price(), 1_000_000_000n, 10n);
 
-        expect(result.elapsedBorrowing).toBe(8n);
-        expect(result.elapsedFunding).toBe(6n);
-        expect(result.market.borrowingUpdate).toBe(10n);
-        expect(result.market.fundingUpdate).toBe(10n);
+        expect(result.elapsed).toBe(8n);
+        expect(result.market.accruedAt).toBe(10n);
+        expect(result.market.fundingIdx.long).toBeGreaterThan(0n);
+        expect(result.market.borrowingIdx.long).toBeGreaterThan(0n);
         expect(original).toEqual(before);
     });
 
-    it('rejects any quote timestamp before stored borrowing or funding state', () => {
-        const data = market({ borrowingUpdate: 10n, fundingUpdate: 20n });
+    it('rejects any quote timestamp before the stored accrual clock', () => {
+        const data = market({ accruedAt: 20n });
 
-        expect(() => advanceBorrowing(data, config(), price(), 1_000n, 9n))
-            .toThrowError(new RangeError('quote timestamp predates stored borrowing accrual'));
-        expect(() => advanceFunding(data, config(), 19n))
-            .toThrowError(new RangeError('quote timestamp predates stored funding accrual'));
-        // The composite no longer duplicates the chronology check up front; the
-        // inner funding advancement still rejects the stale timestamp.
+        expect(() => advanceBorrowing(data, config(), price(), 1_000n, -1n))
+            .toThrowError(new RangeError('quote timestamp predates stored accrual'));
+        expect(() => advanceFunding(data, config(), -1n))
+            .toThrowError(new RangeError('quote timestamp predates stored accrual'));
         expect(() => advanceMarketAccruals(data, config(), price(), 1_000n, 15n))
-            .toThrowError(new RangeError('quote timestamp predates stored funding accrual'));
+            .toThrowError(new RangeError('quote timestamp predates stored accrual'));
     });
 });

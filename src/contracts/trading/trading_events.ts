@@ -148,7 +148,7 @@ export interface TradingAdlUpdateEvent extends BaseTradingEvent {
     short: boolean;
 }
 
-/** The market's post-accrual funding state, emitted by `accrue` and `accrue_funding`. */
+/** The market's post-accrual funding state, emitted by the `accrue` entry. */
 export interface TradingFundingAccrualEvent extends BaseTradingEvent {
     eventType: TradingEventType.FundingAccrual;
     /** Signed funding rate, + = longs pay (SCALAR_18, per second). */

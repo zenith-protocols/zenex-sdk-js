@@ -351,8 +351,7 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
         fundingIdx: pair(),
         borrowingIdx: pair(),
         fundingRate: 0n,
-        fundingUpdate: 0n,
-        borrowingUpdate: 0n,
+        accruedAt: 0n,
         fundingPool: 0n,
         fundingOwed: 0n,
         ...overrides,
@@ -422,7 +421,7 @@ function input(
         now: 1n,
         isLong: true,
         position: position(),
-        market: market({ fundingUpdate: 1n, borrowingUpdate: 1n }),
+        market: market({ accruedAt: 1n }),
         config: config(),
         price: verifiedPrice({ publish_time: 1n }),
         vaultAssets: 100_000_000_000n,
@@ -458,8 +457,7 @@ function positionVectorInput(id: string): PositionActionInput {
         margin: isLong
             ? pair(open.margin, 0n)
             : pair(0n, open.margin),
-        fundingUpdate: inputs.now as bigint,
-        borrowingUpdate: inputs.now as bigint,
+        accruedAt: inputs.now as bigint,
     });
     const operation = golden.operation;
     const action =
@@ -525,8 +523,7 @@ function marginVectorInput(id: string): PositionActionInput {
         borrowingIdx: isLong
             ? pair(inputs.market_borrowing_idx as bigint, 0n)
             : pair(0n, inputs.market_borrowing_idx as bigint),
-        fundingUpdate: now,
-        borrowingUpdate: now,
+        accruedAt: now,
     });
     const operation = golden.operation;
     const action =
@@ -757,8 +754,7 @@ describe('exact position action transitions', () => {
                 notional: pair(1_000n, 0n),
                 tokens: pair(1_000n, 0n),
                 margin: pair(200n, 0n),
-                fundingUpdate: 5n,
-                borrowingUpdate: 5n,
+                accruedAt: 5n,
             }),
             price: verifiedPrice({ publish_time: 6n }),
             action: { kind: 'decrease', notional: 100n, margin: 0n },
@@ -864,8 +860,7 @@ describe('haircuts and protocol gates', () => {
                     notional: pair(open.notional, 0n),
                     tokens: pair(open.tokens, 0n),
                     margin: pair(open.margin, 0n),
-                    fundingUpdate: 1n,
-                    borrowingUpdate: 1n,
+                    accruedAt: 1n,
                 }),
                 config: config({
                     feeDom: 5_000_000_000_000_000n,
@@ -905,8 +900,7 @@ describe('haircuts and protocol gates', () => {
                     notional: pair(100n, 0n),
                     tokens: pair(100n, 0n),
                     margin: pair(100n, 0n),
-                    fundingUpdate: 99n,
-                    borrowingUpdate: 99n,
+                    accruedAt: 99n,
                 }),
                 price: verifiedPrice({ publish_time: 99n }),
                 action: { kind: 'decrease', notional: 51n, margin: 0n },
@@ -927,8 +921,7 @@ describe('haircuts and protocol gates', () => {
                     notional: pair(90n, 0n),
                     tokens: pair(90n, 0n),
                     margin: pair(20n, 0n),
-                    fundingUpdate: 1n,
-                    borrowingUpdate: 1n,
+                    accruedAt: 1n,
                 }),
                 config: config({ maxOpenInterest: 100n }),
                 action: { kind: 'increase', notional: 11n, margin: 10n },
@@ -1014,8 +1007,7 @@ describe('haircuts and protocol gates', () => {
                     notional: pair(100n, 0n),
                     tokens: pair(100n, 0n),
                     margin: pair(11n, 0n),
-                    fundingUpdate: 1n,
-                    borrowingUpdate: 1n,
+                    accruedAt: 1n,
                 }),
                 config: config({ initMargin: 50_000_000_000_000_000n }),
                 action: { kind: 'decrease', notional: 10n, margin: 6n },
@@ -1046,8 +1038,7 @@ describe('typed public quote failures', () => {
                 market: market({
                     notional: pair(I128_MAX, 0n),
                     margin: pair(I128_MAX, 0n),
-                    fundingUpdate: 1n,
-                    borrowingUpdate: 1n,
+                    accruedAt: 1n,
                 }),
                 config: config({
                     maxPositionNotional: I128_MAX,
@@ -1059,7 +1050,7 @@ describe('typed public quote failures', () => {
         const chronology = quotePositionAction(
             input({
                 now: 1n,
-                market: market({ fundingUpdate: 2n, borrowingUpdate: 1n }),
+                market: market({ accruedAt: 2n }),
             }),
         );
 

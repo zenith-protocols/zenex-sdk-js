@@ -236,7 +236,7 @@ describe('trading_types', () => {
             notional: { long: 1n, short: 2n }, margin: { long: 3n, short: 4n },
             tokens: { long: 5n, short: 6n }, funding_idx: { long: 7n, short: 8n },
             borrowing_idx: { long: 9n, short: 10n }, funding_rate: 11n,
-            funding_update: 12n, borrowing_update: 13n, funding_pool: 14n,
+            accrued_at: 12n, funding_pool: 14n,
             funding_owed: 15n,
         });
         expect(marketData).toEqual({
@@ -246,8 +246,7 @@ describe('trading_types', () => {
             fundingIdx: { long: 7n, short: 8n },
             borrowingIdx: { long: 9n, short: 10n },
             fundingRate: 11n,
-            fundingUpdate: 12n,
-            borrowingUpdate: 13n,
+            accruedAt: 12n,
             fundingPool: 14n,
             fundingOwed: 15n,
         });

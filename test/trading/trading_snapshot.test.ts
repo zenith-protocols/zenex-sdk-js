@@ -132,8 +132,7 @@ const expectedMarket: MarketData = {
     fundingIdx: pair(1n, 2n),
     borrowingIdx: pair(3n, 4n),
     fundingRate: 5n,
-    fundingUpdate: 90n,
-    borrowingUpdate: 91n,
+    accruedAt: 90n,
     fundingPool: 6n,
     fundingOwed: 7n,
 };
@@ -179,14 +178,13 @@ function pairScVal(value: SidePair): xdr.ScVal {
 
 function marketScVal(value: MarketData): xdr.ScVal {
     return xdr.ScVal.scvMap([
+        entry('accrued_at', u64(value.accruedAt)),
         entry('borrowing_idx', pairScVal(value.borrowingIdx)),
-        entry('borrowing_update', u64(value.borrowingUpdate)),
         entry('margin', pairScVal(value.margin)),
         entry('funding_idx', pairScVal(value.fundingIdx)),
         entry('funding_owed', i128(value.fundingOwed)),
         entry('funding_pool', i128(value.fundingPool)),
         entry('funding_rate', i128(value.fundingRate)),
-        entry('funding_update', u64(value.fundingUpdate)),
         entry('notional', pairScVal(value.notional)),
         entry('tokens', pairScVal(value.tokens)),
     ]);

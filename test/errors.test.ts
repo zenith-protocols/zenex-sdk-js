@@ -26,7 +26,7 @@ describe('TradingError (v2 trading/src/errors.rs)', () => {
         expect(TradingError.InvalidConfig).toBe(700);
         expect(TradingError.InvalidPrice).toBe(701);
         expect(TradingError.InvalidStatus).toBe(702);
-        expect(TradingError.BorrowingNotAccrued).toBe(703);
+        expect(TradingError.MarketNotAccrued).toBe(703);
         expect(TradingError.MarketFrozen).toBe(704);
         expect(TradingError.IncreaseHalted).toBe(705);
         expect(TradingError.MarketNotCleared).toBe(706);

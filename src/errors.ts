@@ -274,8 +274,8 @@ export enum TradingError {
     InvalidPrice = 701,
     /** Illegal status transition, or the action requires a different operational status. */
     InvalidStatus = 702,
-    /** A borrowing rate changed without a same-ledger `accrue`. */
-    BorrowingNotAccrued = 703,
+    /** An accrual-rate parameter (borrowing or funding) changed without a same-ledger `accrue`. */
+    MarketNotAccrued = 703,
     /** Action halted by the operational status: `Frozen`, or `Retired` on trading paths. */
     MarketFrozen = 704,
     /** An `Increase` was executed while the market does not accept opens. */
@@ -363,7 +363,7 @@ export const tradingErrorMessages: Record<number, string> = {
     [700]: 'Trading config value out of bounds or invariant violated',
     [701]: 'Flat settlement price is not strictly positive',
     [702]: 'Illegal status transition or action requires a different status',
-    [703]: 'Borrowing rate changed without a same-ledger accrue',
+    [703]: 'Borrowing or funding rate changed without a same-ledger accrue',
     [704]: 'Action halted by operational status (Frozen, or Retired on trading paths)',
     [705]: 'Increase executed while the market does not accept opens',
     [706]: 'Retirement attempted while positions remain open',

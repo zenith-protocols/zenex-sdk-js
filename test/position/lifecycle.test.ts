@@ -121,8 +121,7 @@ function emptyMarket(overrides: Partial<MarketData> = {}): MarketData {
         fundingIdx: pair(),
         borrowingIdx: pair(),
         fundingRate: 0n,
-        fundingUpdate: 0n,
-        borrowingUpdate: 0n,
+        accruedAt: 0n,
         fundingPool: 0n,
         fundingOwed: 0n,
         ...overrides,
@@ -202,8 +201,7 @@ function liquidationContext(id: string) {
             notional: pair(open.notional, 0n),
             tokens: pair(open.tokens, 0n),
             margin: pair(open.margin, 0n),
-            fundingUpdate: inputs.now as bigint,
-            borrowingUpdate: inputs.now as bigint,
+            accruedAt: inputs.now as bigint,
         }),
         config: config({
             feeDom: inputs.fee_dom as bigint,
@@ -301,7 +299,7 @@ describe('position lifecycle state', () => {
 
     it('returns a typed unavailable result for inconsistent chronology', () => {
         const chronology = liquidationContext('position.full_close.flat');
-        chronology.market.fundingUpdate = 2n;
+        chronology.market.accruedAt = 2n;
 
         expect(liquidationState(chronology.position, chronology)).toMatchObject(
             {

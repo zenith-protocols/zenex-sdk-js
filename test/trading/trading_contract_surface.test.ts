@@ -51,14 +51,13 @@ const sidePair = (long: bigint, short: bigint) =>
 
 // Alphabetical field order, matching #[contracttype] serialization.
 const marketDataScVal = () => xdr.ScVal.scvMap([
+    entry('accrued_at', u64(3n)),
     entry('borrowing_idx', sidePair(1n, 2n)),
-    entry('borrowing_update', u64(3n)),
     entry('margin', sidePair(4n, 5n)),
     entry('funding_idx', sidePair(6n, 7n)),
     entry('funding_owed', i128(8n)),
     entry('funding_pool', i128(9n)),
     entry('funding_rate', i128(10n)),
-    entry('funding_update', u64(11n)),
     entry('notional', sidePair(12n, 13n)),
     entry('tokens', sidePair(14n, 15n)),
 ]);
@@ -142,7 +141,6 @@ describe('TradingContract full surface', () => {
     });
 
     it('builds maintenance and view ops', () => {
-        expect(decodeInvoke(contract.accrueFunding()).fn).toBe('accrue_funding');
         expect(decodeInvoke(contract.accrue(PRICE)).fn).toBe('accrue');
         expect(decodeInvoke(contract.getConfig()).fn).toBe('get_config');
         expect(decodeInvoke(contract.getMarketData()).fn).toBe('get_market_data');
@@ -287,7 +285,6 @@ describe('TradingContract full surface', () => {
             expect(parsedMarketData.fundingRate).toBe(10n);
             expect('lastPriceTime' in parsedMarketData).toBe(false);
             expect(parsers.accrue(marketData).fundingOwed).toBe(8n);
-            expect(parsers.accrueFunding(marketData).fundingPool).toBe(9n);
 
             const position = xdr.ScVal.scvMap([
                 entry('borrowing_idx', i128(1n)),

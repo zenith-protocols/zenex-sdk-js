@@ -159,8 +159,6 @@ export class TradingContract extends Contract {
             parseAdlState(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
         getAdl: (result: string): AdlState =>
             parseAdlState(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
-        accrueFunding: (result: string): MarketData =>
-            parseMarketData(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
         accrue: (result: string): MarketData =>
             parseMarketData(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
         getMarketData: (result: string): MarketData =>
@@ -247,8 +245,8 @@ export class TradingContract extends Contract {
      * # Errors
      * - InvalidConfig (700) if a bound or range check fails.
      * - NegativeValueNotAllowed (710) if any rate, fee, or margin is negative.
-     * - BorrowingNotAccrued (703) if a borrowing param changed without a
-     *   same-ledger accrual (waived while `Status::Frozen`).
+     * - MarketNotAccrued (703) if a borrowing or funding rate param changed
+     *   without a same-ledger accrual (waived while `Status::Frozen`).
      */
     setConfig(config: TradingConfig): string {
         return this.call(
@@ -659,19 +657,6 @@ export class TradingContract extends Contract {
     // ============================================================
     // Maintenance (permissionless)
     // ============================================================
-
-    /**
-     * Advance the market's funding accrual to the current timestamp.
-     *
-     * # Returns
-     * - The accrued market data.
-     *
-     * # Errors
-     * - MarketFrozen (704) if the market status is `Frozen` or `Retired`.
-     */
-    accrueFunding(): string {
-        return this.call('accrue_funding').toXDR('base64');
-    }
 
     /**
      * Advance both of the market's accrual indices (borrowing and funding)

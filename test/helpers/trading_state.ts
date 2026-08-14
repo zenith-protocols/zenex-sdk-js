@@ -66,14 +66,13 @@ export function makeConfig(): TradingConfig {
 
 export function marketDataScVal(): xdr.ScVal {
     return xdr.ScVal.scvMap([
+        mapEntry('accrued_at', u64(500n)),
         mapEntry('borrowing_idx', sidePair(3n * 10n ** 15n, 0n)),
-        mapEntry('borrowing_update', u64(500n)),
         mapEntry('margin', sidePair(100n, 100n)),
         mapEntry('funding_idx', sidePair(-2n * 10n ** 16n, 0n)),
         mapEntry('funding_owed', i128(0n)),
         mapEntry('funding_pool', i128(0n)),
         mapEntry('funding_rate', i128(0n)),
-        mapEntry('funding_update', u64(600n)),
         mapEntry('notional', sidePair(1000n, 500n)),
         mapEntry('tokens', sidePair(500n, 250n)),
     ]);

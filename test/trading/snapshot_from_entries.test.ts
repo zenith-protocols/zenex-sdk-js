@@ -54,8 +54,7 @@ function makeEntries(
             fundingRate: 0n,
             fundingPool: 0n,
             fundingOwed: 0n,
-            fundingUpdate: 0n,
-            borrowingUpdate: 0n,
+            accruedAt: 0n,
         },
         position,
         vault: {

@@ -20,8 +20,8 @@ import type { PriceData } from './types.js';
 
 export interface AccrualResult {
     market: MarketData;
-    elapsedBorrowing: bigint;
-    elapsedFunding: bigint;
+    /** Seconds both indices accrued over, from the shared `accruedAt` clock. */
+    elapsed: bigint;
 }
 
 function clonePair(value: SidePair): SidePair {
@@ -68,15 +68,13 @@ export function advanceBorrowing(
     config: TradingConfig,
     price: PriceData,
     vaultAssets: bigint,
-    now: bigint,
+    elapsed: bigint,
 ): MarketData {
-    if (now < data.borrowingUpdate) {
-        throw new RangeError('quote timestamp predates stored borrowing accrual');
+    if (elapsed < 0n) {
+        throw new RangeError('quote timestamp predates stored accrual');
     }
 
     const next = cloneMarket(data);
-    const elapsed = now - data.borrowingUpdate;
-    next.borrowingUpdate = now;
     if (elapsed === 0n) return next;
 
     const capacity = sideCapacity(vaultAssets, config.maxUtilOpen);
@@ -133,15 +131,13 @@ function evolvedFundingRate(
 export function advanceFunding(
     data: MarketData,
     config: TradingConfig,
-    now: bigint,
+    elapsed: bigint,
 ): MarketData {
-    if (now < data.fundingUpdate) {
-        throw new RangeError('quote timestamp predates stored funding accrual');
+    if (elapsed < 0n) {
+        throw new RangeError('quote timestamp predates stored accrual');
     }
 
     const next = cloneMarket(data);
-    const elapsed = now - data.fundingUpdate;
-    next.fundingUpdate = now;
     if (elapsed === 0n) return next;
 
     next.fundingRate = evolvedFundingRate(next, config, elapsed);
@@ -175,10 +171,13 @@ export function advanceMarketAccruals(
     vaultAssets: bigint,
     now: bigint,
 ): AccrualResult {
-    const afterBorrowing = advanceBorrowing(data, config, price, vaultAssets, now);
-    return {
-        market: advanceFunding(afterBorrowing, config, now),
-        elapsedBorrowing: now - data.borrowingUpdate,
-        elapsedFunding: now - data.fundingUpdate,
-    };
+    if (now < data.accruedAt) {
+        throw new RangeError('quote timestamp predates stored accrual');
+    }
+    // Mirror of Market::load: one elapsed window for both indices, one stamp.
+    const elapsed = now - data.accruedAt;
+    const afterBorrowing = advanceBorrowing(data, config, price, vaultAssets, elapsed);
+    const market = advanceFunding(afterBorrowing, config, elapsed);
+    market.accruedAt = now;
+    return { market, elapsed };
 }
