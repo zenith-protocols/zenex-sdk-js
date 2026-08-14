@@ -28,7 +28,6 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
         borrowingUpdate: 0n,
         fundingPool: 0n,
         fundingOwed: 0n,
-        lastPriceTime: 0n,
         ...overrides,
     };
 }
@@ -75,10 +74,10 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
 
 function price(): PriceData {
     return {
-        feedId: 1,
-        exponent: -8,
+        feedId: Buffer.alloc(32, 1),
         bid: 1_000_000_000n,
         ask: 1_000_000_000n,
+        publishTime: 1n,
     };
 }
 

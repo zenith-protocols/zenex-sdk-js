@@ -11,10 +11,11 @@ const KEEPER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
 const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 4));
 const TOKEN = StrKey.encodeContract(Buffer.alloc(32, 5));
 const VAULT = StrKey.encodeContract(Buffer.alloc(32, 6));
-const PRICE_VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 7));
+const ORACLE = StrKey.encodeContract(Buffer.alloc(32, 7));
 const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 8));
 
 const PRICE = Buffer.from('deadbeef', 'hex');
+const FEED_ID = Buffer.concat([Buffer.from([0x00, 0x03]), Buffer.alloc(30, 1)]);
 
 function decodeInvoke(operation: string) {
     const body = xdr.Operation.fromXDR(operation, 'base64').body().invokeHostFunctionOp();
@@ -58,7 +59,6 @@ const marketDataScVal = () => xdr.ScVal.scvMap([
     entry('funding_pool', i128(9n)),
     entry('funding_rate', i128(10n)),
     entry('funding_update', u64(11n)),
-    entry('last_price_time', u64(16n)),
     entry('notional', sidePair(12n, 13n)),
     entry('tokens', sidePair(14n, 15n)),
 ]);
@@ -68,16 +68,16 @@ describe('TradingContract full surface', () => {
 
     it('deploy builds a createCustomContract op with the constructor args', () => {
         const args: DeployArgs = {
-            owner: OWNER, token: TOKEN, vault: VAULT, priceVerifier: PRICE_VERIFIER,
-            treasury: TREASURY, feedId: 1, exponent: -8, config: makeConfig(),
+            owner: OWNER, token: TOKEN, vault: VAULT, oracle: ORACLE,
+            treasury: TREASURY, feedId: FEED_ID, config: makeConfig(),
         };
         const opHex = TradingContract.deploy(OWNER, Buffer.alloc(32, 9).toString('hex'), args);
         const body = xdr.Operation.fromXDR(opHex, 'base64').body().invokeHostFunctionOp();
         const create = body.hostFunction().createContractV2();
-        expect(create.constructorArgs().length).toBe(8);
+        expect(create.constructorArgs().length).toBe(7);
         expect(scValToNative(create.constructorArgs()[0])).toBe(OWNER);
-        expect(scValToNative(create.constructorArgs()[5])).toBe(1);
-        expect(scValToNative(create.constructorArgs()[6])).toBe(-8);
+        expect(scValToNative(create.constructorArgs()[3])).toBe(ORACLE);
+        expect(Buffer.from(create.constructorArgs()[5].bytes())).toEqual(FEED_ID);
 
         // Buffer wasmHash + salt variant
         const opBuf = TradingContract.deploy(OWNER, Buffer.alloc(32, 9), args, Buffer.alloc(32, 2));
@@ -158,7 +158,7 @@ describe('TradingContract full surface', () => {
         expect(decodeInvoke(contract.getToken()).fn).toBe('get_token');
         expect(decodeInvoke(contract.getVault()).fn).toBe('get_vault');
         expect(decodeInvoke(contract.getTreasury()).fn).toBe('get_treasury');
-        expect(decodeInvoke(contract.getPriceVerifier()).fn).toBe('get_price_verifier');
+        expect(decodeInvoke(contract.getOracle()).fn).toBe('get_oracle');
         expect(decodeInvoke(contract.getRetirement()).fn).toBe('get_retirement');
         expect(decodeInvoke(contract.getFeed()).fn).toBe('get_feed');
     });
@@ -260,14 +260,14 @@ describe('TradingContract full surface', () => {
             expect(parsers.getToken(Address.fromString(TOKEN).toScVal().toXDR('base64'))).toBe(TOKEN);
             expect(parsers.getVault(Address.fromString(VAULT).toScVal().toXDR('base64'))).toBe(VAULT);
             expect(parsers.getTreasury(Address.fromString(TREASURY).toScVal().toXDR('base64'))).toBe(TREASURY);
-            expect(parsers.getPriceVerifier(Address.fromString(PRICE_VERIFIER).toScVal().toXDR('base64'))).toBe(PRICE_VERIFIER);
+            expect(parsers.getOracle(Address.fromString(ORACLE).toScVal().toXDR('base64'))).toBe(ORACLE);
             expect(parsers.getOwner(Address.fromString(OWNER).toScVal().toXDR('base64'))).toBe(OWNER);
             expect(parsers.getOwner(xdr.ScVal.scvVoid().toXDR('base64'))).toBeUndefined();
         });
 
-        it('parses tuple views', () => {
-            const feed = xdr.ScVal.scvVec([xdr.ScVal.scvU32(7), xdr.ScVal.scvI32(-8)]).toXDR('base64');
-            expect(parsers.getFeed(feed)).toEqual([7, -8]);
+        it('parses the feed bytes and the retirement tuple', () => {
+            const feed = xdr.ScVal.scvBytes(FEED_ID).toXDR('base64');
+            expect(Buffer.from(parsers.getFeed(feed))).toEqual(FEED_ID);
             const retirement = xdr.ScVal.scvVec([i128(100n), u64(123n)]).toXDR('base64');
             expect(parsers.getRetirement(retirement)).toEqual([100n, 123n]);
             expect(parsers.getRetirement(xdr.ScVal.scvVoid().toXDR('base64'))).toBeUndefined();
@@ -285,7 +285,7 @@ describe('TradingContract full surface', () => {
             const parsedMarketData = parsers.getMarketData(marketData);
             expect(parsedMarketData.notional).toEqual({ long: 12n, short: 13n });
             expect(parsedMarketData.fundingRate).toBe(10n);
-            expect(parsedMarketData.lastPriceTime).toBe(16n);
+            expect('lastPriceTime' in parsedMarketData).toBe(false);
             expect(parsers.accrue(marketData).fundingOwed).toBe(8n);
             expect(parsers.accrueFunding(marketData).fundingPool).toBe(9n);
 
@@ -307,7 +307,7 @@ describe('TradingContract full surface', () => {
             expect(parsedPosition.decreaseOrders).toEqual([11, 12]);
         });
 
-        it('parses Option views (Order, VaultOrder) and the Config mirror', () => {
+        it('parses the Order/VaultOrder rows and the Config mirror', () => {
             const order = xdr.ScVal.scvMap([
                 entry('margin', i128(1n)),
                 entry('created_at', u64(2n)),
@@ -319,11 +319,10 @@ describe('TradingContract full surface', () => {
                 entry('price_bound', i128(5n)),
                 entry('trigger_price', i128(6n)),
             ]).toXDR('base64');
-            const parsedOrder = parsers.getOrder(order)!;
+            const parsedOrder = parsers.getOrder(order);
             expect(parsedOrder.kind).toBe(OrderKind.LimitIncrease);
             expect(parsedOrder.execFee).toBe(7n);
             expect(parsedOrder.expiration).toBe(3);
-            expect(parsers.getOrder(xdr.ScVal.scvVoid().toXDR('base64'))).toBeUndefined();
 
             const vaultOrder = xdr.ScVal.scvMap([
                 entry('amount', i128(1n)),
@@ -332,11 +331,10 @@ describe('TradingContract full surface', () => {
                 entry('kind', xdr.ScVal.scvU32(1)),
                 entry('min_out', i128(3n)),
             ]).toXDR('base64');
-            const parsedVaultOrder = parsers.getVaultOrder(vaultOrder)!;
+            const parsedVaultOrder = parsers.getVaultOrder(vaultOrder);
             expect(parsedVaultOrder.kind).toBe(VaultOrderKind.Redeem);
             expect(parsedVaultOrder.minOut).toBe(3n);
             expect(parsedVaultOrder.execFee).toBe(5n);
-            expect(parsers.getVaultOrder(xdr.ScVal.scvVoid().toXDR('base64'))).toBeUndefined();
 
             const config = tradingConfigToScVal(makeConfig()).toXDR('base64');
             expect(parsers.getConfig(config)).toEqual(makeConfig());

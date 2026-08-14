@@ -92,7 +92,11 @@ export interface VaultRestingOrderCreation {
     minOut: bigint;
     executionFee: bigint;
     createdAt: bigint;
-    /** Earliest valid later price timestamp, or null at the u64 ceiling. */
+    /**
+     * Earliest ledger timestamp at which a fill can land (the fill ledger must
+     * strictly postdate creation; the price's publishTime may equal
+     * createdAt), or null at the u64 ceiling.
+     */
     fillAfter: bigint | null;
     /** Contract cooldown boundary for a redeem, otherwise null. */
     redeemUnlockAt: bigint | null;
@@ -150,6 +154,7 @@ export interface VaultQuoteContext {
 
 export interface VaultDepositQuoteInput extends VaultQuoteContext {
     assets: bigint;
+    createdAt: bigint;
 }
 
 export interface VaultRedeemQuoteInput extends VaultQuoteContext {
@@ -235,6 +240,20 @@ function cappedNetPnl(
     const long = marketSidePnl(market, price, true, maximize);
     const short = marketSidePnl(market, price, false, maximize);
     return addI128(long < cap ? long : cap, short < cap ? short : cap);
+}
+
+/**
+ * Mirror the execute_vault_order commit-then-execute timing gates: the fill
+ * may not price at a payload predating the commitment (equality passes), and
+ * it must land in a ledger strictly later than the commitment.
+ */
+function requireFillTiming(
+    price: PriceData,
+    createdAt: bigint,
+    now: bigint,
+): void {
+    if (price.publishTime < createdAt) throw new VaultQuoteGateError(740);
+    if (now <= createdAt) throw new VaultQuoteGateError(740);
 }
 
 function prepareContext(input: VaultQuoteContext): PreparedVaultContext {
@@ -324,6 +343,10 @@ export function quoteVaultOrderCreation(
             if (input.action === 'deposit') {
                 throw new VaultQuoteGateError(702);
             }
+            const shares = input.amount;
+            // Same guard as the pending-redeem branch below: the contract
+            // rejects a non-positive share amount before touching the vault.
+            if (shares <= 0n) throw new VaultQuoteGateError(732);
             if (input.vault === undefined) {
                 return unavailable(
                     'MISSING_STATE',
@@ -331,8 +354,6 @@ export function quoteVaultOrderCreation(
                 );
             }
             const vault = input.vault;
-            const shares = input.amount;
-            if (shares <= 0n) throw new VaultQuoteGateError(800);
             if (shares > vault.totalSupply) {
                 throw new RangeError('redeem shares exceed total supply');
             }
@@ -397,6 +418,7 @@ export function quoteVaultDepositFill(
 ): QuoteResult<VaultQuoteOutcome> {
     try {
         const prepared = prepareContext(input);
+        requireFillTiming(input.price, input.createdAt, input.now);
         const assets = input.assets;
         if (assets <= 0n) throw new VaultQuoteGateError(800);
 
@@ -459,6 +481,7 @@ export function quoteVaultRedeemFill(
 ): QuoteResult<VaultQuoteOutcome> {
     try {
         const prepared = prepareContext(input);
+        requireFillTiming(input.price, input.createdAt, input.now);
         if (
             input.now <
             saturatingTimestampAdd(input.createdAt, input.config.redeemLock)

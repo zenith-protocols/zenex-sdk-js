@@ -1,6 +1,6 @@
 import { tradingSpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
-import { i128, u32, i32, u64 } from '../../index.js';
+import { i128, u32, u64 } from '../../index.js';
 import type { Call } from '../router/router_types.js';
 import {
     OrderKind, VaultOrderKind, TradingConfig,
@@ -19,10 +19,10 @@ export interface DeployArgs {
     owner: string;
     token: string;
     vault: string;
-    priceVerifier: string;
+    oracle: string;
     treasury: string;
-    feedId: u32;
-    exponent: i32;
+    /** 32-byte Data Streams stream id (`BytesN<32>`); must be a V3 (`0x0003…`) stream. */
+    feedId: Buffer | Uint8Array;
     config: TradingConfig;
 }
 
@@ -105,6 +105,14 @@ function priceBuffer(price: Buffer | Uint8Array): Buffer {
     return price instanceof Buffer ? price : Buffer.from(price);
 }
 
+/** Coerce a 32-byte feed id into a `Buffer` for `scvBytes` (`BytesN<32>`). */
+function feedIdBuffer(feedId: Buffer | Uint8Array): Buffer {
+    if (feedId.length !== 32) {
+        throw new Error(`feedId must be 32 bytes, got ${feedId.length}`);
+    }
+    return feedId instanceof Buffer ? feedId : Buffer.from(feedId);
+}
+
 /**
  * TradingContract - Operation builder for the Zenex Trading contract
  * (order -> keeper-execute flow, single market per contract instance).
@@ -159,16 +167,14 @@ export class TradingContract extends Contract {
             parseMarketData(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
         getPosition: (result: string): Position =>
             parsePosition(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
-        // Option<Order>: None decodes to null.
-        getOrder: (result: string): Order | undefined => {
-            const native = scValToNative(xdr.ScVal.fromXDR(result, 'base64'));
-            return native == null ? undefined : parseOrder(native);
-        },
-        // Option<VaultOrder>: None decodes to null.
-        getVaultOrder: (result: string): VaultOrder | undefined => {
-            const native = scValToNative(xdr.ScVal.fromXDR(result, 'base64'));
-            return native == null ? undefined : parseVaultOrder(native);
-        },
+        // A missing order traps OrderNotFound (730) on-chain; the result here
+        // is always a stored row.
+        getOrder: (result: string): Order =>
+            parseOrder(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
+        // A missing vault order traps VaultOrderNotFound (750) on-chain; the
+        // result here is always a stored row.
+        getVaultOrder: (result: string): VaultOrder =>
+            parseVaultOrder(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
         getConfig: (result: string): TradingConfig =>
             parseTradingConfig(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
         // --- plain scalar / address / tuple views (passthrough) ---
@@ -182,24 +188,24 @@ export class TradingContract extends Contract {
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         getTreasury: (result: string): string =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        getPriceVerifier: (result: string): string =>
+        getOracle: (result: string): string =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         getRetirement: (result: string): [i128, u64] | undefined =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')) ?? undefined,
-        getFeed: (result: string): [u32, i32] =>
+        getFeed: (result: string): Buffer =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
     };
 
     /**
      * Deploy a new instance of the Trading contract.
      *
-     * Constructor: `__constructor(owner, token, vault, price_verifier,
-     * treasury, feed_id, exponent, config)`. `MarketData` starts zeroed with
-     * its accrual timestamps at `now`; status starts `Status::Active`.
+     * Constructor: `__constructor(owner, token, vault, oracle, treasury,
+     * feed_id, config)`. `MarketData` starts zeroed with its accrual
+     * timestamps at `now`; status starts `Status::Active`.
      *
      * # Errors
-     * - InvalidConfig (700) if `exponent` is outside the valid range, or a
-     *   config bound or range check fails.
+     * - InvalidConfig (700) if `feedId` is not a V3 (`0x0003…`) stream id, or
+     *   a config bound or range check fails.
      * - NegativeValueNotAllowed (710) if any rate, fee, or margin is negative.
      */
     static deploy(
@@ -219,10 +225,9 @@ export class TradingContract extends Contract {
                 Address.fromString(args.owner).toScVal(),
                 Address.fromString(args.token).toScVal(),
                 Address.fromString(args.vault).toScVal(),
-                Address.fromString(args.priceVerifier).toScVal(),
+                Address.fromString(args.oracle).toScVal(),
                 Address.fromString(args.treasury).toScVal(),
-                xdr.ScVal.scvU32(args.feedId),
-                xdr.ScVal.scvI32(args.exponent),
+                xdr.ScVal.scvBytes(feedIdBuffer(args.feedId)),
                 tradingConfigToScVal(args.config),
             ],
         }).toXDR('base64');
@@ -235,13 +240,15 @@ export class TradingContract extends Contract {
     /**
      * Replace the global trading configuration.
      *
-     * A borrowing-param change requires a same-ledger `accrue`. Owner only.
+     * A borrowing-param change requires a same-ledger `accrue`, waived while
+     * `Status::Frozen`: the first accrual at unfreeze then prices the entire
+     * frozen window at the new rates. Owner only.
      *
      * # Errors
      * - InvalidConfig (700) if a bound or range check fails.
      * - NegativeValueNotAllowed (710) if any rate, fee, or margin is negative.
      * - BorrowingNotAccrued (703) if a borrowing param changed without a
-     *   same-ledger accrual.
+     *   same-ledger accrual (waived while `Status::Frozen`).
      */
     setConfig(config: TradingConfig): string {
         return this.call(
@@ -308,8 +315,8 @@ export class TradingContract extends Contract {
      *   `priceBound` is negative.
      * - InvalidOrder (732) if the shape is a no-op, a moved value is below a
      *   dust floor, or a limit/stop kind carries a non-positive `triggerPrice`.
-     * - TooManyOrders (733) if the side already holds the maximum pending
-     *   decrease orders.
+     * - TooManyOrders (733) if the side already holds the maximum
+     *   (`MAX_ORDERS_PER_SIDE` = 8) pending decrease orders.
      * - NotionalAboveMaximum (712) if an increase's `notional` exceeds `maxPositionNotional`.
      * - OrderExpired (731) if `expiration` is already behind the current ledger.
      */
@@ -572,8 +579,6 @@ export class TradingContract extends Contract {
      *
      * # Errors
      * - MarketFrozen (704) if the market status is `Frozen` or `Retired`.
-     * - StalePrice (740) if the verified price is older than the newest price
-     *   the market has consumed.
      */
     updateAdlState(price: Buffer | Uint8Array): string {
         return this.call(
@@ -631,8 +636,8 @@ export class TradingContract extends Contract {
      * # Errors
      * - MarketFrozen (704) if the market status is `Frozen` or `Retired`.
      * - VaultOrderNotFound (750) if no vault order `(user, id)` exists.
-     * - StalePrice (740) if the verified price does not strictly postdate the
-     *   order's `createdAt`.
+     * - StalePrice (740) if the effective price's `publish_time` predates the
+     *   order's `createdAt`, or the fill runs in the order's creation ledger.
      * - VaultOrderLocked (751) if a redeem's `redeemLock` cooldown from
      *   `createdAt` has not elapsed.
      * - MinOutNotMet (752) if the fill returns less than the order's `minOut`.
@@ -717,7 +722,11 @@ export class TradingContract extends Contract {
      * Look up the pending keeper order `(user, id)`.
      *
      * # Returns
-     * - The stored `Order`, or `undefined` if none exists.
+     * - The stored `Order` row. The read extends the entry's TTL when
+     *   submitted on-chain; a simulated call leaves no footprint.
+     *
+     * # Errors
+     * - OrderNotFound (730) if no such order exists.
      */
     getOrder(user: string, id: u32): string {
         return this.call(
@@ -736,7 +745,11 @@ export class TradingContract extends Contract {
      * Look up the pending vault order `(user, id)`.
      *
      * # Returns
-     * - The stored `VaultOrder`, or `undefined` if none exists.
+     * - The stored `VaultOrder` row. The read extends the entry's TTL when
+     *   submitted on-chain; a simulated call leaves no footprint.
+     *
+     * # Errors
+     * - VaultOrderNotFound (750) if no such vault order exists.
      */
     getVaultOrder(user: string, id: u32): string {
         return this.call(
@@ -793,9 +806,9 @@ export class TradingContract extends Contract {
         return this.call('get_treasury').toXDR('base64');
     }
 
-    /** Read the price-verifier contract address. */
-    getPriceVerifier(): string {
-        return this.call('get_price_verifier').toXDR('base64');
+    /** Read the oracle contract address. */
+    getOracle(): string {
+        return this.call('get_oracle').toXDR('base64');
     }
 
     /**
@@ -811,10 +824,10 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Read the oracle feed anchors.
+     * Read the oracle feed anchor.
      *
      * # Returns
-     * - The constructor-set `[feedId, exponent]` pair; `price_scalar = 10^-exponent`.
+     * - The constructor-set 32-byte price stream id (`BytesN<32>`).
      */
     getFeed(): string {
         return this.call('get_feed').toXDR('base64');

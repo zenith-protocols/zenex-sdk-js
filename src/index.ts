@@ -140,11 +140,14 @@ export type {
 // Factory Module
 // =============================================================================
 
-export { FactoryContract } from './contracts/factory/index.js';
+export { FactoryContract, FactoryEventType } from './contracts/factory/index.js';
 
 export type {
     FactoryInitMeta,
     FactoryConstructorArgs,
+    BaseFactoryEvent,
+    FactoryDeployEvent,
+    FactoryEvent,
 } from './contracts/factory/index.js';
 
 // =============================================================================
@@ -169,15 +172,15 @@ export type {
 } from './contracts/governance/index.js';
 
 // =============================================================================
-// Price Verifier Module
+// Oracle Module (Chainlink Data Streams verifier)
 // =============================================================================
 
-export { PriceVerifierContract } from './contracts/price-verifier/index.js';
+export { OracleContract } from './contracts/oracle/index.js';
 
 export type {
-    PriceVerifierPriceData,
-    PriceVerifierConstructorArgs,
-} from './contracts/price-verifier/index.js';
+    OraclePriceData,
+    OracleConstructorArgs,
+} from './contracts/oracle/index.js';
 
 // =============================================================================
 // Treasury Module
@@ -234,6 +237,8 @@ export type {
     VaultConstructorArgs,
     VaultInstanceState,
     BaseVaultEvent,
+    VaultDepositEvent,
+    VaultWithdrawEvent,
     VaultStrategyWithdrawEvent,
     VaultEvent,
 } from './contracts/vault/index.js';
@@ -250,7 +255,7 @@ export {
     parseError,
     parseResult,
 } from './response_parser.js';
-export { tradingErrorMessages } from './errors.js';
+export { tradingErrorMessages, parseContractErrorCode } from './errors.js';
 
 // =============================================================================
 // Ledger Keys (direct storage reads)
@@ -267,17 +272,17 @@ export {
     // Trading DataKey mirrors - instance tier
     tradingConfigKey,
     tradingFeedIdKey,
-    tradingExponentKey,
     tradingStatusKey,
     tradingVaultKey,
     tradingTokenKey,
-    tradingPriceVerifierKey,
+    tradingOracleKey,
     tradingTreasuryKey,
     tradingDelistedAtKey,
     tradingTerminalPriceKey,
     tradingAdlKey,
     // Trading DataKey mirrors - persistent / temporary entries
     tradingMarketDataLedgerKey,
+    tradingPriceCacheLedgerKey,
     tradingPositionLedgerKey,
     tradingVaultOrderLedgerKey,
     tradingOrderCounterLedgerKey,

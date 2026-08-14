@@ -127,14 +127,9 @@ export function tradingConfigKey(): xdr.ScVal {
     return tradingUnitDataKey('Config');
 }
 
-/** `DataKey::FeedId` -> u32: price feed id; immutable, constructor-set. */
+/** `DataKey::FeedId` -> BytesN<32>: price stream id; immutable, constructor-set. */
 export function tradingFeedIdKey(): xdr.ScVal {
     return tradingUnitDataKey('FeedId');
-}
-
-/** `DataKey::Exponent` -> i32: oracle exponent; immutable, constructor-set. */
-export function tradingExponentKey(): xdr.ScVal {
-    return tradingUnitDataKey('Exponent');
 }
 
 /** `DataKey::Status` -> u32: operational status (Status discriminant). */
@@ -152,9 +147,9 @@ export function tradingTokenKey(): xdr.ScVal {
     return tradingUnitDataKey('Token');
 }
 
-/** `DataKey::PriceVerifier` -> Address: price-verifier contract. */
-export function tradingPriceVerifierKey(): xdr.ScVal {
-    return tradingUnitDataKey('PriceVerifier');
+/** `DataKey::Oracle` -> Address: oracle contract. */
+export function tradingOracleKey(): xdr.ScVal {
+    return tradingUnitDataKey('Oracle');
 }
 
 /** `DataKey::Treasury` -> Address: treasury contract (protocol fee sink). */
@@ -182,6 +177,18 @@ export function tradingAdlKey(): xdr.ScVal {
 /** `DataKey::MarketData` -> MarketData: hot per-market state; singleton, own entry. */
 export function tradingMarketDataLedgerKey(contractId: string): xdr.LedgerKey {
     return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('MarketData')]);
+}
+
+// --- temporary tier ---
+
+/**
+ * `DataKey::PriceCache` -> PriceData: newest verified price the market has
+ * consumed (monotonic on publish_time). Temporary durability with the
+ * network-minimum TTL (16 ledgers), re-extended on every write; lazy, lapses
+ * harmlessly, so an absent entry just means no recent consumption.
+ */
+export function tradingPriceCacheLedgerKey(contractId: string): xdr.LedgerKey {
+    return temporaryLedgerKey(contractId, [xdr.ScVal.scvSymbol('PriceCache')]);
 }
 
 // --- persistent, user tier ---

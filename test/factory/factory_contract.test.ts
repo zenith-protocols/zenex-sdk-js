@@ -6,7 +6,9 @@ import { TradingConfig } from '../../src/contracts/trading/trading_types.js';
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const ADMIN = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
 const TOKEN = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
-const PRICE_VERIFIER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 4));
+const ORACLE = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 4));
+// V3 Chainlink Data Streams stream id: 0x0003 prefix, 32 bytes.
+const FEED_ID = Buffer.concat([Buffer.from([0x00, 0x03]), Buffer.alloc(30, 8)]);
 const TREASURY = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 5));
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 6));
 const VAULT = StrKey.encodeContract(Buffer.alloc(32, 7));
@@ -105,48 +107,57 @@ const EXPECTED_CONFIG_ENTRIES: [string, bigint][] = [
 describe('FactoryContract', () => {
     const contract = new FactoryContract(CONTRACT_ID);
 
-    it('deployMarket builds deploy with the exact 10-arg order and config as a map', () => {
+    it('deployMarket builds deploy with the exact 9-arg order and config as a map', () => {
         const salt = Buffer.alloc(32, 7);
         const op = contract.deployMarket(
             ADMIN,
             salt,
             TOKEN,
-            PRICE_VERIFIER,
-            42,
-            -8,
+            ORACLE,
+            FEED_ID,
             makeConfig(),
             'Vault Shares',
             'vTKN',
             0,
         );
-        const { fn, args } = decodeInvoke(op);
+        const { fn, args, rawArgs } = decodeInvoke(op);
         expect(fn).toBe('deploy');
-        expect(args).toHaveLength(10);
+        expect(args).toHaveLength(9);
         expect(args[0]).toBe(ADMIN);
         expect(args[1]).toEqual(salt);
         expect(args[2]).toBe(TOKEN);
-        expect(args[3]).toBe(PRICE_VERIFIER);
-        expect(args[4]).toBe(42);
-        expect(args[5]).toBe(-8);
-        expect(args[7]).toBe('Vault Shares');
-        expect(args[8]).toBe('vTKN');
-        expect(args[9]).toBe(0);
+        expect(args[3]).toBe(ORACLE);
+        expect(rawArgs[4].switch().name).toBe('scvBytes');
+        expect(Buffer.from(args[4])).toEqual(FEED_ID);
+        expect(args[6]).toBe('Vault Shares');
+        expect(args[7]).toBe('vTKN');
+        expect(args[8]).toBe(0);
+    });
+
+    it('deployMarket accepts the feed id as a plain Uint8Array', () => {
+        const op = contract.deployMarket(
+            ADMIN, Buffer.alloc(32, 7), TOKEN, ORACLE, Uint8Array.from(FEED_ID),
+            makeConfig(), 'Vault Shares', 'vTKN', 0,
+        );
+        const { rawArgs } = decodeInvoke(op);
+        expect(rawArgs[4].switch().name).toBe('scvBytes');
+        expect(Buffer.from(rawArgs[4].bytes())).toEqual(FEED_ID);
     });
 
     it('encodes the 34-field config map in alphabetical key order with the right values', () => {
         const op = contract.deployMarket(
-            ADMIN, Buffer.alloc(32, 7), TOKEN, PRICE_VERIFIER, 42, -8,
+            ADMIN, Buffer.alloc(32, 7), TOKEN, ORACLE, FEED_ID,
             makeConfig(), 'Vault Shares', 'vTKN', 0,
         );
         const { rawArgs } = decodeInvoke(op);
 
-        const configMap = rawArgs[6].map();
+        const configMap = rawArgs[5].map();
         expect(configMap).toBeDefined();
         // XDR map entry order is the on-chain contract's alphabetical order.
         const encodedKeys = configMap!.map((entry) => entry.key().sym().toString());
         expect(encodedKeys).toEqual(EXPECTED_CONFIG_ENTRIES.map(([key]) => key));
 
-        const native = scValToNative(rawArgs[6]) as Record<string, bigint>;
+        const native = scValToNative(rawArgs[5]) as Record<string, bigint>;
         for (const [key, value] of EXPECTED_CONFIG_ENTRIES) {
             expect(native[key], `config field ${key}`).toBe(value);
         }

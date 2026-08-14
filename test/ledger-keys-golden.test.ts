@@ -5,16 +5,16 @@ import {
     tokenBalanceLedgerKey,
     tradingConfigKey,
     tradingFeedIdKey,
-    tradingExponentKey,
     tradingStatusKey,
     tradingVaultKey,
     tradingTokenKey,
-    tradingPriceVerifierKey,
+    tradingOracleKey,
     tradingTreasuryKey,
     tradingDelistedAtKey,
     tradingTerminalPriceKey,
     tradingAdlKey,
     tradingMarketDataLedgerKey,
+    tradingPriceCacheLedgerKey,
     tradingPositionLedgerKey,
     tradingVaultOrderLedgerKey,
     tradingOrderCounterLedgerKey,
@@ -84,16 +84,16 @@ function unionSpec(
 const dataKey = unionSpec('DataKey', [
     voidCase('Config'),
     voidCase('FeedId'),
-    voidCase('Exponent'),
     voidCase('Status'),
     voidCase('Vault'),
     voidCase('Token'),
-    voidCase('PriceVerifier'),
+    voidCase('Oracle'),
     voidCase('Treasury'),
     voidCase('DelistedAt'),
     voidCase('TerminalPrice'),
     voidCase('Adl'),
     voidCase('MarketData'),
+    voidCase('PriceCache'),
     tupleCase('Position', [ADDRESS, BOOL]),
     tupleCase('VaultOrder', [ADDRESS, U32]),
     tupleCase('Order', [ADDRESS, U32]),
@@ -132,11 +132,10 @@ describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () =
         const cases: [string, xdr.ScVal][] = [
             ['Config', tradingConfigKey()],
             ['FeedId', tradingFeedIdKey()],
-            ['Exponent', tradingExponentKey()],
             ['Status', tradingStatusKey()],
             ['Vault', tradingVaultKey()],
             ['Token', tradingTokenKey()],
-            ['PriceVerifier', tradingPriceVerifierKey()],
+            ['Oracle', tradingOracleKey()],
             ['Treasury', tradingTreasuryKey()],
             ['DelistedAt', tradingDelistedAtKey()],
             ['TerminalPrice', tradingTerminalPriceKey()],
@@ -153,6 +152,17 @@ describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () =
         expect(b64(tradingMarketDataLedgerKey(MARKET))).toBe(
             b64(expectedContractDataKey(MARKET, specScVal(dataKey, 'MarketData'))),
         );
+    });
+
+    it('PriceCache temporary key matches the spec encoder', () => {
+        const expected = xdr.LedgerKey.contractData(
+            new xdr.LedgerKeyContractData({
+                contract: Address.fromString(MARKET).toScAddress(),
+                key: specScVal(dataKey, 'PriceCache'),
+                durability: xdr.ContractDataDurability.temporary(),
+            }),
+        );
+        expect(b64(tradingPriceCacheLedgerKey(MARKET))).toBe(b64(expected));
     });
 
     it('Position key matches for both sides and account/contract users', () => {

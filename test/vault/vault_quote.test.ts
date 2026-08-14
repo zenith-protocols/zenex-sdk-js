@@ -43,7 +43,6 @@ const tradingVaultCases: Record<string, ContractCase> = {
             long_tokens: 100_000_000_000n,
             short_tokens: 0n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 800_000_000n,
             ask: 800_000_000n,
             publish_time: 2n,
@@ -87,7 +86,6 @@ const tradingVaultCases: Record<string, ContractCase> = {
             long_tokens: 100_000_000_000n,
             short_tokens: 0n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_200_000_000n,
             ask: 1_200_000_000n,
             publish_time: 2n,
@@ -133,7 +131,6 @@ const tradingVaultCases: Record<string, ContractCase> = {
             long_tokens: 900_000_000_000_000_000n,
             short_tokens: 0n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 2n,
@@ -178,7 +175,6 @@ const tradingVaultCases: Record<string, ContractCase> = {
             long_tokens: 800_000_000_000_000_000n,
             short_tokens: 0n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 2n,
@@ -284,12 +280,18 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
     };
 }
 
+function feedId(id: bigint): Buffer {
+    const bytes = Buffer.alloc(32);
+    bytes.writeBigUInt64BE(id, 24);
+    return bytes;
+}
+
 function price(overrides: Partial<PriceData> = {}): PriceData {
     return {
-        feedId: 1,
-        exponent: -8,
+        feedId: feedId(1n),
         bid: 1_000_000_000n,
         ask: 1_000_000_000n,
+        publishTime: 2n,
         ...overrides,
     };
 }
@@ -377,10 +379,10 @@ function tradingContext(id: string): {
                 10_000_000_000_000n,
         }),
         price: price({
-            feedId: Number(inputs.feed_id),
-            exponent: Number(inputs.exponent),
+            feedId: feedId(inputs.feed_id as bigint),
             bid: inputs.bid as bigint,
             ask: inputs.ask as bigint,
+            publishTime: inputs.publish_time as bigint,
         }),
         // The trading artifact intentionally uses a 1:1 mock strategy. Match
         // its exchange rate while the production conversion is tested against
@@ -400,6 +402,7 @@ function tradingContext(id: string): {
             ? {
                   ...common,
                   assets: inputs.assets_deposited as bigint,
+                  createdAt: inputs.created_at as bigint,
               }
             : {
                   ...common,
@@ -457,10 +460,77 @@ describe('trading vault fill sequence', () => {
         });
     });
 
+    it('rejects a deposit fill priced at a payload predating the order', () => {
+        const result = quoteVaultDeposit({
+            ...context({ now: 3n, price: price({ publishTime: 1n }) }),
+            assets: 100n,
+            createdAt: 2n,
+        });
+
+        expect(result).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('#740'),
+        });
+    });
+
+    it('rejects a deposit fill in the commitment ledger even with a fresh price', () => {
+        const result = quoteVaultDeposit({
+            ...context({ now: 2n, price: price({ publishTime: 2n }) }),
+            assets: 100n,
+            createdAt: 2n,
+        });
+
+        expect(result).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('#740'),
+        });
+    });
+
+    it('accepts a fill whose price publishTime equals createdAt in a later ledger', () => {
+        const result = quoteVaultDeposit({
+            ...context({ now: 3n, price: price({ publishTime: 2n }) }),
+            assets: 100n,
+            createdAt: 2n,
+        });
+
+        expect(result.kind).toBe('exact');
+    });
+
+    it('gates a same-second redeem fill on the ledger check before the cooldown', () => {
+        const result = quoteVaultRedeem({
+            ...context({ now: 2n, price: price({ publishTime: 2n }) }),
+            shares: 100n,
+            createdAt: 2n,
+        });
+
+        expect(result).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('#740'),
+        });
+    });
+
+    it('rejects a redeem fill priced at a payload predating the order', () => {
+        const result = quoteVaultRedeem({
+            ...context({ now: 3n, price: price({ publishTime: 1n }) }),
+            shares: 100n,
+            createdAt: 2n,
+        });
+
+        expect(result).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('#740'),
+        });
+    });
+
     it('rejects a nonpositive strategy deposit without rereading minDeposit', () => {
         const result = quoteVaultDeposit({
             ...context({ config: config({ minDeposit: 10n }) }),
             assets: 0n,
+            createdAt: 1n,
         });
 
         expect(result).toEqual({
@@ -474,6 +544,7 @@ describe('trading vault fill sequence', () => {
         const result = quoteVaultDeposit({
             ...context({ config: config({ minDeposit: 10n }) }),
             assets: 9n,
+            createdAt: 1n,
         });
 
         expect(result.kind).toBe('exact');
@@ -498,6 +569,7 @@ describe('trading vault fill sequence', () => {
                 },
             }),
             assets: 100n,
+            createdAt: 1n,
         });
 
         expect(result.kind).toBe('exact');
@@ -558,6 +630,7 @@ describe('trading vault fill sequence', () => {
                 config: config({ maxVaultBalance: I128_MAX }),
             }),
             assets: I128_MAX,
+            createdAt: 1n,
         });
 
         expect(result).toEqual({

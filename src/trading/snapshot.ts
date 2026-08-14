@@ -39,10 +39,10 @@ export interface TradingDeployment {
     readonly trading: string;
     readonly router: string;
     readonly vault: string;
-    readonly priceVerifier: string;
+    readonly oracle: string;
     readonly treasury: string;
-    readonly feedId: number;
-    readonly exponent: number;
+    /** 32-byte price stream id (`BytesN<32>`). */
+    readonly feedId: Buffer | Uint8Array;
     readonly vaultDecimalsOffset: number;
     readonly vaultShareDecimals: number;
 }
@@ -69,8 +69,8 @@ export interface TradingSnapshot {
     price: PriceData;
     /**
      * Exact serialized update submitted in this snapshot simulation.
-     * Pyth markets verify it; terminal markets carry it unchanged because
-     * their oracle path ignores the update payload.
+     * Live markets verify it on-chain at fill; terminal markets carry it
+     * unchanged because their oracle path ignores the update payload.
      */
     priceUpdate: Uint8Array;
     vault: VaultAtomicState;
@@ -86,22 +86,20 @@ export type SubjectBoundTradingSnapshot = TradingSnapshot & {
 export type PriceFreshness = (typeof PRICE_FRESHNESS)[number];
 
 /**
- * The platform's numeric price surface for one feed. Signed Pyth Lazer updates
- * are license-restricted and never reach a browser; the snapshot synthesizes a
- * {@link PriceData} from these numeric fields, mirroring the on-chain
- * verifier's positive-uncrossed, confidence, and staleness gates client-side.
- * Maps field-for-field from a decoded `LatestPrice`/`price.tick` payload.
+ * The platform's numeric price surface for one feed. Signed Chainlink Data
+ * Streams reports are license-restricted and never reach a browser; the
+ * snapshot synthesizes a {@link PriceData} from these numeric fields,
+ * mirroring the on-chain oracle's decoded V3 report (bid/ask, fixed 18-dec,
+ * publish time in seconds) client-side.
  */
 export interface TradingSnapshotPrice {
-    readonly feedId: number;
-    readonly exponent: number;
-    /** Aggregate mark in the feed's native precision; drives the confidence gate. */
-    readonly price: bigint;
+    /** 32-byte price stream id (`BytesN<32>`). */
+    readonly feedId: Buffer | Uint8Array;
+    /** Best bid (18-dec, after spread reduction). */
     readonly bid: bigint;
+    /** Best ask (18-dec, after spread reduction). */
     readonly ask: bigint;
-    /** Uncertainty magnitude (>= 0) in the feed's native precision. */
-    readonly confidence: bigint;
-    /** Feed update time in whole seconds. */
+    /** Feed observation time in whole seconds. */
     readonly publishTime: bigint;
     readonly freshness: PriceFreshness;
 }
@@ -187,6 +185,16 @@ function checkedFreshness(value: unknown): PriceFreshness {
     return value as PriceFreshness;
 }
 
+function checkedFeedId(value: unknown, label: string): Buffer {
+    if (!(value instanceof Uint8Array) || value.length !== 32) {
+        throw new SnapshotUnavailableError(
+            'INVALID_INPUT',
+            `${label} must be a 32-byte Uint8Array`,
+        );
+    }
+    return Buffer.from(value);
+}
+
 function checkedNumericPrice(value: unknown): TradingSnapshotPrice {
     if (!value || typeof value !== 'object') {
         throw new SnapshotUnavailableError(
@@ -196,12 +204,9 @@ function checkedNumericPrice(value: unknown): TradingSnapshotPrice {
     }
     const source = value as Record<keyof TradingSnapshotPrice, unknown>;
     return {
-        feedId: checkedU32(source.feedId as number, 'numeric feed id'),
-        exponent: source.exponent as number,
-        price: checkedI128Field(source.price, 'numeric price'),
+        feedId: checkedFeedId(source.feedId, 'numeric feed id'),
         bid: checkedI128Field(source.bid, 'numeric bid'),
         ask: checkedI128Field(source.ask, 'numeric ask'),
-        confidence: checkedI128Field(source.confidence, 'numeric confidence'),
         publishTime: checkedU64(
             source.publishTime as bigint,
             'numeric publish time',
@@ -218,7 +223,13 @@ function validateRequest(request: TradingSnapshotRequest): {
     priceUpdate: Uint8Array;
 } {
     return {
-        deployment: { ...request.deployment },
+        deployment: {
+            ...request.deployment,
+            feedId: checkedFeedId(
+                request.deployment.feedId,
+                'deployment feed id',
+            ),
+        },
         user: request.user,
         isLong: request.isLong,
         price: checkedNumericPrice(request.price),
@@ -226,10 +237,11 @@ function validateRequest(request: TradingSnapshotRequest): {
     };
 }
 
-// The market's price is not read on-chain: signed Pyth Lazer updates are
-// license-restricted and must not reach a browser, so the mark is synthesized
-// from the platform's numeric price surface (see `synthesizeNumericPrice`). The
-// multicall carries only the 16 verbatim state views.
+// The market's price is not read on-chain: signed Chainlink Data Streams
+// reports are license-restricted and must not reach a browser, so the mark is
+// synthesized from the platform's numeric price surface (see
+// `synthesizeNumericPrice`). The multicall carries only the 16 verbatim state
+// views.
 function snapshotCalls(
     deployment: TradingDeployment,
     user: string,
@@ -248,7 +260,7 @@ function snapshotCalls(
         viewCall(deployment.trading, 'get_token'),
         viewCall(deployment.trading, 'get_vault'),
         viewCall(deployment.trading, 'get_treasury'),
-        viewCall(deployment.trading, 'get_price_verifier'),
+        viewCall(deployment.trading, 'get_oracle'),
         viewCall(deployment.vault, 'total_assets'),
         viewCall(deployment.vault, 'total_supply'),
         viewCall(deployment.vault, 'query_asset'),
@@ -336,10 +348,28 @@ function parseLedgerTime(value: string): bigint {
 /** Project the platform's numeric price surface onto {@link PriceData}. */
 function synthesizeNumericPrice(price: TradingSnapshotPrice): PriceData {
     return {
-        feedId: price.feedId,
-        exponent: price.exponent,
+        feedId: Buffer.from(price.feedId),
         bid: price.bid,
         ask: price.ask,
+        publishTime: price.publishTime,
+    };
+}
+
+/**
+ * The flat terminal mark of a retired market. The terminal price has no feed
+ * observation behind it, so its `publishTime` is the snapshot's ledger close
+ * time (it is "current" as of the read).
+ */
+function terminalPrice(
+    feedId: Buffer | Uint8Array,
+    terminal: bigint,
+    ledgerTime: bigint,
+): PriceData {
+    return {
+        feedId: Buffer.from(feedId),
+        bid: terminal,
+        ask: terminal,
+        publishTime: ledgerTime,
     };
 }
 
@@ -370,7 +400,7 @@ function decodeSnapshot(
     const treasuryAddress = TradingContract.parsers.getTreasury(
         resultXdr(values, 8),
     );
-    const verifierAddress = TradingContract.parsers.getPriceVerifier(
+    const oracleAddress = TradingContract.parsers.getOracle(
         resultXdr(values, 9),
     );
     const totalAssets = checkedI128(
@@ -390,13 +420,11 @@ function decodeSnapshot(
 
     let price: PriceData;
     if (retirement && retirement[0] !== 0n) {
-        const terminal = checkedI128(retirement[0]);
-        price = {
-            feedId: deployment.feedId,
-            exponent: deployment.exponent,
-            bid: terminal,
-            ask: terminal,
-        };
+        price = terminalPrice(
+            deployment.feedId,
+            checkedI128(retirement[0]),
+            ledgerTime,
+        );
     } else {
         price = synthesizeNumericPrice(numericPrice);
     }
@@ -465,13 +493,11 @@ export function snapshotFromEntries(
 
     let price: PriceData;
     if (retirement && retirement[0] !== 0n) {
-        const terminal = checkedI128(retirement[0]);
-        price = {
-            feedId: instance.feedId,
-            exponent: instance.exponent,
-            bid: terminal,
-            ask: terminal,
-        };
+        price = terminalPrice(
+            instance.feedId,
+            checkedI128(retirement[0]),
+            ledgerTime,
+        );
     } else {
         price = synthesizeNumericPrice(numericPrice);
     }
@@ -486,10 +512,9 @@ export function snapshotFromEntries(
             trading: entries.trading,
             router: input.router,
             vault: instance.vault,
-            priceVerifier: instance.priceVerifier,
+            oracle: instance.oracle,
             treasury: instance.treasury,
             feedId: instance.feedId,
-            exponent: instance.exponent,
             vaultDecimalsOffset: entries.vault.decimalsOffset,
             vaultShareDecimals: entries.vault.shareDecimals,
         },

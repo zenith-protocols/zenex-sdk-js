@@ -5,13 +5,13 @@ import type { TradingSnapshotPrice } from '../../src/trading/snapshot.js';
 import type { TradingEntriesSnapshot } from '../../src/contracts/trading/trading_entries.js';
 import { Status } from '../../src/contracts/trading/trading_types.js';
 import type { Position } from '../../src/contracts/trading/trading_types.js';
-import { makeConfig } from '../helpers/trading_state.js';
+import { makeConfig, TEST_FEED_ID } from '../helpers/trading_state.js';
 
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 1));
 const VAULT = StrKey.encodeContract(Buffer.alloc(32, 2));
 const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 3));
 const TOKEN = StrKey.encodeContract(Buffer.alloc(32, 4));
-const VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 5));
+const ORACLE = StrKey.encodeContract(Buffer.alloc(32, 5));
 const ROUTER = StrKey.encodeContract(Buffer.alloc(32, 6));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7));
 
@@ -36,12 +36,11 @@ function makeEntries(
         subject: { user: USER, isLong: true },
         instance: {
             config: makeConfig(),
-            feedId: 9,
-            exponent: -8,
+            feedId: TEST_FEED_ID,
             status: Status.Active,
             vault: VAULT,
             token: TOKEN,
-            priceVerifier: VERIFIER,
+            oracle: ORACLE,
             treasury: TREASURY,
             adl: { long: false, short: true },
             ...overrides,
@@ -57,7 +56,6 @@ function makeEntries(
             fundingOwed: 0n,
             fundingUpdate: 0n,
             borrowingUpdate: 0n,
-            lastPriceTime: 0n,
         },
         position,
         vault: {
@@ -79,12 +77,9 @@ function makeEntries(
 }
 
 const numericPrice: TradingSnapshotPrice = {
-    feedId: 9,
-    exponent: -8,
-    price: 100n,
+    feedId: TEST_FEED_ID,
     bid: 99n,
     ask: 101n,
-    confidence: 1n,
     publishTime: 1_700_000_000n,
     freshness: 'fresh',
 };
@@ -107,10 +102,9 @@ describe('snapshotFromEntries', () => {
             trading: TRADING,
             router: ROUTER,
             vault: VAULT,
-            priceVerifier: VERIFIER,
+            oracle: ORACLE,
             treasury: TREASURY,
-            feedId: 9,
-            exponent: -8,
+            feedId: TEST_FEED_ID,
             vaultDecimalsOffset: 3,
             vaultShareDecimals: 10,
         });
@@ -119,10 +113,10 @@ describe('snapshotFromEntries', () => {
         expect(snapshot.config).toEqual(makeConfig());
         expect(snapshot.position).toEqual(position);
         expect(snapshot.price).toEqual({
-            feedId: 9,
-            exponent: -8,
+            feedId: TEST_FEED_ID,
             bid: 99n,
             ask: 101n,
+            publishTime: 1_700_000_000n,
         });
         expect(snapshot.priceUpdate).toEqual(new Uint8Array(0));
         expect(snapshot.vault).toEqual({
@@ -156,11 +150,13 @@ describe('snapshotFromEntries', () => {
             price: numericPrice,
         });
         expect(snapshot.retirement).toEqual([12_345n, 1_600_000_000n]);
+        // The terminal mark has no feed observation behind it; its
+        // publishTime is the snapshot's ledger close time.
         expect(snapshot.price).toEqual({
-            feedId: 9,
-            exponent: -8,
+            feedId: TEST_FEED_ID,
             bid: 12_345n,
             ask: 12_345n,
+            publishTime: 1_700_000_005n,
         });
     });
 

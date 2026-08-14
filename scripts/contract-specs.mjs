@@ -17,15 +17,14 @@ import ts from 'typescript';
 const sdkRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const contractsRoot = '/home/robin/Zenith/Zenex-V2/zenex-contracts';
 const manifestPath = resolve(contractsRoot, 'artifacts/v2/manifest.json');
-const oldContractsRoot = '/home/robin/Zenith/Zenex/zenex-contracts-v2-platform';
 
 const EXPECTED_SOURCE = Object.freeze({
     schemaVersion: 1,
-    contractsCommit: 'fc85144123622676d77c4e72b10aad7eab43d321',
-    productionSourceTree: 'd7537b81ec8ecf4f64b1dcb56dadac71894e04f7',
-    cargoLockSha256: '79a15142a56b0a97f1b0d3af1f9c0625feaa6e9eb3804089f9e31e268f5484a0',
-    rustc: 'rustc 1.93.1 (01f6ddf75 2026-02-11)',
-    cargo: 'cargo 1.93.1 (083ac5135 2025-12-15)',
+    contractsCommit: 'd6f6cb9c518f9989d3723dfe4660eea2d762ccd1',
+    productionSourceTree: 'aa71b347d123dd857bd2a6e12fa8b9ae89f43690',
+    cargoLockSha256: 'eb5429fcee41a363d0d288f92bccde575add7a22130de7b359fd979746408ca6',
+    rustc: 'rustc 1.97.1 (8bab26f4f 2026-07-14)',
+    cargo: 'cargo 1.97.1 (c980f4866 2026-06-30)',
     stellarCli: 'stellar 25.2.0 (28484880988199233a7e8e87c97cb12dac323cb3)',
     stellarXdr: 'stellar-xdr 25.0.0 (dc9f40fcb83c3054341f70b65a2222073369b37b)',
     xdrCurrentRevision: '0a621ec7811db000a60efae5b35f78dee3aa2533',
@@ -37,7 +36,7 @@ const contracts = [
     ['trading_router', 'tradingRouterSpec'],
     ['factory', 'factorySpec'],
     ['strategy_vault', 'strategyVaultSpec'],
-    ['price_verifier', 'priceVerifierSpec'],
+    ['oracle', 'oracleSpec'],
     ['treasury', 'treasurySpec'],
     ['governance', 'governanceSpec'],
 ];
@@ -63,10 +62,10 @@ const bindings = Object.freeze({
         classPath: 'src/contracts/vault/vault_contract.ts',
         fixturePath: 'test/fixtures/specs/strategy_vault.json',
     },
-    price_verifier: {
-        manifestPackage: 'price-verifier',
-        classPath: 'src/contracts/price-verifier/price_verifier_contract.ts',
-        fixturePath: 'test/fixtures/specs/price_verifier.json',
+    oracle: {
+        manifestPackage: 'oracle',
+        classPath: 'src/contracts/oracle/oracle_contract.ts',
+        fixturePath: 'test/fixtures/specs/oracle.json',
     },
     treasury: {
         manifestPackage: 'treasury',
@@ -83,38 +82,38 @@ const bindings = Object.freeze({
 const EXPECTED_CONTRACTS = Object.freeze({
     factory: {
         path: 'artifacts/v2/wasm/factory.wasm',
-        sha256: 'ad47c71dfa109f4c035c84f8e2b412f0087422d510872d5792c2a7e3de8bc6b8',
-        bytes: 7_714,
+        sha256: '020f26d51709fe1c7de1280546f4d88ff729d8243c8b12a20906f480dbb773c9',
+        bytes: 7_705,
     },
     governance: {
         path: 'artifacts/v2/wasm/governance.wasm',
-        sha256: '751b7cc97b3c348e1eaf263eaef0c694ac1c5b3879256e68afe4ab9be8efac87',
-        bytes: 10_130,
+        sha256: '51c5491b0c24dd1ba805ab1038cbdac63b756c4b84e9a71e91b81885656fd250',
+        bytes: 10_260,
     },
-    'price-verifier': {
-        path: 'artifacts/v2/wasm/price_verifier.wasm',
-        sha256: 'a305fb2c74d335602fc4c29e33f12772e747f80d0734293fbea83b709db0a2b3',
-        bytes: 15_247,
+    oracle: {
+        path: 'artifacts/v2/wasm/oracle.wasm',
+        sha256: '795ab53defab9982319e62bb855e434068fac5ed74c84258c34ac85327385bf9',
+        bytes: 15_592,
     },
     'strategy-vault': {
         path: 'artifacts/v2/wasm/strategy_vault.wasm',
-        sha256: '26899099b15ef633220eabfd0871d2678170a3faab12a4e45eb1b986964950eb',
-        bytes: 20_915,
+        sha256: 'afd6fcf06748a6fc21074a48b145288c77ad9ccfee0200b18770c65c326431f4',
+        bytes: 20_679,
     },
     trading: {
         path: 'artifacts/v2/wasm/trading.wasm',
-        sha256: '1a99a7c8f90b094be36909aa8c180f68c13dbe99861bfb76777b481336fadc92',
-        bytes: 66_036,
+        sha256: '890b1b126e6c2b20077467a6c58146770513759945d9ecf2229ca6140fd85fca',
+        bytes: 66_137,
     },
     'trading-router': {
         path: 'artifacts/v2/wasm/trading_router.wasm',
-        sha256: '1affc4279fdc11de0ae14d2a8958f34aa88dfed4759f93a5a49b85c5c545caaa',
-        bytes: 12_350,
+        sha256: 'd2af8cc360972dfee584be3e4595395765fdbffba833f2e031e53a430742dcf2',
+        bytes: 12_312,
     },
     treasury: {
         path: 'artifacts/v2/wasm/treasury.wasm',
-        sha256: '85322d7b3edd30ac9c5f9a7dfb187dfa9eadf0781333ad841fe1bedb75a0eae9',
-        bytes: 6_248,
+        sha256: 'c760dc41ed845fec15361296dbd158f0c2199e67d38ad5f8026048f16162d4f6',
+        bytes: 6_320,
     },
 });
 
@@ -142,9 +141,6 @@ function resolveArtifact(relativePath) {
     const relativeToRoot = relative(contractsRoot, artifactPath);
     if (relativeToRoot.startsWith('..') || relativeToRoot === '') {
         fail(`artifact path leaves the approved source root: ${relativePath}`);
-    }
-    if (artifactPath.startsWith(oldContractsRoot + '/')) {
-        fail(`obsolete contracts checkout is forbidden: ${artifactPath}`);
     }
     return artifactPath;
 }

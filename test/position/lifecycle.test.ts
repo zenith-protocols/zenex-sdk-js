@@ -29,7 +29,6 @@ const positionCases: Record<string, ContractCase> = {
             notional_delta: 600_000_000n,
             collateral_delta: 250_000_000n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 1n,
@@ -55,7 +54,6 @@ const positionCases: Record<string, ContractCase> = {
             position_tokens: 1_000_000_000_000_000_000n,
             position_collateral: 100_000_000n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 1n,
@@ -79,7 +77,6 @@ const positionCases: Record<string, ContractCase> = {
             position_tokens: 100_000_000_000n,
             position_collateral: 10n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 800_000_000n,
             ask: 800_000_000n,
             publish_time: 1n,
@@ -128,7 +125,6 @@ function emptyMarket(overrides: Partial<MarketData> = {}): MarketData {
         borrowingUpdate: 0n,
         fundingPool: 0n,
         fundingOwed: 0n,
-        lastPriceTime: 0n,
         ...overrides,
     };
 }
@@ -174,11 +170,13 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
 }
 
 function price(inputs: Record<string, unknown>): PriceData {
+    const feedId = Buffer.alloc(32);
+    feedId.writeBigUInt64BE(inputs.feed_id as bigint, 24);
     return {
-        feedId: Number(inputs.feed_id),
-        exponent: Number(inputs.exponent),
+        feedId,
         bid: inputs.bid as bigint,
         ask: inputs.ask as bigint,
+        publishTime: (inputs.publish_time ?? 1n) as bigint,
     };
 }
 

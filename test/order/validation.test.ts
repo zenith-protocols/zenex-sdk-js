@@ -2,7 +2,10 @@ import { StrKey } from '@stellar/stellar-sdk';
 import { describe, expect, it } from 'vitest';
 import { validateOrder } from '../../src/trading/order/validation.js';
 import { OrderKind, Status } from '../../src/contracts/trading/trading_types.js';
-import type { TradingConfig } from '../../src/contracts/trading/trading_types.js';
+import type {
+    Position,
+    TradingConfig,
+} from '../../src/contracts/trading/trading_types.js';
 import type { OrderParams } from '../../src/contracts/router/router_types.js';
 
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 1));
@@ -70,10 +73,10 @@ function context(overrides: Record<string, unknown> = {}) {
         status: Status.Active,
         config: config(),
         price: {
-            feedId: 1,
-            exponent: -8,
+            feedId: Buffer.alloc(32, 1),
             bid: 100n,
             ask: 105n,
+            publishTime: 1n,
         },
         ...overrides,
     };
@@ -106,6 +109,35 @@ describe('validateOrder', () => {
         expect(issueCodes(order(), { status: Status.Frozen })).toContain(704);
         expect(issueCodes(order(), { status: Status.Retired })).toContain(704);
         expect(issueCodes(order({ kind: 99 as OrderKind }))).toContain(734);
+    });
+
+    it('caps pending decrease orders per side at MAX_ORDERS_PER_SIDE', () => {
+        const parked: Position = {
+            margin: 100n,
+            notional: 1_000n,
+            tokens: 1_000n,
+            fundingIdx: 0n,
+            borrowingIdx: 0n,
+            lockedNotional: 0n,
+            unlocksAt: 0n,
+            pricedAt: 0n,
+            decreaseOrders: [1, 2, 3, 4, 5, 6, 7, 8],
+        };
+        const decrease = order({
+            kind: OrderKind.MarketDecrease,
+            notional: 100n,
+            margin: 0n,
+            priceBound: 0n,
+        });
+
+        expect(issueCodes(decrease, { position: parked })).toContain(733);
+        expect(
+            issueCodes(decrease, {
+                position: { ...parked, decreaseOrders: [1, 2, 3, 4, 5, 6, 7] },
+            }),
+        ).toEqual([]);
+        // Increases never join the decrease list, so the cap does not apply.
+        expect(issueCodes(order(), { position: parked })).toEqual([]);
     });
 
     it('checks the exact market execution side against the bound', () => {

@@ -32,7 +32,7 @@ import {
 const MARKET = StrKey.encodeContract(Buffer.alloc(32, 1));
 const VAULT = StrKey.encodeContract(Buffer.alloc(32, 2));
 const TOKEN = StrKey.encodeContract(Buffer.alloc(32, 3));
-const PRICE_VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 4));
+const ORACLE = StrKey.encodeContract(Buffer.alloc(32, 4));
 const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 5));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7));
 const RATE = 5n * 10n ** 16n;
@@ -66,7 +66,7 @@ function fullEntries(overrides: {
         tradingInstanceScVal({
             vault: VAULT,
             token: TOKEN,
-            priceVerifier: PRICE_VERIFIER,
+            oracle: ORACLE,
             treasury: TREASURY,
             adl: [true, false],
         });
@@ -285,7 +285,7 @@ describe('loadTradingEntriesBatch: positions-list batching', () => {
                 tradingInstanceScVal({
                     vault: VAULT2,
                     token: TOKEN2,
-                    priceVerifier: PRICE_VERIFIER,
+                    oracle: ORACLE,
                     treasury: TREASURY2,
                 }),
             ),

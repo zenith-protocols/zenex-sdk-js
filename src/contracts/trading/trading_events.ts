@@ -59,11 +59,19 @@ export interface TradingCreateOrderEvent extends BaseTradingEvent {
     order: Order;
 }
 
-/** Pending order cancelled by its owner via `cancel_order`. */
+/**
+ * Pending order cancelled: by its owner via `cancel_order` (the refund pays
+ * in its own transfer), or by the closure sweep that cancels every decrease
+ * order still resting on a side whose position closed (the refunds ride the
+ * same-tx `close_fill`/`liquidation` payout transfer, one receipt per swept
+ * order).
+ */
 export interface TradingCancelOrderEvent extends BaseTradingEvent {
     eventType: TradingEventType.CancelOrder;
     user: string;
     orderId: u32;
+    /** Escrow returned by this cancel (`Order::escrow_amount`), token-dec. */
+    refund: i128;
 }
 
 /**
@@ -282,7 +290,8 @@ export interface TradingDecreaseFillEvent extends BaseTradingEvent {
  * is the exit price the close settled at. `margin` and `pnl` are gross
  * of the itemized fees; `returned` is the post-fee equity floored at zero,
  * any shortfall emitted as `badDebt`. The transfer to the trader adds the
- * escrow refunds of cleared pending decrease orders.
+ * swept decrease-order escrows announced by the same-tx `cancel_order`
+ * receipts.
  */
 export interface TradingCloseFillEvent extends BaseTradingEvent {
     eventType: TradingEventType.CloseFill;
@@ -324,7 +333,9 @@ export interface TradingCloseFillEvent extends BaseTradingEvent {
  * `margin` and `pnl` are gross of the itemized fees; the post-fee
  * remainder (equity, floored at zero) lands on `returned` (trader) on the
  * soft tier and `forfeit` (vault) on the hard tier; any shortfall past the
- * freed margin is emitted as `badDebt` and absorbed by the vault.
+ * freed margin is emitted as `badDebt` and absorbed by the vault. The
+ * soft-tier transfer adds the swept decrease-order escrows announced by the
+ * same-tx `cancel_order` receipts.
  */
 export interface TradingLiquidationEvent extends BaseTradingEvent {
     eventType: TradingEventType.Liquidation;
@@ -352,8 +363,6 @@ export interface TradingLiquidationEvent extends BaseTradingEvent {
     borrowing: i128;
     /** Fees and losses past the freed margin, absorbed by the vault, token-dec. */
     badDebt: i128;
-    /** Liquidation fee, token-dec; 0 = soft tier, > 0 = hard tier. */
-    liqFee: i128;
     /** Post-fee remainder transferred to the trader (soft tier), token-dec. */
     returned: i128;
     /** Post-fee remainder forfeited to the vault (hard tier), token-dec. */

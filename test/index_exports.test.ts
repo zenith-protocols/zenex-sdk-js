@@ -17,7 +17,7 @@ describe('package root exports', () => {
         expect(SDK.TradingRouterContract).toBeTypeOf('function');
         expect(SDK.FactoryContract).toBeTypeOf('function');
         expect(SDK.VaultContract).toBeTypeOf('function');
-        expect(SDK.PriceVerifierContract).toBeTypeOf('function');
+        expect(SDK.OracleContract).toBeTypeOf('function');
         expect(SDK.TreasuryContract).toBeTypeOf('function');
         expect(SDK.GovernanceContract).toBeTypeOf('function');
         expect(SDK.SmartAccountContract).toBeTypeOf('function');
@@ -92,10 +92,15 @@ describe('package root exports', () => {
         expect(SDK.TradingEventType.DecreaseFill).toBe('decrease_fill');
         expect(SDK.TradingEventType.Liquidation).toBe('liquidation');
         expect(SDK.decodeTradingEvent).toBeUndefined();
-        expect(SDK.VaultEventType.StrategyWithdraw).toBe('StrategyWithdraw');
+        // Bare #[contractevent] name topics are snake_case of the struct name.
+        expect(SDK.VaultEventType.Deposit).toBe('deposit');
+        expect(SDK.VaultEventType.Withdraw).toBe('withdraw');
+        expect(SDK.VaultEventType.StrategyWithdraw).toBe('strategy_withdraw');
         expect(SDK.decodeVaultEvent).toBeUndefined();
-        expect(SDK.GovernanceEventType.Queued).toBe('Queued');
+        expect(SDK.GovernanceEventType.Queued).toBe('queued');
+        expect(SDK.GovernanceEventType.StatusSet).toBe('status_set');
         expect(SDK.decodeGovernanceEvent).toBeUndefined();
+        expect(SDK.FactoryEventType.Deploy).toBe('deploy');
         expect(SDK.ZenexContractType.Trading).toBe('trading');
         // The event surface is types-only; consumers own their decode path.
         expect(SDK.decodeEvent).toBeUndefined();
@@ -140,12 +145,16 @@ describe('package root exports', () => {
         expect(SDK.TradingError.UnknownKind).toBe(734);
         expect(SDK.TradingError.MinOutNotMet).toBe(752);
         expect(SDK.TradingError.PendingPnlExceeded).toBe(754);
+        expect(SDK.TradingError.PositionLiquidatable).toBe(723);
+        expect(SDK.TradingError.VaultInsolvent).toBe(755);
         expect(SDK.TradingError.AdlNotEligible).toBe(772);
-        expect(SDK.ContractErrorType.PVFeedNotFound).toBe(790);
+        expect(SDK.ContractErrorType.OracleFeedMismatch).toBe(790);
+        expect(SDK.ContractErrorType.OraclePriceAhead).toBe(793);
         expect(SDK.ContractErrorType.StrategyInvalidAmount).toBe(800);
         expect(SDK.ContractErrorType.GovNotQueued).toBe(810);
         expect(SDK.tradingErrorMessages[700]).toBeTypeOf('string');
         expect(SDK.contractErrorFromCode).toBeTypeOf('function');
+        expect(SDK.parseContractErrorCode).toBeTypeOf('function');
         expect(SDK.parseError).toBeTypeOf('function');
         expect(SDK.parseResult).toBeTypeOf('function');
     });
@@ -159,16 +168,20 @@ describe('package root exports', () => {
         expect(SDK.temporaryLedgerKey).toBeTypeOf('function');
         expect(SDK.tradingConfigKey).toBeTypeOf('function');
         expect(SDK.tradingFeedIdKey).toBeTypeOf('function');
-        expect(SDK.tradingExponentKey).toBeTypeOf('function');
         expect(SDK.tradingStatusKey).toBeTypeOf('function');
         expect(SDK.tradingVaultKey).toBeTypeOf('function');
         expect(SDK.tradingTokenKey).toBeTypeOf('function');
-        expect(SDK.tradingPriceVerifierKey).toBeTypeOf('function');
+        expect(SDK.tradingOracleKey).toBeTypeOf('function');
         expect(SDK.tradingTreasuryKey).toBeTypeOf('function');
         expect(SDK.tradingDelistedAtKey).toBeTypeOf('function');
         expect(SDK.tradingTerminalPriceKey).toBeTypeOf('function');
         expect(SDK.tradingAdlKey).toBeTypeOf('function');
+        // The Exponent and PriceVerifier keys are gone from the contract.
+        const sdk = SDK as Record<string, unknown>;
+        expect(sdk.tradingExponentKey).toBeUndefined();
+        expect(sdk.tradingPriceVerifierKey).toBeUndefined();
         expect(SDK.tradingMarketDataLedgerKey).toBeTypeOf('function');
+        expect(SDK.tradingPriceCacheLedgerKey).toBeTypeOf('function');
         expect(SDK.tradingPositionLedgerKey).toBeTypeOf('function');
         expect(SDK.tradingVaultOrderLedgerKey).toBeTypeOf('function');
         expect(SDK.tradingOrderCounterLedgerKey).toBeTypeOf('function');

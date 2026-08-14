@@ -3,12 +3,15 @@ import { checkedI128 } from '../../math/fixed.js';
 import type { PriceData } from '../market/types.js';
 import { decodeLedgerSequence } from '../quote/result.js';
 import {
+    MAX_ORDERS_PER_SIDE,
     OrderKind,
     Status,
+    type Position,
     type TradingConfig,
 } from '../../contracts/trading/trading_types.js';
 import type { Call, OrderParams } from '../../contracts/router/router_types.js';
 import {
+    isDecreaseOrderKind,
     isIncreaseOrderKind,
     isMarketOrderKind,
     isTriggerOrderKind,
@@ -37,10 +40,16 @@ export interface OrderValidationContext {
     config: TradingConfig;
     price?: PriceData;
     /**
-     * Serialized update submitted when `price` was loaded. Pyth markets
-     * verify it; terminal markets ignore the payload by contract design.
+     * Serialized update submitted when `price` was loaded; terminal markets
+     * ignore the payload by contract design.
      */
     priceUpdate?: Uint8Array;
+    /**
+     * The side's stored position. When present, decrease kinds preflight the
+     * `MAX_ORDERS_PER_SIDE` pending-decrease cap (#733) that `create_order`
+     * enforces when it appends to `decrease_orders`.
+     */
+    position?: Position;
 }
 
 function issue(
@@ -205,6 +214,19 @@ export function validateOrder(
                     712,
                     'notional',
                     'increase exceeds maximum position notional',
+                ),
+            );
+        }
+        if (
+            isDecreaseOrderKind(kind) &&
+            context.position !== undefined &&
+            context.position.decreaseOrders.length >= MAX_ORDERS_PER_SIDE
+        ) {
+            issues.push(
+                issue(
+                    733,
+                    'kind',
+                    'side already holds the maximum pending decrease orders',
                 ),
             );
         }

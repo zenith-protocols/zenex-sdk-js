@@ -1,6 +1,6 @@
 import { factorySpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
-import { u32, i32 } from '../../index.js';
+import { u32 } from '../../index.js';
 import { TradingConfig, tradingConfigToScVal } from '../trading/trading_types.js';
 
 // FactoryInitMeta - constructor arg for the factory
@@ -103,17 +103,18 @@ export class FactoryContract extends Contract {
      * # Arguments
      * - `salt` - Salt for the trading address; the vault salt is derived from it
      * - `token` - Collateral token address (settlement token for both contracts)
-     * - `priceVerifier` - Pyth Lazer price verifier contract address
-     * - `feedId` - Pyth Lazer feed id of the market (immutable on trading)
-     * - `exponent` - Price exponent of the feed (immutable on trading)
+     * - `oracle` - Oracle contract address (Chainlink Data Streams verifier wrapper)
+     * - `feedId` - 32-byte Chainlink Data Streams stream id of the market
+     *   (immutable on trading)
      * - `config` - Initial trading `TradingConfig`
      * - `vaultName` / `vaultSymbol` - Vault share token metadata
      * - `vaultDecimalsOffset` - Extra share decimals (inflation attack mitigation)
      *
      * # Errors
      * - Propagates the trading constructor's validation: `InvalidConfig` if
-     *   `exponent` is out of range or `config` fails its bounds,
-     *   `NegativeValueNotAllowed` if a rate, fee, or margin is negative.
+     *   `config` fails its bounds or `feedId` is not a V3 stream id
+     *   (`0x0003` prefix), `NegativeValueNotAllowed` if a rate, fee, or
+     *   margin is negative.
      *
      * # Returns
      * - The `(trading, vault)` address tuple; parse with `parsers.deployMarket`.
@@ -125,23 +126,22 @@ export class FactoryContract extends Contract {
         admin: string,
         salt: Buffer | Uint8Array,
         token: string,
-        priceVerifier: string,
-        feedId: u32,
-        exponent: i32,
+        oracle: string,
+        feedId: Buffer | Uint8Array,
         config: TradingConfig,
         vaultName: string,
         vaultSymbol: string,
         vaultDecimalsOffset: u32,
     ): string {
         const saltBuffer = salt instanceof Buffer ? salt : Buffer.from(salt);
+        const feedIdBuffer = feedId instanceof Buffer ? feedId : Buffer.from(feedId);
         return this.call(
             'deploy',
             Address.fromString(admin).toScVal(),
             xdr.ScVal.scvBytes(saltBuffer),
             Address.fromString(token).toScVal(),
-            Address.fromString(priceVerifier).toScVal(),
-            xdr.ScVal.scvU32(feedId),
-            xdr.ScVal.scvI32(exponent),
+            Address.fromString(oracle).toScVal(),
+            xdr.ScVal.scvBytes(feedIdBuffer),
             tradingConfigToScVal(config),
             nativeToScVal(vaultName, { type: 'string' }),
             nativeToScVal(vaultSymbol, { type: 'string' }),

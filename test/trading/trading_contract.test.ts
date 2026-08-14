@@ -230,14 +230,36 @@ describe('TradingContract', () => {
         expect(TradingContract.parsers.cancelOrder(raw)).toBe(1234n);
     });
 
-    it('parsers.getOrder returns undefined on Option None (scvVoid)', () => {
-        const raw = xdr.ScVal.scvVoid().toXDR('base64');
-        expect(TradingContract.parsers.getOrder(raw)).toBeUndefined();
+    it('parsers.getOrder decodes the stored row (a missing order traps 730 on-chain)', () => {
+        const entry = (key: string, val: xdr.ScVal) =>
+            new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
+        const i128Val = (value: bigint) => nativeToScVal(value, { type: 'i128' });
+        const raw = xdr.ScVal.scvMap([
+            entry('margin', i128Val(1n)),
+            entry('created_at', nativeToScVal(2n, { type: 'u64' })),
+            entry('exec_fee', i128Val(7n)),
+            entry('expiration', xdr.ScVal.scvU32(3)),
+            entry('is_long', xdr.ScVal.scvBool(true)),
+            entry('kind', xdr.ScVal.scvU32(1)),
+            entry('notional', i128Val(4n)),
+            entry('price_bound', i128Val(5n)),
+            entry('trigger_price', i128Val(6n)),
+        ]).toXDR('base64');
+        expect(TradingContract.parsers.getOrder(raw).execFee).toBe(7n);
     });
 
-    it('parsers.getVaultOrder returns undefined on Option None (scvVoid)', () => {
-        const raw = xdr.ScVal.scvVoid().toXDR('base64');
-        expect(TradingContract.parsers.getVaultOrder(raw)).toBeUndefined();
+    it('parsers.getVaultOrder decodes the stored row (a missing vault order traps 750 on-chain)', () => {
+        const entry = (key: string, val: xdr.ScVal) =>
+            new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
+        const i128Val = (value: bigint) => nativeToScVal(value, { type: 'i128' });
+        const raw = xdr.ScVal.scvMap([
+            entry('amount', i128Val(1n)),
+            entry('created_at', nativeToScVal(2n, { type: 'u64' })),
+            entry('exec_fee', i128Val(5n)),
+            entry('kind', xdr.ScVal.scvU32(1)),
+            entry('min_out', i128Val(3n)),
+        ]).toXDR('base64');
+        expect(TradingContract.parsers.getVaultOrder(raw).minOut).toBe(3n);
     });
 
     it('parsers.getPosition returns camelCase fields including pricedAt and decreaseOrders', () => {
@@ -271,24 +293,40 @@ describe('TradingContract', () => {
         });
     });
 
-    it('static deploy builds __constructor with 8 args in order', () => {
+    it('static deploy builds __constructor with 7 args in order', () => {
+        const feedId = Buffer.concat([Buffer.from([0x00, 0x03]), Buffer.alloc(30, 1)]);
         const deployArgs: DeployArgs = {
             owner: USER,
             token: USER,
             vault: USER,
-            priceVerifier: USER,
+            oracle: USER,
             treasury: USER,
-            feedId: 1,
-            exponent: -8,
+            feedId,
             config: makeConfig(),
         };
         const operation = TradingContract.deploy(USER, Buffer.alloc(32, 9), deployArgs, undefined, 'hex');
         const decoded = xdr.Operation.fromXDR(operation, 'base64');
         const createContract = decoded.body().invokeHostFunctionOp().hostFunction().createContractV2();
         const constructorArgs = createContract.constructorArgs();
-        expect(constructorArgs).toHaveLength(8);
-        expect(scValToNative(constructorArgs[5])).toBe(1);
-        expect(scValToNative(constructorArgs[6])).toBe(-8);
-        expect(constructorArgs[7].map()!).toHaveLength(34);
+        expect(constructorArgs).toHaveLength(7);
+        // feed_id crosses as BytesN<32>.
+        expect(constructorArgs[5].switch().name).toBe('scvBytes');
+        expect(Buffer.from(constructorArgs[5].bytes())).toEqual(feedId);
+        expect(constructorArgs[6].map()!).toHaveLength(34);
+    });
+
+    it('static deploy rejects a feed id that is not 32 bytes', () => {
+        const deployArgs: DeployArgs = {
+            owner: USER,
+            token: USER,
+            vault: USER,
+            oracle: USER,
+            treasury: USER,
+            feedId: Buffer.alloc(31),
+            config: makeConfig(),
+        };
+        expect(() =>
+            TradingContract.deploy(USER, Buffer.alloc(32, 9), deployArgs),
+        ).toThrow(/32 bytes/);
     });
 });

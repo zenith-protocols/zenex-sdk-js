@@ -8,8 +8,10 @@ import {
 import {
     FULL_CLOSE,
     OrderKind,
+    Status,
 } from '../../contracts/trading/trading_types.js';
 import type { OrderParams } from '../../contracts/router/router_types.js';
+import { isIncreaseOrderKind, isMarketOrderKind } from '../order/kinds.js';
 import { orderExecutionPrice, validateOrder } from '../order/validation.js';
 import type { PriceData } from '../market/types.js';
 import type { TradingSnapshot } from '../snapshot.js';
@@ -110,12 +112,34 @@ export function applyOrder(
         config: snapshot.config,
         price,
         priceUpdate: snapshot.priceUpdate,
+        position: snapshot.position,
     });
     // A real gate outranks the bound-not-crossed signal: rests only when the
     // uncrossed bound is the sole reason the order would not fill now.
     const gate = issues.find((entry) => entry.code !== BOUND_NOT_CROSSED);
     if (gate !== undefined) {
         return { kind: 'gate', code: gate.code, reason: gate.reason, ledger };
+    }
+    // A size-growing increase cannot fill while opens are halted: a status
+    // that disallows opens (only Active allows them past the Frozen/Retired
+    // creation gate) or the side's ADL flag (`execute_order`, #705). The
+    // halt outranks the uncrossed bound, which the contract judges later.
+    if (
+        isMarketOrderKind(order.kind) &&
+        isIncreaseOrderKind(order.kind) &&
+        order.notional > 0n
+    ) {
+        const sideAdl = order.isLong
+            ? snapshot.adl?.long
+            : snapshot.adl?.short;
+        if (snapshot.status !== Status.Active || sideAdl === true) {
+            return {
+                kind: 'gate',
+                code: 705,
+                reason: 'contract error #705: increase halted',
+                ledger,
+            };
+        }
     }
     if (issues.length > 0) {
         return { kind: 'rests', reason: issues[0].reason, ledger };

@@ -38,7 +38,6 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
         borrowingUpdate: 0n,
         fundingPool: 0n,
         fundingOwed: 0n,
-        lastPriceTime: 0n,
         ...overrides,
     };
 }
@@ -101,10 +100,10 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
 describe('exact market marks and capacity', () => {
     it('selects the contract entry and exit sides', () => {
         const price: PriceData = {
-            feedId: 1,
-            exponent: -8,
+            feedId: Buffer.alloc(32, 1),
             bid: 900_000_000n,
             ask: 1_100_000_000n,
+            publishTime: 1n,
         };
 
         expect(entryPrice(price, true)).toBe(price.ask);
@@ -115,10 +114,10 @@ describe('exact market marks and capacity', () => {
 
     it('floors a fractional long exit and ceils the mirrored short exit', () => {
         const price: PriceData = {
-            feedId: 1,
-            exponent: -8,
+            feedId: Buffer.alloc(32, 1),
             bid: 250_000_000n,
             ask: 250_000_000n,
+            publishTime: 1n,
         };
         const open = position({
             notional: 100_000_000n,
@@ -131,10 +130,10 @@ describe('exact market marks and capacity', () => {
 
     it('rounds a long ask reserve up by one atomic unit', () => {
         const price: PriceData = {
-            feedId: 1,
-            exponent: 0,
+            feedId: Buffer.alloc(32, 1),
             bid: 1n,
             ask: 1n,
+            publishTime: 1n,
         };
 
         expect(sideReserved(market({ tokens: pair(1n, 0n) }), price, true)).toBe(1n);
@@ -147,10 +146,10 @@ describe('exact market marks and capacity', () => {
             tokens: pair(2_000_000_000_000_000_000n, 500_000_000_000_000_000n),
         });
         const price: PriceData = {
-            feedId: 1,
-            exponent: -7,
+            feedId: Buffer.alloc(32, 1),
             bid: 90_000_000n,
             ask: 110_000_000n,
+            publishTime: 1n,
         };
 
         expect(marketSidePnl(data, price, true, true)).toBe(20_000_000n);
@@ -168,10 +167,10 @@ describe('exact market marks and capacity', () => {
             tokens: pair(2_000_000_000_000_000_000n, 500_000_000_000_000_000n),
         });
         const price: PriceData = {
-            feedId: 1,
-            exponent: -7,
+            feedId: Buffer.alloc(32, 1),
             bid: 90_000_000n,
             ask: 110_000_000n,
+            publishTime: 1n,
         };
 
         expect(marketSidePnl(data, price, true, false)).toBe(-10_000_000n);

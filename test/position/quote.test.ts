@@ -27,7 +27,6 @@ const positionCases: Record<string, ContractCase> = {
             notional_delta: 600_000_000n,
             collateral_delta: 250_000_000n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 1n,
@@ -65,7 +64,6 @@ const positionCases: Record<string, ContractCase> = {
             notional_delta: 500_000_000n,
             collateral_delta: 0n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 1n,
@@ -102,7 +100,6 @@ const positionCases: Record<string, ContractCase> = {
             notional_delta: 170_141_183_460_469_231_731_687_303_715_884_105_727n,
             collateral_delta: 0n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 1n,
@@ -141,7 +138,6 @@ const positionCases: Record<string, ContractCase> = {
             notional_delta: 170_141_183_460_469_231_731_687_303_715_884_105_727n,
             collateral_delta: 0n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 800_000_000n,
             ask: 800_000_000n,
             publish_time: 1n,
@@ -154,7 +150,7 @@ const positionCases: Record<string, ContractCase> = {
             now: 1n,
         },
         expected: {
-            error_code: 713n,
+            error_code: 723n,
         },
     },
 };
@@ -173,7 +169,6 @@ const marginCases: Record<string, ContractCase> = {
             market_funding_idx: 0n,
             market_borrowing_idx: 1n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 1n,
@@ -214,7 +209,6 @@ const marginCases: Record<string, ContractCase> = {
             market_funding_idx: 25_000_000_000_000_001n,
             market_borrowing_idx: 25_000_000_000_000_000n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 1n,
@@ -257,7 +251,6 @@ const marginCases: Record<string, ContractCase> = {
             market_funding_idx: 25_000_000_000_000_001n,
             market_borrowing_idx: 25_000_000_000_000_000n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 1n,
@@ -300,7 +293,6 @@ const marginCases: Record<string, ContractCase> = {
             market_funding_idx: 25_000_000_000_000_001n,
             market_borrowing_idx: 25_000_000_000_000_000n,
             feed_id: 1n,
-            exponent: -8n,
             bid: 1_000_000_000n,
             ask: 1_000_000_000n,
             publish_time: 1n,
@@ -363,7 +355,6 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
         borrowingUpdate: 0n,
         fundingPool: 0n,
         fundingOwed: 0n,
-        lastPriceTime: 0n,
         ...overrides,
     };
 }
@@ -408,12 +399,18 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
     };
 }
 
+function feedId(id = 1n): Buffer {
+    const bytes = Buffer.alloc(32);
+    bytes.writeBigUInt64BE(id, 24);
+    return bytes;
+}
+
 function verifiedPrice(inputs: Record<string, unknown>): PriceData {
     return {
-        feedId: Number(inputs.feed_id ?? 1n),
-        exponent: Number(inputs.exponent ?? -18n),
+        feedId: feedId((inputs.feed_id ?? 1n) as bigint),
         bid: (inputs.bid ?? SCALAR_18) as bigint,
         ask: (inputs.ask ?? SCALAR_18) as bigint,
+        publishTime: (inputs.publish_time ?? 1n) as bigint,
     };
 }
 
@@ -592,11 +589,13 @@ describe('exact position action transitions', () => {
             impact: expected.impact_fee,
             marginDebit: 3_360_000n,
         });
+        // Maintenance headroom is settled: the full-size close fees
+        // (1_800_000n base + 360_000n impact) come out of the equity leg.
         expect(result.value.margin).toEqual({
             initialRequired: 60_000_000n,
             maintenanceRequired: 30_000_000n,
             initialHeadroom: 186_640_000n,
-            maintenanceHeadroom: 216_640_000n,
+            maintenanceHeadroom: 214_480_000n,
         });
         expect(result.value.realizedPnl).toBe(0n);
         expect(result.value.walletPayout).toBe(0n);
@@ -656,7 +655,7 @@ describe('exact position action transitions', () => {
         expect(result.value.fees.impact).toBe(expected.impact_fee);
     });
 
-    it('rejects the contract-derived voluntary underwater full close with code 713', () => {
+    it('rejects the contract-derived voluntary underwater full close with code 723', () => {
         const id = 'position.full_close.underwater_voluntary_reject';
         const expected = vector(positionCases, id).expected;
         const result = quotePositionAction(positionVectorInput(id));
@@ -664,7 +663,122 @@ describe('exact position action transitions', () => {
         expect(result).toEqual({
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
-            reason: `contract error #${expected.error_code}: insufficient margin`,
+            reason: `contract error #${expected.error_code}: position liquidatable`,
+        });
+    });
+
+    it('rejects any decrease of a liquidatable position with code 723', () => {
+        // Same underwater book as the full-close vector, but a partial
+        // request: the settled-equity gate fires before the partial runs.
+        const id = 'position.full_close.underwater_voluntary_reject';
+        const quoteInput = positionVectorInput(id);
+        quoteInput.action = { kind: 'decrease', notional: 10n, margin: 0n };
+        const partial = quotePositionAction(quoteInput);
+        const withdraw = quotePositionAction({
+            ...positionVectorInput(id),
+            action: {
+                kind: 'adjustMargin',
+                direction: 'withdraw',
+                amount: 1n,
+            },
+        });
+
+        expect(partial).toMatchObject({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('723'),
+        });
+        expect(withdraw).toMatchObject({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('723'),
+        });
+    });
+
+    it('clamps a dust-band decrease to a full close with the settled payout', () => {
+        // The contract-derived flat book: a decrease leaving 400_000_000n
+        // behind under a 500_000_000n position minimum fills as a full close.
+        const id = 'position.full_close.flat';
+        const expected = vector(positionCases, id).expected;
+        const quoteInput = positionVectorInput(id);
+        quoteInput.config.minPositionNotional = 500_000_000n;
+        quoteInput.action = {
+            kind: 'decrease',
+            notional: 600_000_000n,
+            margin: 0n,
+        };
+        const result = quotePositionAction(quoteInput);
+
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        expect(result.value.postPosition).toEqual(position());
+        expect(result.value.walletPayout).toBe(expected.returned);
+        expect(result.value.fees.base).toBe(expected.base_fee);
+        expect(result.value.fees.impact).toBe(expected.impact_fee);
+    });
+
+    it('rejects a dust-band decrease with locked notional with code 721', () => {
+        const id = 'position.full_close.flat';
+        const quoteInput = positionVectorInput(id);
+        quoteInput.config.minPositionNotional = 500_000_000n;
+        quoteInput.position.lockedNotional = 100_000_000n;
+        quoteInput.position.unlocksAt = 10n;
+        quoteInput.action = {
+            kind: 'decrease',
+            notional: 600_000_000n,
+            margin: 0n,
+        };
+        const result = quotePositionAction(quoteInput);
+
+        expect(result).toMatchObject({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('721'),
+        });
+    });
+
+    it('anchors pricedAt at the fill price publish time and gates stale fills', () => {
+        const increase = quotePositionAction(
+            input({
+                price: verifiedPrice({ publish_time: 7n }),
+                action: { kind: 'increase', notional: 100n, margin: 20n },
+            }),
+        );
+        const open = position({
+            notional: 1_000n,
+            tokens: 1_000n,
+            margin: 200n,
+            pricedAt: 5n,
+        });
+        const partialInput = input({
+            now: 5n,
+            position: open,
+            market: market({
+                notional: pair(1_000n, 0n),
+                tokens: pair(1_000n, 0n),
+                margin: pair(200n, 0n),
+                fundingUpdate: 5n,
+                borrowingUpdate: 5n,
+            }),
+            price: verifiedPrice({ publish_time: 6n }),
+            action: { kind: 'decrease', notional: 100n, margin: 0n },
+        });
+        const partial = quotePositionAction(partialInput);
+        const stale = quotePositionAction({
+            ...partialInput,
+            price: verifiedPrice({ publish_time: 4n }),
+        });
+
+        expect(increase.kind).toBe('exact');
+        if (increase.kind !== 'exact') return;
+        expect(increase.value.postPosition.pricedAt).toBe(7n);
+        expect(partial.kind).toBe('exact');
+        if (partial.kind !== 'exact') return;
+        expect(partial.value.postPosition.pricedAt).toBe(6n);
+        expect(stale).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: 'contract error #740: stale price',
         });
     });
 });
@@ -759,10 +873,10 @@ describe('haircuts and protocol gates', () => {
                     maxPnlTrader: 900_000_000_000_000_000n,
                 }),
                 price: {
-                    feedId: 1,
-                    exponent: -7,
+                    feedId: feedId(),
                     bid: 105_000_000n,
                     ask: 105_000_000n,
+                    publishTime: 1n,
                 },
                 vaultAssets: 50_000_000n,
                 action: { kind: 'close' },
@@ -878,12 +992,16 @@ describe('haircuts and protocol gates', () => {
         });
     });
 
-    it('enforces initial and maintenance margin on surviving positions', () => {
+    it('enforces initial and settled maintenance margin on surviving positions', () => {
         const initial = quotePositionAction(
             input({
                 action: { kind: 'increase', notional: 100n, margin: 9n },
             }),
         );
+        // Healthy before the decrease (settled equity 10n over a 5n line),
+        // but the withdrawal leaves 5n margin whose settled equity 4n sits
+        // below the survivor's 5n maintenance requirement: the fee-inclusive
+        // `require_valid` leg gates where a fee-free equity mark would pass.
         const open = position({
             notional: 100n,
             tokens: 100n,
@@ -899,13 +1017,8 @@ describe('haircuts and protocol gates', () => {
                     fundingUpdate: 1n,
                     borrowingUpdate: 1n,
                 }),
-                price: {
-                    feedId: 1,
-                    exponent: -18,
-                    bid: 940_000_000_000_000_000n,
-                    ask: 940_000_000_000_000_000n,
-                },
-                action: { kind: 'decrease', notional: 10n, margin: 0n },
+                config: config({ initMargin: 50_000_000_000_000_000n }),
+                action: { kind: 'decrease', notional: 10n, margin: 6n },
             }),
         );
 

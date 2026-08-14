@@ -63,6 +63,14 @@ export enum VaultOrderKind {
 export const FULL_CLOSE: i128 = 2n ** 127n - 1n;
 
 /**
+ * Maximum pending decrease orders per position side
+ * (trading/src/trading/constants.rs::MAX_ORDERS_PER_SIDE); the 9th decrease
+ * on a side traps `TooManyOrders` (733). Sized so the closure sweep's
+ * cancel+refund receipts stay inside per-tx limits.
+ */
+export const MAX_ORDERS_PER_SIDE = 8;
+
+/**
  * A keeper-executed order (persistent user-tier storage, keyed `(user, id)`).
  *
  * `kind` sets both the size direction and the eligibility rule;
@@ -100,7 +108,7 @@ export interface VaultOrder {
     minOut: i128;
     /** Keeper execution fee escrowed at creation (settlement token), token-dec. */
     execFee: i128;
-    /** Creation timestamp; fills need a strictly later publish_time, redeems also the redeem_lock cooldown. */
+    /** Creation timestamp; fills need a publish_time at or past it and a later ledger, redeems also the redeem_lock cooldown. */
     createdAt: u64;
 }
 
@@ -122,7 +130,7 @@ export interface Position {
     unlocksAt: u64;
     /** publish_time of the last fill's price; force-close anti-replay floor. */
     pricedAt: u64;
-    /** Pending decrease order ids on the side (max 16); cleared when the position closes. */
+    /** Pending decrease order ids on the side (max `MAX_ORDERS_PER_SIDE` = 8); cleared when the position closes. */
     decreaseOrders: u32[];
 }
 
@@ -154,8 +162,6 @@ export interface MarketData {
     fundingPool: i128;
     /** Total funding owed to traders, token-dec. */
     fundingOwed: i128;
-    /** publish_time of the newest consumed price (monotonic). */
-    lastPriceTime: u64;
 }
 
 /** ADL state (instance storage singleton): the per-side enable flags driving the open-stop. */
@@ -357,7 +363,6 @@ export function parseMarketData(raw: Record<string, unknown>): MarketData {
         borrowingUpdate: big(raw.borrowing_update),
         fundingPool: big(raw.funding_pool),
         fundingOwed: big(raw.funding_owed),
-        lastPriceTime: big(raw.last_price_time),
     };
 }
 

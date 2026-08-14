@@ -8,16 +8,16 @@ import {
     tokenBalanceLedgerKey,
     tradingConfigKey,
     tradingFeedIdKey,
-    tradingExponentKey,
     tradingStatusKey,
     tradingVaultKey,
     tradingTokenKey,
-    tradingPriceVerifierKey,
+    tradingOracleKey,
     tradingTreasuryKey,
     tradingDelistedAtKey,
     tradingTerminalPriceKey,
     tradingAdlKey,
     tradingMarketDataLedgerKey,
+    tradingPriceCacheLedgerKey,
     tradingPositionLedgerKey,
     tradingVaultOrderLedgerKey,
     tradingOrderCounterLedgerKey,
@@ -40,14 +40,13 @@ function unitVariantScVal(variantName: string): xdr.ScVal {
 }
 
 describe('ledger-keys: trading DataKey mirror (trading/src/storage.rs)', () => {
-    it('instance-tier unit variants (Config/FeedId/Exponent/Status/Vault/Token/PriceVerifier/Treasury/DelistedAt/TerminalPrice/Adl) encode as [Symbol(name)]', () => {
+    it('instance-tier unit variants (Config/FeedId/Status/Vault/Token/Oracle/Treasury/DelistedAt/TerminalPrice/Adl) encode as [Symbol(name)]', () => {
         expect(decodeKeyVec(tradingConfigKey())).toEqual(['Config']);
         expect(decodeKeyVec(tradingFeedIdKey())).toEqual(['FeedId']);
-        expect(decodeKeyVec(tradingExponentKey())).toEqual(['Exponent']);
         expect(decodeKeyVec(tradingStatusKey())).toEqual(['Status']);
         expect(decodeKeyVec(tradingVaultKey())).toEqual(['Vault']);
         expect(decodeKeyVec(tradingTokenKey())).toEqual(['Token']);
-        expect(decodeKeyVec(tradingPriceVerifierKey())).toEqual(['PriceVerifier']);
+        expect(decodeKeyVec(tradingOracleKey())).toEqual(['Oracle']);
         expect(decodeKeyVec(tradingTreasuryKey())).toEqual(['Treasury']);
         expect(decodeKeyVec(tradingDelistedAtKey())).toEqual(['DelistedAt']);
         expect(decodeKeyVec(tradingTerminalPriceKey())).toEqual(['TerminalPrice']);
@@ -58,6 +57,14 @@ describe('ledger-keys: trading DataKey mirror (trading/src/storage.rs)', () => {
         const marketDataKey = tradingMarketDataLedgerKey(CONTRACT_ID);
         expect(marketDataKey.contractData().durability().name).toBe('persistent');
         expect(decodeKeyVec(marketDataKey.contractData().key())).toEqual(['MarketData']);
+    });
+
+    it('PriceCache (price cache) is the TEMPORARY tier and builds [Symbol("PriceCache")]', () => {
+        const priceCacheKey = tradingPriceCacheLedgerKey(CONTRACT_ID);
+        expect(priceCacheKey.contractData().durability().name).toBe('temporary');
+        expect(decodeKeyVec(priceCacheKey.contractData().key())).toEqual(['PriceCache']);
+        const contractAddress = Address.fromScAddress(priceCacheKey.contractData().contract()).toString();
+        expect(contractAddress).toBe(CONTRACT_ID);
     });
 
     it('Position(user, is_long) builds [Symbol("Position"), user, bool] for both sides', () => {

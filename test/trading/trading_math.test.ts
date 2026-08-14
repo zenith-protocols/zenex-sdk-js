@@ -76,7 +76,6 @@ function makeMarket(overrides: Partial<MarketData> = {}): MarketData {
         borrowingUpdate: 0n,
         fundingPool: 0n,
         fundingOwed: 0n,
-        lastPriceTime: 0n,
         ...overrides,
     };
 }

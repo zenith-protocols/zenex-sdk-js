@@ -11,6 +11,7 @@ import {
     exactPositionPnl,
     exitPrice,
     marketSidePnl,
+    quoteTradeFees,
     sideCapacity,
     sideReserved,
 } from '../market/capacity.js';
@@ -30,6 +31,7 @@ const U64_MAX = 2n ** 64n - 1n;
 const OVERFLOW_MESSAGE = 'value is outside the i128 range';
 
 const GATE_REASONS: Readonly<Record<number, string>> = {
+    705: 'increase halted',
     710: 'negative value not allowed',
     711: 'notional below minimum',
     712: 'notional above maximum',
@@ -38,7 +40,10 @@ const GATE_REASONS: Readonly<Record<number, string>> = {
     715: 'open interest exceeded',
     720: 'position not found',
     721: 'notional locked',
+    722: 'not liquidatable',
+    723: 'position liquidatable',
     732: 'invalid order',
+    740: 'stale price',
 };
 
 class ProtocolGateError extends Error {
@@ -238,10 +243,47 @@ function haircutPnl(
     return sidePnl > allowance ? mulDivFloor(pnl, allowance, sidePnl) : pnl;
 }
 
-function marginState(
+/**
+ * Settled equity of a position whose accrual indices are already synced to
+ * the market (the repeat settle banks nothing): margin less the full-size
+ * close-grade trade fees, plus the haircut PnL. Ports the equity leg of
+ * `Position::settle` (position.rs).
+ */
+function settledEquity(
     position: Position,
+    market: MarketData,
     config: TradingConfig,
     price: PriceData,
+    vaultAssets: bigint,
+    isLong: boolean,
+): bigint {
+    const trade = quoteTradeFees(
+        market,
+        config,
+        isLong,
+        subI128(0n, position.notional),
+        subI128(0n, position.tokens),
+    );
+    const pnl = haircutPnl(
+        market,
+        config,
+        price,
+        vaultAssets,
+        isLong,
+        exactPositionPnl(position, price, isLong),
+    );
+    return addI128(
+        subI128(position.margin, addI128(trade.base, trade.impact)),
+        pnl,
+    );
+}
+
+function marginState(
+    position: Position,
+    market: MarketData,
+    config: TradingConfig,
+    price: PriceData,
+    vaultAssets: bigint,
     isLong: boolean,
 ): MarginState {
     if (position.notional === 0n) {
@@ -262,9 +304,15 @@ function marginState(
         config.maintenanceMargin,
         SCALAR_18,
     );
-    const equity = addI128(
-        position.margin,
-        exactPositionPnl(position, price, isLong),
+    // The maintenance line is the settled (fee-inclusive) predicate the
+    // contract's `is_liquidatable` applies, not a fee-free equity mark.
+    const equity = settledEquity(
+        position,
+        market,
+        config,
+        price,
+        vaultAssets,
+        isLong,
     );
     return {
         initialRequired,
@@ -279,15 +327,25 @@ function requireValidPosition(
     market: MarketData,
     config: TradingConfig,
     price: PriceData,
+    vaultAssets: bigint,
     isLong: boolean,
 ): void {
     if (position.notional < config.minPositionNotional)
         throw new ProtocolGateError(711);
     if (position.notional > config.maxPositionNotional)
         throw new ProtocolGateError(712);
-    const margin = marginState(position, config, price, isLong);
+    const margin = marginState(
+        position,
+        market,
+        config,
+        price,
+        vaultAssets,
+        isLong,
+    );
     if (position.margin < margin.initialRequired)
         throw new ProtocolGateError(713);
+    // Ports `require_valid`'s second settle: no action may leave a
+    // liquidatable (settled equity below maintenance) position behind.
     if (margin.maintenanceHeadroom < 0n) throw new ProtocolGateError(713);
 }
 
@@ -326,12 +384,15 @@ function increaseTransition(
         position.lockedNotional = addI128(liveLock, notional);
         position.unlocksAt = addTimestamp(input.now, input.config.notionalLock);
     }
+    // Anchor the position's price floor at this fill's price.
+    position.pricedAt = input.price.publishTime;
 
     requireValidPosition(
         position,
         market,
         input.config,
         input.price,
+        input.vaultAssets,
         input.isLong,
     );
     if (
@@ -358,61 +419,81 @@ function increaseTransition(
     };
 }
 
-function fullCloseTransition(
+interface SettledClose {
+    fees: FeeBreakdown;
+    claimableFundingDelta: bigint;
+    pnl: bigint;
+    equity: bigint;
+}
+
+/**
+ * Ports `Position::settle`: bank the accruals, price the trade fees at the
+ * full size, haircut the full PnL, and derive the settled equity. Banks the
+ * accrual legs into `market` and syncs `position`'s indices exactly once.
+ */
+function settleToClose(
     input: PositionActionInput,
     position: Position,
     market: MarketData,
-): TransitionResult {
-    const notional = position.notional;
-    const tokens = position.tokens;
-    const grossMargin = position.margin;
+): SettledClose {
     const settled = settleFees(
         position,
         market,
         input.config,
         input.isLong,
-        subI128(0n, notional),
-        subI128(0n, tokens),
+        subI128(0n, position.notional),
+        subI128(0n, position.tokens),
         input.executionFee,
         input.relayFee,
     );
-    const remainder = subI128(grossMargin, settled.fees.marginDebit);
-    const rawPnl = exactPositionPnl(position, input.price, input.isLong);
     const pnl = haircutPnl(
         market,
         input.config,
         input.price,
         input.vaultAssets,
         input.isLong,
-        rawPnl,
+        exactPositionPnl(position, input.price, input.isLong),
     );
-    const equity = addI128(remainder, pnl);
-    const returned = equity > 0n ? equity : 0n;
-    const badDebt = equity < 0n ? subI128(0n, equity) : 0n;
+    return {
+        fees: settled.fees,
+        claimableFundingDelta: settled.claimableFundingDelta,
+        pnl,
+        equity: addI128(
+            subI128(position.margin, settled.fees.marginDebit),
+            pnl,
+        ),
+    };
+}
 
-    addPair(market.notional, input.isLong, subI128(0n, notional));
-    addPair(market.tokens, input.isLong, subI128(0n, tokens));
-    addPair(market.margin, input.isLong, subI128(0n, grossMargin));
+/**
+ * Ports `Position::close_settled`: close the whole position against its
+ * settled numbers; the payout is the settled equity floored at zero, any
+ * shortfall becoming bad debt.
+ */
+function closeSettledTransition(
+    input: PositionActionInput,
+    position: Position,
+    market: MarketData,
+    settled: SettledClose,
+): TransitionResult {
+    const returned = settled.equity > 0n ? settled.equity : 0n;
+    const badDebt = settled.equity < 0n ? subI128(0n, settled.equity) : 0n;
 
-    const maintenance = mulDivCeil(
-        notional,
-        input.config.maintenanceMargin,
-        SCALAR_18,
-    );
-    if (returned < maintenance) throw new ProtocolGateError(713);
+    addPair(market.notional, input.isLong, subI128(0n, position.notional));
+    addPair(market.tokens, input.isLong, subI128(0n, position.tokens));
+    addPair(market.margin, input.isLong, subI128(0n, position.margin));
 
     const feeLeg = feeVaultLeg(settled.fees, input.config, input.treasuryRate);
-    const pnlAndDebt = addI128(pnl, badDebt);
     return {
         position: zeroPosition(),
         market,
         fees: settled.fees,
         executionPrice: exitPrice(input.price, input.isLong),
-        realizedPnl: pnl,
+        realizedPnl: settled.pnl,
         walletPayout: returned,
         badDebt,
         claimableFundingDelta: settled.claimableFundingDelta,
-        settlementVaultLeg: subI128(feeLeg, pnlAndDebt),
+        settlementVaultLeg: subI128(feeLeg, addI128(settled.pnl, badDebt)),
     };
 }
 
@@ -420,20 +501,36 @@ function partialDecreaseTransition(
     input: PositionActionInput,
     position: Position,
     market: MarketData,
+    settled: SettledClose,
     notional: bigint,
     margin: bigint,
 ): TransitionResult {
     const tokens = mulDivFloor(position.tokens, notional, position.notional);
-    const settled = settleFees(
-        position,
+    // The fill's own trade fees; impact is quadratic in fill size, so the
+    // full-size fees priced for the settled-equity gate do not apply here.
+    // The accruals were banked by the settle and ride along unchanged.
+    const trade = quoteTradeFees(
         market,
         input.config,
         input.isLong,
         subI128(0n, notional),
         subI128(0n, tokens),
-        input.executionFee,
-        input.relayFee,
     );
+    const paidFunding =
+        settled.fees.funding > 0n ? settled.fees.funding : 0n;
+    const marginDebit = addI128(
+        addI128(trade.base, trade.impact),
+        addI128(settled.fees.borrowing, paidFunding),
+    );
+    const fees: FeeBreakdown = {
+        base: trade.base,
+        impact: trade.impact,
+        funding: settled.fees.funding,
+        borrowing: settled.fees.borrowing,
+        execution: input.executionFee,
+        relay: input.relayFee,
+        marginDebit,
+    };
     const rawPnl = exactPositionPnl(
         { ...position, notional, tokens },
         input.price,
@@ -450,15 +547,19 @@ function partialDecreaseTransition(
     const profit = pnl > 0n ? pnl : 0n;
     const loss = pnl < 0n ? pnl : 0n;
     const proceeds = addI128(margin, profit);
-    const covered =
-        settled.fees.marginDebit < proceeds
-            ? settled.fees.marginDebit
-            : proceeds;
-    const uncovered = subI128(settled.fees.marginDebit, covered);
+    const covered = marginDebit < proceeds ? marginDebit : proceeds;
+    const uncovered = subI128(marginDebit, covered);
     const marginChange = subI128(subI128(loss, margin), uncovered);
 
-    position.margin = addI128(position.margin, marginChange);
-    addPair(market.margin, input.isLong, marginChange);
+    // Margin floors at zero; the excess is bad debt drawn from the vault.
+    const nextMargin = addI128(position.margin, marginChange);
+    const badDebt = nextMargin < 0n ? subI128(0n, nextMargin) : 0n;
+    position.margin = nextMargin > 0n ? nextMargin : 0n;
+    addPair(market.margin, input.isLong, addI128(marginChange, badDebt));
+
+    // Anchor the position's price floor at this fill's price.
+    position.pricedAt = input.price.publishTime;
+
     position.notional = subI128(position.notional, notional);
     addPair(market.notional, input.isLong, subI128(0n, notional));
     position.tokens = subI128(position.tokens, tokens);
@@ -469,20 +570,21 @@ function partialDecreaseTransition(
         market,
         input.config,
         input.price,
+        input.vaultAssets,
         input.isLong,
     );
 
-    const feeLeg = feeVaultLeg(settled.fees, input.config, input.treasuryRate);
+    const feeLeg = feeVaultLeg(fees, input.config, input.treasuryRate);
     return {
         position,
         market,
-        fees: settled.fees,
+        fees,
         executionPrice: exitPrice(input.price, input.isLong),
         realizedPnl: pnl,
         walletPayout: subI128(proceeds, covered),
-        badDebt: 0n,
+        badDebt,
         claimableFundingDelta: settled.claimableFundingDelta,
-        settlementVaultLeg: subI128(feeLeg, pnl),
+        settlementVaultLeg: subI128(feeLeg, addI128(pnl, badDebt)),
     };
 }
 
@@ -494,12 +596,32 @@ function decreaseTransition(
     margin: bigint,
 ): TransitionResult {
     if (position.notional === 0n) throw new ProtocolGateError(720);
+
+    // Settle once (`Position::decrease`): the liquidatable gate, the clamped
+    // full close, and the partial's accruals all consume the same numbers.
+    const settled = settleToClose(input, position, market);
+    const maintenance = mulDivCeil(
+        position.notional,
+        input.config.maintenanceMargin,
+        SCALAR_18,
+    );
+    // Liquidation is the only legal transition for an underwater position.
+    if (settled.equity < maintenance) throw new ProtocolGateError(723);
+
     const locked =
         input.now < position.unlocksAt ? position.lockedNotional : 0n;
-    if (requestedNotional >= position.notional) {
+    // A request for the whole position (or more) is a full close; so is one
+    // whose survivor would sit below the position minimum — that partial
+    // could never validate (#711), so the fill clamps to a full close.
+    if (
+        requestedNotional >= position.notional ||
+        subI128(position.notional, requestedNotional) <
+            input.config.minPositionNotional
+    ) {
         if (locked > 0n) throw new ProtocolGateError(721);
-        return fullCloseTransition(input, position, market);
+        return closeSettledTransition(input, position, market, settled);
     }
+    // A partial close is only allowed on the unlocked fraction.
     if (requestedNotional > subI128(position.notional, locked)) {
         throw new ProtocolGateError(721);
     }
@@ -507,6 +629,7 @@ function decreaseTransition(
         input,
         position,
         market,
+        settled,
         requestedNotional,
         margin,
     );
@@ -514,6 +637,12 @@ function decreaseTransition(
 
 function runTransition(input: PositionActionInput): TransitionResult {
     validateAction(input.action);
+
+    // No fill may price behind the position's own last mark: `priced_at`
+    // stays monotone (`Position::require_price_not_stale`, #740).
+    if (input.price.publishTime < input.position.pricedAt) {
+        throw new ProtocolGateError(740);
+    }
 
     const market = advanceMarketAccruals(
         input.market,
@@ -620,8 +749,10 @@ export function quotePositionAction(
                 claimableFundingDelta: transition.claimableFundingDelta,
                 margin: marginState(
                     transition.position,
+                    transition.market,
                     input.config,
                     input.price,
+                    input.vaultAssets,
                     input.isLong,
                 ),
             },

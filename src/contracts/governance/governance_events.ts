@@ -1,13 +1,15 @@
 import { u32, u64 } from '../../index.js';
 import { ZenexContractType, BaseZenexEvent } from '../../base_event.js';
 
-// Governance event types (matches Rust events)
+// Governance event types (matches Rust events). Values are the on-chain
+// name topics: bare `#[contractevent]` defaults to snake_case of the
+// struct name.
 export enum GovernanceEventType {
-    Queued = 'Queued',
-    Executed = 'Executed',
-    Cancelled = 'Cancelled',
-    StatusSet = 'StatusSet',
-    DelaySet = 'DelaySet',
+    Queued = 'queued',
+    Executed = 'executed',
+    Cancelled = 'cancelled',
+    StatusSet = 'status_set',
+    DelaySet = 'delay_set',
 }
 
 // Governance Events

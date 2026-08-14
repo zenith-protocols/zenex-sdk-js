@@ -76,20 +76,19 @@ export enum ContractErrorType {
     // trading/src/errors.rs exactly; see below). `contractErrorFromCode` falls
     // through to it automatically.
 
-    // Price Verifier Errors (780-792)
-    PVInvalidData = 780,
-    PVInvalidPrice = 781,
-    PVPriceStale = 782,
-    PVInvalidStaleness = 783,
-    PVTruncatedData = 784,
-    PVInvalidPayloadLength = 785,
-    PVInvalidPayloadMagic = 786,
-    PVInvalidChannel = 787,
-    PVInvalidProperty = 788,
-    PVInvalidMarketSession = 789,
-    PVFeedNotFound = 790,
-    PVWrongExponent = 791,
-    PVInvalidConfidence = 792,
+    // Oracle Errors (780-793): the oracle owns the 78x/79x domain inherited
+    // from the price-verifier it replaces. Codes whose semantics carried over
+    // keep their numbers (780-783, 790, 793); the Lazer parser block
+    // (784-789) is retired, with 784 reassigned to the report-expiry reject
+    // that replaced that machinery.
+    OracleInvalidData = 780,
+    OracleInvalidPrice = 781,
+    OraclePriceStale = 782,
+    OracleInvalidStaleness = 783,
+    OracleReportExpired = 784,
+    OracleInvalidSpreadReduction = 785,
+    OracleFeedMismatch = 790,
+    OraclePriceAhead = 793,
 
     // Strategy Vault Errors (800-801)
     StrategyInvalidAmount = 800,
@@ -187,20 +186,15 @@ const errorMessages: Record<number, string> = {
     // and resolve through the dedicated `TradingError` enum (see the note in
     // ContractErrorType above).
 
-    // Price Verifier
-    [780]: 'Price update signature or format is invalid',
-    [781]: 'Price confidence exceeds bounds or required fields missing',
-    [782]: 'Price update is stale (exceeds max staleness threshold)',
-    [783]: 'max_staleness exceeds MAX_STALENESS_SECONDS cap (15)',
-    [784]: 'Price update payload is truncated',
-    [785]: 'Price update payload has trailing bytes (invalid length)',
-    [786]: 'Price update payload magic number is invalid',
-    [787]: 'Price update payload channel is invalid',
-    [788]: 'Price update payload contains an unknown property',
-    [789]: 'Price update payload market session is invalid',
-    [790]: 'Price update does not carry the requested feed id',
-    [791]: 'Price update exponent does not match the market anchor',
-    [792]: 'Price confidence bound rejects every feed',
+    // Oracle
+    [780]: 'Verified report body failed decoding',
+    [781]: 'Non-positive price side, crossed book (bid > ask), or int192 overflow',
+    [782]: 'Price observation is older than max_staleness',
+    [783]: 'max_staleness outside the [3, 15] second bounds',
+    [784]: 'Ledger clock has passed the report expiresAt',
+    [785]: 'spread_reduction_factor outside [0, SCALAR_18]',
+    [790]: 'Report prices a different stream than the feed anchor',
+    [793]: 'Report validity window not open, or observation ahead of the ledger clock',
 
     // Strategy Vault
     [800]: 'Invalid amount for strategy operation',
@@ -231,7 +225,7 @@ export class ContractError extends Error {
  * Resolve a raw on-chain error code to a ContractError.
  *
  * The per-contract code namespaces are disjoint (trading 700-772,
- * price-verifier 780-792, strategy-vault 800-801, governance 810-812,
+ * oracle 780-793, strategy-vault 800-801, governance 810-812,
  * treasury 900, fee-abstraction 5003), so every code resolves without a
  * hint: from the merged `ContractErrorType` first, then the standalone
  * `TradingError` enum.
@@ -312,6 +306,9 @@ export enum TradingError {
     NotionalLocked = 721,
     /** Liquidation attempted while equity is still above maintenance margin. */
     NotLiquidatable = 722,
+    /** Decrease or ADL attempted while settled equity is below maintenance
+     * margin: a liquidatable position's only legal transition is `liquidate`. */
+    PositionLiquidatable = 723,
 
     // --- orders / price ---
     /** No keeper order exists for `(user, id)`. */
@@ -319,7 +316,8 @@ export enum TradingError {
     /** Order `expiration` is behind the current ledger sequence. */
     OrderExpired = 731,
     /** Delta pair is not an allowed combination, a moved value is below its dust
-     * floor, or a trigger kind carries a non-positive `trigger_price`. */
+     * floor, a trigger kind carries a non-positive `trigger_price`, or an
+     * increase's `margin + exec_fee` escrow sum overflows. */
     InvalidOrder = 732,
     /** A side already holds `MAX_ORDERS_PER_SIDE` pending decrease orders. */
     TooManyOrders = 733,
@@ -344,6 +342,8 @@ export enum TradingError {
     /** Redeem fill while a side's pending PnL exceeds `max_pnl_withdraw` of
      * half the post-redeem vault balance. */
     PendingPnlExceeded = 754,
+    /** A settlement's vault draw exceeds the vault's balance. */
+    VaultInsolvent = 755,
 
     // --- funding ---
     /** Claim attempted with no claimable funding balance. */
@@ -376,9 +376,10 @@ export const tradingErrorMessages: Record<number, string> = {
     [720]: 'No position exists for (user, is_long)',
     [721]: 'Requested close exceeds the unlocked notional',
     [722]: 'Liquidation attempted while equity is above maintenance margin',
+    [723]: 'Decrease or ADL attempted on a liquidatable position (equity below maintenance margin)',
     [730]: 'No keeper order exists for (user, id)',
     [731]: 'Order expiration is behind the current ledger sequence',
-    [732]: 'Invalid order (no-op shape, dust floor, or missing trigger price)',
+    [732]: 'Invalid order (no-op shape, dust floor, missing trigger price, or escrow-sum overflow)',
     [733]: 'Side already holds the maximum pending decrease orders',
     [734]: 'Order kind discriminant is not a known variant',
     [740]: 'Verified price predates the position or order (anti-replay)',
@@ -389,6 +390,7 @@ export const tradingErrorMessages: Record<number, string> = {
     [752]: 'Vault order fill returned less than the order min_out',
     [753]: 'Deposit fill would push the vault balance above max_vault_balance',
     [754]: 'Redeem fill would leave pending PnL above the max_pnl_withdraw gate',
+    [755]: 'Settlement vault draw exceeds the vault balance',
     [760]: 'Claim attempted with no claimable funding balance',
     [770]: 'ADL execution attempted while the PnL ratio is at or below the trigger',
     [771]: 'ADL close left the pending PnL under the clear target',

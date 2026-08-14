@@ -30,9 +30,10 @@ import type { OrderParams } from '../../src/contracts/router/router_types.js';
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 1));
 const ROUTER = StrKey.encodeContract(Buffer.alloc(32, 2));
 const VAULT = StrKey.encodeContract(Buffer.alloc(32, 3));
-const VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 4));
+const ORACLE = StrKey.encodeContract(Buffer.alloc(32, 4));
 const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 5));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
+const FEED_ID = Buffer.alloc(32, 7);
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -77,7 +78,6 @@ function marketFor(open: Position, isLong = true): MarketData {
         borrowingUpdate: 1n,
         fundingPool: 0n,
         fundingOwed: 0n,
-        lastPriceTime: 1n,
     };
 }
 
@@ -123,10 +123,10 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
 
 function price(overrides: Partial<PriceData> = {}): PriceData {
     return {
-        feedId: 1,
-        exponent: -8,
+        feedId: FEED_ID,
         bid: 1_000_000_000n,
         ask: 1_000_000_000n,
+        publishTime: 1n,
         ...overrides,
     };
 }
@@ -141,10 +141,9 @@ function snapshot(overrides: Partial<TradingSnapshot> = {}): TradingSnapshot {
             trading: TRADING,
             router: ROUTER,
             vault: VAULT,
-            priceVerifier: VERIFIER,
+            oracle: ORACLE,
             treasury: TREASURY,
-            feedId: 1,
-            exponent: -8,
+            feedId: FEED_ID,
             vaultDecimalsOffset: 0,
             vaultShareDecimals: 7,
         },
@@ -359,6 +358,66 @@ describe('applyOrder gates and rests', () => {
             code: 732,
             reason: 'notional is below the order dust floor',
         });
+    });
+
+    it('gates a size-growing increase while opens are halted with code 705', () => {
+        const onIce = applyOrder(snapshot({ status: Status.OnIce }), order());
+        const delisted = applyOrder(
+            snapshot({ status: Status.Delisted }),
+            order(),
+        );
+        const adlHalted = applyOrder(
+            snapshot({ adl: { long: true, short: false } }),
+            order(),
+        );
+        const otherSideAdl = applyOrder(
+            snapshot({ adl: { long: false, short: true } }),
+            order(),
+        );
+        const marginOnly = applyOrder(
+            snapshot({
+                status: Status.OnIce,
+                position: openPosition(),
+            }),
+            order({ notional: 0n, margin: 5_000_000n }),
+        );
+
+        const halted = {
+            kind: 'gate',
+            code: 705,
+            reason: 'contract error #705: increase halted',
+            ledger: 1_000,
+        };
+        expect(onIce).toEqual(halted);
+        expect(delisted).toEqual(halted);
+        expect(adlHalted).toEqual(halted);
+        expect(otherSideAdl.kind).toBe('fills');
+        // A zero-notional increase adds only margin and stays available for
+        // margin defense when opens are halted.
+        expect(marginOnly.kind).toBe('fills');
+    });
+
+    it('gates a ninth pending decrease with code 733', () => {
+        const open = openPosition({
+            decreaseOrders: [1, 2, 3, 4, 5, 6, 7, 8],
+        });
+        const snap = snapshot({ position: open, market: marketFor(open) });
+        const result = applyOrder(
+            snap,
+            order({
+                kind: OrderKind.MarketDecrease,
+                notional: 100_000_000n,
+                margin: 0n,
+            }),
+        );
+        const increaseUncapped = applyOrder(snap, order());
+
+        expect(result).toMatchObject({
+            kind: 'gate',
+            code: 733,
+            reason: 'side already holds the maximum pending decrease orders',
+        });
+        expect(increaseUncapped.kind).toBe('fills');
     });
 
     it('rests a market order whose price bound is not crossed', () => {

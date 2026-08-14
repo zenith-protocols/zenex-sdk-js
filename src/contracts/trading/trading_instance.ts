@@ -21,18 +21,16 @@ import { parseAdlState, parseTradingConfig } from './trading_types.js';
 export interface TradingInstanceState {
     /** Global trading parameters. */
     config: TradingConfig;
-    /** Price feed id (immutable anchor). */
-    feedId: number;
-    /** Oracle exponent; price_scalar = 10^-exponent. */
-    exponent: number;
+    /** 32-byte price stream id (`BytesN<32>`, immutable anchor). */
+    feedId: Buffer;
     /** Operational status discriminant. */
     status: Status;
     /** Strategy-vault contract. */
     vault: string;
     /** Settlement token (collateral asset) contract. */
     token: string;
-    /** Price-verifier contract. */
-    priceVerifier: string;
+    /** Oracle contract. */
+    oracle: string;
     /** Treasury contract (protocol fee sink). */
     treasury: string;
     /** First-delist timestamp; lazy (absent unless delisted). */
@@ -59,8 +57,8 @@ function entryKeyName(key: xdr.ScVal): string | undefined {
  * @param instanceVal - The `.val()` of the trading instance `ContractDataEntry`
  *   (an `scvContractInstance`).
  * @throws If the value is not a contract instance, or any required key
- *   (`Config`, `FeedId`, `Exponent`, `Status`, `Vault`, `Token`,
- *   `PriceVerifier`, `Treasury`) is absent.
+ *   (`Config`, `FeedId`, `Status`, `Vault`, `Token`, `Oracle`, `Treasury`)
+ *   is absent.
  */
 export function parseTradingInstance(
     instanceVal: xdr.ScVal,
@@ -74,12 +72,11 @@ export function parseTradingInstance(
     }
 
     let config: TradingConfig | undefined;
-    let feedId: number | undefined;
-    let exponent: number | undefined;
+    let feedId: Buffer | undefined;
     let status: Status | undefined;
     let vault: string | undefined;
     let token: string | undefined;
-    let priceVerifier: string | undefined;
+    let oracle: string | undefined;
     let treasury: string | undefined;
     let delistedAt: bigint | undefined;
     let terminalPrice: bigint | undefined;
@@ -91,10 +88,7 @@ export function parseTradingInstance(
                 config = parseTradingConfig(scValToNative(item.val()));
                 break;
             case 'FeedId':
-                feedId = Number(scValToNative(item.val()));
-                break;
-            case 'Exponent':
-                exponent = Number(scValToNative(item.val()));
+                feedId = Buffer.from(item.val().bytes());
                 break;
             case 'Status':
                 status = Number(scValToNative(item.val())) as Status;
@@ -105,8 +99,8 @@ export function parseTradingInstance(
             case 'Token':
                 token = Address.fromScVal(item.val()).toString();
                 break;
-            case 'PriceVerifier':
-                priceVerifier = Address.fromScVal(item.val()).toString();
+            case 'Oracle':
+                oracle = Address.fromScVal(item.val()).toString();
                 break;
             case 'Treasury':
                 treasury = Address.fromScVal(item.val()).toString();
@@ -133,11 +127,10 @@ export function parseTradingInstance(
     return {
         config: required(config, 'Config'),
         feedId: required(feedId, 'FeedId'),
-        exponent: required(exponent, 'Exponent'),
         status: required(status, 'Status'),
         vault: required(vault, 'Vault'),
         token: required(token, 'Token'),
-        priceVerifier: required(priceVerifier, 'PriceVerifier'),
+        oracle: required(oracle, 'Oracle'),
         treasury: required(treasury, 'Treasury'),
         delistedAt,
         terminalPrice,

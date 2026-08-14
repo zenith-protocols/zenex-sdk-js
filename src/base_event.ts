@@ -1,6 +1,7 @@
 import type { TradingEvent } from './contracts/trading/trading_events.js';
 import type { VaultEvent } from './contracts/vault/vault_events.js';
 import type { GovernanceEvent } from './contracts/governance/governance_events.js';
+import type { FactoryEvent } from './contracts/factory/factory_events.js';
 
 // =============================================================================
 // Typed event surface (types only).
@@ -30,4 +31,4 @@ export interface BaseZenexEvent {
     txHash: string;
 }
 
-export type ZenexEvent = TradingEvent | VaultEvent | GovernanceEvent;
+export type ZenexEvent = TradingEvent | VaultEvent | GovernanceEvent | FactoryEvent;

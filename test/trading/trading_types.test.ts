@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { scValToNative } from '@stellar/stellar-sdk';
 import {
-    OrderKind, VaultOrderKind, Status, FULL_CLOSE,
+    OrderKind, VaultOrderKind, Status, FULL_CLOSE, MAX_ORDERS_PER_SIDE,
     tradingConfigToScVal, parseSidePair,
     parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState,
     parseTradingConfig, TradingConfig,
@@ -121,6 +121,10 @@ describe('trading_types', () => {
         expect(FULL_CLOSE).toBe(170141183460469231731687303715884105727n);
     });
 
+    it('MAX_ORDERS_PER_SIDE mirrors constants.rs (8 pending decreases per side)', () => {
+        expect(MAX_ORDERS_PER_SIDE).toBe(8);
+    });
+
     describe('tradingConfigToScVal', () => {
         it('emits exactly the 34 config.rs keys in alphabetical order', () => {
             const configScVal = tradingConfigToScVal(makeDistinctConfig());
@@ -227,13 +231,13 @@ describe('trading_types', () => {
         expect('updatedAt' in position).toBe(false);
     });
 
-    it('parseMarketData decodes SidePairs and lastPriceTime', () => {
+    it('parseMarketData decodes SidePairs and carries no lastPriceTime (moved to the PriceCache entry)', () => {
         const marketData = parseMarketData({
             notional: { long: 1n, short: 2n }, margin: { long: 3n, short: 4n },
             tokens: { long: 5n, short: 6n }, funding_idx: { long: 7n, short: 8n },
             borrowing_idx: { long: 9n, short: 10n }, funding_rate: 11n,
             funding_update: 12n, borrowing_update: 13n, funding_pool: 14n,
-            funding_owed: 15n, last_price_time: 16n,
+            funding_owed: 15n,
         });
         expect(marketData).toEqual({
             notional: { long: 1n, short: 2n },
@@ -246,8 +250,8 @@ describe('trading_types', () => {
             borrowingUpdate: 13n,
             fundingPool: 14n,
             fundingOwed: 15n,
-            lastPriceTime: 16n,
         });
+        expect('lastPriceTime' in marketData).toBe(false);
     });
 
     it('parseAdlState maps the per-side flags', () => {

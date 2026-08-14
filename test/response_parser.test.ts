@@ -93,18 +93,21 @@ describe('parseError: periphery namespaces resolve unhinted', () => {
         expect(parseError(simulationError(801)).type).toBe(ContractErrorType.StrategyPnlExceedsAssets);
     });
 
-    it('price-verifier 790-791 (feed-anchor pair, no longer strategy-vault codes)', () => {
-        expect(parseError(simulationError(790)).type).toBe(ContractErrorType.PVFeedNotFound);
-        expect(parseError(simulationError(791)).type).toBe(ContractErrorType.PVWrongExponent);
+    it('oracle feed/clock pair 790/793 (no longer strategy-vault codes)', () => {
+        expect(parseError(simulationError(790)).type).toBe(ContractErrorType.OracleFeedMismatch);
+        expect(parseError(simulationError(793)).type).toBe(ContractErrorType.OraclePriceAhead);
     });
 
-    it('price-verifier payload parser range 784-789', () => {
-        expect(parseError(simulationError(784)).type).toBe(ContractErrorType.PVTruncatedData);
-        expect(parseError(simulationError(785)).type).toBe(ContractErrorType.PVInvalidPayloadLength);
-        expect(parseError(simulationError(786)).type).toBe(ContractErrorType.PVInvalidPayloadMagic);
-        expect(parseError(simulationError(787)).type).toBe(ContractErrorType.PVInvalidChannel);
-        expect(parseError(simulationError(788)).type).toBe(ContractErrorType.PVInvalidProperty);
-        expect(parseError(simulationError(789)).type).toBe(ContractErrorType.PVInvalidMarketSession);
+    it('oracle Chainlink report rejects 784/785; the Lazer parser range is retired', () => {
+        expect(parseError(simulationError(784)).type).toBe(ContractErrorType.OracleReportExpired);
+        expect(parseError(simulationError(785)).type).toBe(
+            ContractErrorType.OracleInvalidSpreadReduction
+        );
+        for (const code of [786, 787, 788, 789, 791, 792]) {
+            expect(parseError(simulationError(code)).type, `code ${code}`).toBe(
+                ContractErrorType.UnknownError
+            );
+        }
     });
 
     it('treasury 900', () => {

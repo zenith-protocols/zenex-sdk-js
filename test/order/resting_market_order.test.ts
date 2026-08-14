@@ -61,10 +61,10 @@ const validation: OrderValidationContext = {
     status: Status.Active,
     config: config(),
     price: {
-        feedId: 1,
-        exponent: -8,
+        feedId: Buffer.alloc(32, 1),
         bid: 99n,
         ask: 101n,
+        publishTime: 1n,
     },
     priceUpdate: new Uint8Array([1, 2, 3]),
 };

@@ -74,7 +74,6 @@ export function marketDataScVal(): xdr.ScVal {
         mapEntry('funding_pool', i128(0n)),
         mapEntry('funding_rate', i128(0n)),
         mapEntry('funding_update', u64(600n)),
-        mapEntry('last_price_time', u64(1234n)),
         mapEntry('notional', sidePair(1000n, 500n)),
         mapEntry('tokens', sidePair(500n, 250n)),
     ]);
@@ -114,13 +113,18 @@ export function contractInstance(storage: xdr.ScMapEntry[]): xdr.ScVal {
     );
 }
 
+/** Default 32-byte V3 (`0x0003…`) stream id used by the instance fixtures. */
+export const TEST_FEED_ID: Buffer = Buffer.concat([
+    Buffer.from([0x00, 0x03]),
+    Buffer.alloc(30, 23),
+]);
+
 export interface TradingInstanceOptions {
     vault: string;
     token: string;
-    priceVerifier: string;
+    oracle: string;
     treasury: string;
-    feedId?: number;
-    exponent?: number;
+    feedId?: Buffer;
     status?: number;
     adl?: [boolean, boolean];
     delistedAt?: bigint;
@@ -133,12 +137,11 @@ export function tradingInstanceScVal(options: TradingInstanceOptions): xdr.ScVal
     const addr = (id: string) => Address.fromString(id).toScVal();
     const storage: xdr.ScMapEntry[] = [
         new xdr.ScMapEntry({ key: unitKey('Config'), val: tradingConfigToScVal(makeConfig()) }),
-        new xdr.ScMapEntry({ key: unitKey('FeedId'), val: xdr.ScVal.scvU32(options.feedId ?? 23) }),
-        new xdr.ScMapEntry({ key: unitKey('Exponent'), val: xdr.ScVal.scvI32(options.exponent ?? -8) }),
+        new xdr.ScMapEntry({ key: unitKey('FeedId'), val: xdr.ScVal.scvBytes(options.feedId ?? TEST_FEED_ID) }),
         new xdr.ScMapEntry({ key: unitKey('Status'), val: xdr.ScVal.scvU32(options.status ?? 0) }),
         new xdr.ScMapEntry({ key: unitKey('Vault'), val: addr(options.vault) }),
         new xdr.ScMapEntry({ key: unitKey('Token'), val: addr(options.token) }),
-        new xdr.ScMapEntry({ key: unitKey('PriceVerifier'), val: addr(options.priceVerifier) }),
+        new xdr.ScMapEntry({ key: unitKey('Oracle'), val: addr(options.oracle) }),
         new xdr.ScMapEntry({ key: unitKey('Treasury'), val: addr(options.treasury) }),
     ];
     if (options.delistedAt !== undefined) {

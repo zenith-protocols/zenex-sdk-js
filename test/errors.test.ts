@@ -12,7 +12,7 @@ import {
 // =============================================================================
 // Error enums are hand-checked against the contract sources:
 //   trading/src/errors.rs          (TradingError, 700-772)
-//   price-verifier/src/error.rs    (PriceVerifierError, 780-792)
+//   oracle/src/error.rs            (OracleError, 780-793)
 //   strategy-vault/src/strategy.rs (StrategyVaultError, 800-801)
 //   governance/src/errors.rs       (GovernanceError, 810-812)
 //   treasury/src/lib.rs            (TreasuryError, 900)
@@ -42,6 +42,7 @@ describe('TradingError (v2 trading/src/errors.rs)', () => {
         expect(TradingError.PositionNotFound).toBe(720);
         expect(TradingError.NotionalLocked).toBe(721);
         expect(TradingError.NotLiquidatable).toBe(722);
+        expect(TradingError.PositionLiquidatable).toBe(723);
         // orders / price
         expect(TradingError.OrderNotFound).toBe(730);
         expect(TradingError.OrderExpired).toBe(731);
@@ -57,6 +58,7 @@ describe('TradingError (v2 trading/src/errors.rs)', () => {
         expect(TradingError.MinOutNotMet).toBe(752);
         expect(TradingError.VaultBalanceExceeded).toBe(753);
         expect(TradingError.PendingPnlExceeded).toBe(754);
+        expect(TradingError.VaultInsolvent).toBe(755);
         // funding
         expect(TradingError.NothingToClaim).toBe(760);
         // ADL
@@ -65,17 +67,22 @@ describe('TradingError (v2 trading/src/errors.rs)', () => {
         expect(TradingError.AdlNotEligible).toBe(772);
     });
 
-    it('has exactly 33 members (the full errors.rs surface, no stale codes)', () => {
+    it('has exactly 35 members (the full errors.rs surface, no stale codes)', () => {
         // Hand count from errors.rs: 700-706 (7) + 710 (1) + 711-715 (5)
-        // + 720-722 (3) + 730-734 (5) + 740-742 (3) + 750-754 (5) + 760 (1)
-        // + 770-772 (3) = 33.
+        // + 720-723 (4) + 730-734 (5) + 740-742 (3) + 750-755 (6) + 760 (1)
+        // + 770-772 (3) = 35.
         const numericValues = Object.values(TradingError).filter((value) => typeof value === 'number');
-        expect(numericValues).toHaveLength(33);
+        expect(numericValues).toHaveLength(35);
     });
 
     it('752 means MinOutNotMet, and PendingPnlExceeded moved to 754', () => {
         expect(TradingError[752]).toBe('MinOutNotMet');
         expect(TradingError[754]).toBe('PendingPnlExceeded');
+    });
+
+    it('723 and 755 are the settlement-rail rejects added on v2 main', () => {
+        expect(TradingError[723]).toBe('PositionLiquidatable');
+        expect(TradingError[755]).toBe('VaultInsolvent');
     });
 
     it('every trading code has a human-readable message', () => {
@@ -89,20 +96,28 @@ describe('TradingError (v2 trading/src/errors.rs)', () => {
 });
 
 describe('ContractErrorType periphery codes (v2 contracts)', () => {
-    it('price-verifier covers 780-792 including the feed-anchor pair', () => {
-        expect(ContractErrorType.PVInvalidData).toBe(780);
-        expect(ContractErrorType.PVInvalidPrice).toBe(781);
-        expect(ContractErrorType.PVPriceStale).toBe(782);
-        expect(ContractErrorType.PVInvalidStaleness).toBe(783);
-        expect(ContractErrorType.PVTruncatedData).toBe(784);
-        expect(ContractErrorType.PVInvalidPayloadLength).toBe(785);
-        expect(ContractErrorType.PVInvalidPayloadMagic).toBe(786);
-        expect(ContractErrorType.PVInvalidChannel).toBe(787);
-        expect(ContractErrorType.PVInvalidProperty).toBe(788);
-        expect(ContractErrorType.PVInvalidMarketSession).toBe(789);
-        expect(ContractErrorType.PVFeedNotFound).toBe(790);
-        expect(ContractErrorType.PVWrongExponent).toBe(791);
-        expect(ContractErrorType.PVInvalidConfidence).toBe(792);
+    it('oracle covers the OracleError set (780-785, 790, 793)', () => {
+        expect(ContractErrorType.OracleInvalidData).toBe(780);
+        expect(ContractErrorType.OracleInvalidPrice).toBe(781);
+        expect(ContractErrorType.OraclePriceStale).toBe(782);
+        expect(ContractErrorType.OracleInvalidStaleness).toBe(783);
+        expect(ContractErrorType.OracleReportExpired).toBe(784);
+        expect(ContractErrorType.OracleInvalidSpreadReduction).toBe(785);
+        expect(ContractErrorType.OracleFeedMismatch).toBe(790);
+        expect(ContractErrorType.OraclePriceAhead).toBe(793);
+    });
+
+    it('the retired Lazer price-verifier codes are gone (786-789, 791, 792)', () => {
+        const memberNames = ContractErrorType as unknown as Record<string, unknown>;
+        expect(memberNames.PVInvalidData).toBeUndefined();
+        expect(memberNames.PVTruncatedData).toBeUndefined();
+        expect(memberNames.PVWrongExponent).toBeUndefined();
+        expect(memberNames.PVInvalidConfidence).toBeUndefined();
+        const byCode = ContractErrorType as unknown as Record<number, string>;
+        for (const code of [786, 787, 788, 789, 791, 792]) {
+            expect(byCode[code], `code ${code}`).toBeUndefined();
+            expect(contractErrorFromCode(code).type).toBe(ContractErrorType.UnknownError);
+        }
     });
 
     it('fee-abstraction InvalidFeeBounds is 5003 (OpenZeppelin, not a Zenex contract)', () => {
@@ -152,11 +167,13 @@ describe('contractErrorFromCode (hint-free resolution)', () => {
     });
 
     it('resolves the new trading codes', () => {
+        expect(contractErrorFromCode(723).type).toBe(TradingError.PositionLiquidatable);
         expect(contractErrorFromCode(733).type).toBe(TradingError.TooManyOrders);
         expect(contractErrorFromCode(734).type).toBe(TradingError.UnknownKind);
         expect(contractErrorFromCode(742).type).toBe(TradingError.TriggerNotMet);
         expect(contractErrorFromCode(752).type).toBe(TradingError.MinOutNotMet);
         expect(contractErrorFromCode(754).type).toBe(TradingError.PendingPnlExceeded);
+        expect(contractErrorFromCode(755).type).toBe(TradingError.VaultInsolvent);
         expect(contractErrorFromCode(760).type).toBe(TradingError.NothingToClaim);
     });
 
@@ -180,15 +197,25 @@ describe('contractErrorFromCode (hint-free resolution)', () => {
         expect(contractErrorFromCode(812).type).toBe(ContractErrorType.GovInvalidDelay);
     });
 
-    it('resolves strategy-vault 800-801 and price-verifier 790-792', () => {
+    it('resolves strategy-vault 800-801 and the oracle feed/clock pair 790/793', () => {
         expect(contractErrorFromCode(800).type).toBe(ContractErrorType.StrategyInvalidAmount);
         expect(contractErrorFromCode(801).type).toBe(ContractErrorType.StrategyPnlExceedsAssets);
-        expect(contractErrorFromCode(790).type).toBe(ContractErrorType.PVFeedNotFound);
-        expect(contractErrorFromCode(791).type).toBe(ContractErrorType.PVWrongExponent);
-        expect(contractErrorFromCode(792).type).toBe(ContractErrorType.PVInvalidConfidence);
-        expect(contractErrorFromCode(792).message).toBe(
-            'Price confidence bound rejects every feed'
+        expect(contractErrorFromCode(790).type).toBe(ContractErrorType.OracleFeedMismatch);
+        expect(contractErrorFromCode(790).message).toBe(
+            'Report prices a different stream than the feed anchor'
         );
+        expect(contractErrorFromCode(793).type).toBe(ContractErrorType.OraclePriceAhead);
+    });
+
+    it('resolves the Chainlink report rejects 784/785 with their new meanings', () => {
+        expect(contractErrorFromCode(784).type).toBe(ContractErrorType.OracleReportExpired);
+        expect(contractErrorFromCode(784).message).toBe(
+            'Ledger clock has passed the report expiresAt'
+        );
+        expect(contractErrorFromCode(785).type).toBe(
+            ContractErrorType.OracleInvalidSpreadReduction
+        );
+        expect(contractErrorFromCode(785).message).not.toMatch(/payload|trailing/i);
     });
 
     it('resolves fee-abstraction 5003 with the relay fee-bounds message', () => {

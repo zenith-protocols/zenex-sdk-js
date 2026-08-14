@@ -28,31 +28,31 @@ import type {
 const ROUTER = StrKey.encodeContract(Buffer.alloc(32, 1));
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 2));
 const VAULT = StrKey.encodeContract(Buffer.alloc(32, 3));
-const VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 4));
+const ORACLE = StrKey.encodeContract(Buffer.alloc(32, 4));
 const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 5));
 const COLLATERAL = StrKey.encodeContract(Buffer.alloc(32, 6));
 const OTHER = StrKey.encodeContract(Buffer.alloc(32, 7));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 8));
+const FEED_ID = Buffer.concat([
+    Buffer.from([0x00, 0x03]),
+    Buffer.alloc(30, 7),
+]);
 
 const deployment: TradingDeployment = {
     trading: TRADING,
     router: ROUTER,
     vault: VAULT,
-    priceVerifier: VERIFIER,
+    oracle: ORACLE,
     treasury: TREASURY,
-    feedId: 7,
-    exponent: -8,
+    feedId: FEED_ID,
     vaultDecimalsOffset: 11,
     vaultShareDecimals: 18,
 };
 
 const numericPrice = {
-    feedId: 7,
-    exponent: -8,
-    price: 1_005_000_000n,
+    feedId: FEED_ID,
     bid: 1_000_000_000n,
     ask: 1_010_000_000n,
-    confidence: 5_000_000n,
     publishTime: 95n,
     freshness: 'fresh' as const,
 };
@@ -136,7 +136,6 @@ const expectedMarket: MarketData = {
     borrowingUpdate: 91n,
     fundingPool: 6n,
     fundingOwed: 7n,
-    lastPriceTime: 92n,
 };
 
 const expectedPosition: Position = {
@@ -188,7 +187,6 @@ function marketScVal(value: MarketData): xdr.ScVal {
         entry('funding_pool', i128(value.fundingPool)),
         entry('funding_rate', i128(value.fundingRate)),
         entry('funding_update', u64(value.fundingUpdate)),
-        entry('last_price_time', u64(value.lastPriceTime)),
         entry('notional', pairScVal(value.notional)),
         entry('tokens', pairScVal(value.tokens)),
     ]);
@@ -234,7 +232,7 @@ const indexes = {
     token: 6,
     vault: 7,
     treasury: 8,
-    verifier: 9,
+    oracle: 9,
     totalAssets: 10,
     totalSupply: 11,
     vaultAsset: 12,
@@ -250,14 +248,11 @@ function snapshotValues(): xdr.ScVal[] {
         positionScVal(expectedPosition),
         xdr.ScVal.scvU32(Status.Active),
         xdr.ScVal.scvVoid(),
-        xdr.ScVal.scvVec([
-            xdr.ScVal.scvU32(deployment.feedId),
-            xdr.ScVal.scvI32(deployment.exponent),
-        ]),
+        xdr.ScVal.scvBytes(FEED_ID),
         address(COLLATERAL),
         address(VAULT),
         address(TREASURY),
-        address(VERIFIER),
+        address(ORACLE),
         i128(10_000n),
         i128(9_000_000n),
         address(COLLATERAL),
@@ -339,7 +334,7 @@ describe('loadTradingSnapshot', () => {
             'get_token',
             'get_vault',
             'get_treasury',
-            'get_price_verifier',
+            'get_oracle',
             'total_assets',
             'total_supply',
             'query_asset',
@@ -371,10 +366,10 @@ describe('loadTradingSnapshot', () => {
             market: expectedMarket,
             position: expectedPosition,
             price: {
-                feedId: 7,
-                exponent: -8,
+                feedId: FEED_ID,
                 bid: 1_000_000_000n,
                 ask: 1_010_000_000n,
+                publishTime: 95n,
             },
             priceUpdate: new Uint8Array([1, 2, 3]),
             vault: {
@@ -422,11 +417,12 @@ describe('loadTradingSnapshot', () => {
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
         expect(result.value.retirement).toEqual([777_000_000n, 80n]);
+        // The terminal mark's publishTime is the ledger close time (100).
         expect(result.value.price).toEqual({
-            feedId: 7,
-            exponent: -8,
+            feedId: FEED_ID,
             bid: 777_000_000n,
             ask: 777_000_000n,
+            publishTime: 100n,
         });
     });
 
@@ -451,10 +447,10 @@ describe('loadTradingSnapshot', () => {
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
         expect(result.value.price).toEqual({
-            feedId: 7,
-            exponent: -8,
+            feedId: FEED_ID,
             bid: 1_234_000_000n,
             ask: 1_236_000_000n,
+            publishTime: 88n,
         });
     });
 

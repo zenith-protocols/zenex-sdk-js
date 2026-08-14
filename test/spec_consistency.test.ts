@@ -5,13 +5,13 @@ import { TradingContract } from '../src/contracts/trading/trading_contract.js';
 import { TradingRouterContract } from '../src/contracts/router/router_contract.js';
 import { FactoryContract } from '../src/contracts/factory/factory_contract.js';
 import { VaultContract } from '../src/contracts/vault/vault_contract.js';
-import { PriceVerifierContract } from '../src/contracts/price-verifier/price_verifier_contract.js';
+import { OracleContract } from '../src/contracts/oracle/oracle_contract.js';
 import { TreasuryContract } from '../src/contracts/treasury/treasury_contract.js';
 import { GovernanceContract } from '../src/contracts/governance/governance_contract.js';
 import {
     factorySpec,
     governanceSpec,
-    priceVerifierSpec,
+    oracleSpec,
     strategyVaultSpec,
     tradingRouterSpec,
     tradingSpec,
@@ -20,7 +20,7 @@ import {
 
 import factoryFixture from './fixtures/specs/factory.json';
 import governanceFixture from './fixtures/specs/governance.json';
-import priceVerifierFixture from './fixtures/specs/price_verifier.json';
+import oracleFixture from './fixtures/specs/oracle.json';
 import strategyVaultFixture from './fixtures/specs/strategy_vault.json';
 import tradingFixture from './fixtures/specs/trading.json';
 import tradingRouterFixture from './fixtures/specs/trading_router.json';
@@ -37,8 +37,8 @@ const contracts = [
         fixture: tradingFixture,
         contract: TradingContract,
         source: 'src/contracts/trading/trading_contract.ts',
-        sha256: '1a99a7c8f90b094be36909aa8c180f68c13dbe99861bfb76777b481336fadc92',
-        bytes: 66_036,
+        sha256: '890b1b126e6c2b20077467a6c58146770513759945d9ecf2229ca6140fd85fca',
+        bytes: 66_137,
     },
     {
         package: 'trading-router',
@@ -47,8 +47,8 @@ const contracts = [
         fixture: tradingRouterFixture,
         contract: TradingRouterContract,
         source: 'src/contracts/router/router_contract.ts',
-        sha256: '1affc4279fdc11de0ae14d2a8958f34aa88dfed4759f93a5a49b85c5c545caaa',
-        bytes: 12_350,
+        sha256: 'd2af8cc360972dfee584be3e4595395765fdbffba833f2e031e53a430742dcf2',
+        bytes: 12_312,
     },
     {
         package: 'factory',
@@ -57,8 +57,8 @@ const contracts = [
         fixture: factoryFixture,
         contract: FactoryContract,
         source: 'src/contracts/factory/factory_contract.ts',
-        sha256: 'ad47c71dfa109f4c035c84f8e2b412f0087422d510872d5792c2a7e3de8bc6b8',
-        bytes: 7_714,
+        sha256: '020f26d51709fe1c7de1280546f4d88ff729d8243c8b12a20906f480dbb773c9',
+        bytes: 7_705,
     },
     {
         package: 'strategy-vault',
@@ -67,18 +67,18 @@ const contracts = [
         fixture: strategyVaultFixture,
         contract: VaultContract,
         source: 'src/contracts/vault/vault_contract.ts',
-        sha256: '26899099b15ef633220eabfd0871d2678170a3faab12a4e45eb1b986964950eb',
-        bytes: 20_915,
+        sha256: 'afd6fcf06748a6fc21074a48b145288c77ad9ccfee0200b18770c65c326431f4',
+        bytes: 20_679,
     },
     {
-        package: 'price-verifier',
-        exportName: 'priceVerifierSpec',
-        spec: priceVerifierSpec,
-        fixture: priceVerifierFixture,
-        contract: PriceVerifierContract,
-        source: 'src/contracts/price-verifier/price_verifier_contract.ts',
-        sha256: 'a305fb2c74d335602fc4c29e33f12772e747f80d0734293fbea83b709db0a2b3',
-        bytes: 15_247,
+        package: 'oracle',
+        exportName: 'oracleSpec',
+        spec: oracleSpec,
+        fixture: oracleFixture,
+        contract: OracleContract,
+        source: 'src/contracts/oracle/oracle_contract.ts',
+        sha256: '795ab53defab9982319e62bb855e434068fac5ed74c84258c34ac85327385bf9',
+        bytes: 15_592,
     },
     {
         package: 'treasury',
@@ -87,8 +87,8 @@ const contracts = [
         fixture: treasuryFixture,
         contract: TreasuryContract,
         source: 'src/contracts/treasury/treasury_contract.ts',
-        sha256: '85322d7b3edd30ac9c5f9a7dfb187dfa9eadf0781333ad841fe1bedb75a0eae9',
-        bytes: 6_248,
+        sha256: 'c760dc41ed845fec15361296dbd158f0c2199e67d38ad5f8026048f16162d4f6',
+        bytes: 6_320,
     },
     {
         package: 'governance',
@@ -97,8 +97,8 @@ const contracts = [
         fixture: governanceFixture,
         contract: GovernanceContract,
         source: 'src/contracts/governance/governance_contract.ts',
-        sha256: '751b7cc97b3c348e1eaf263eaef0c694ac1c5b3879256e68afe4ab9be8efac87',
-        bytes: 10_130,
+        sha256: '51c5491b0c24dd1ba805ab1038cbdac63b756c4b84e9a71e91b81885656fd250',
+        bytes: 10_260,
     },
 ] as const;
 
@@ -106,13 +106,15 @@ describe('approved v2 contract spec consistency', () => {
     it('pins source commit, source tree, Cargo.lock, and toolchain evidence', () => {
         expect(manifest).toMatchObject({
             schemaVersion: 1,
-            contractsCommit: 'fc85144123622676d77c4e72b10aad7eab43d321',
-            productionSourceTree: 'd7537b81ec8ecf4f64b1dcb56dadac71894e04f7',
+            contractsCommit: 'd6f6cb9c518f9989d3723dfe4660eea2d762ccd1',
+            productionSourceTree: 'aa71b347d123dd857bd2a6e12fa8b9ae89f43690',
             cargoLock: {
                 path: 'Cargo.lock',
-                sha256: '79a15142a56b0a97f1b0d3af1f9c0625feaa6e9eb3804089f9e31e268f5484a0',
+                sha256: 'eb5429fcee41a363d0d288f92bccde575add7a22130de7b359fd979746408ca6',
             },
             toolchain: {
+                rustc: 'rustc 1.97.1 (8bab26f4f 2026-07-14)',
+                cargo: 'cargo 1.97.1 (c980f4866 2026-06-30)',
                 stellarCli: 'stellar 25.2.0 (28484880988199233a7e8e87c97cb12dac323cb3)',
                 stellarXdr: 'stellar-xdr 25.0.0 (dc9f40fcb83c3054341f70b65a2222073369b37b)',
                 xdrCurrentRevision: '0a621ec7811db000a60efae5b35f78dee3aa2533',

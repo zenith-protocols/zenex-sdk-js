@@ -180,6 +180,31 @@ describe('quoteVaultOrderCreation', () => {
             '#732',
         ],
         [
+            'nonpositive retired direct redeem',
+            creation({
+                status: Status.Retired,
+                action: 'redeem',
+                amount: 0n,
+                vault: {
+                    totalAssets: 1_000n,
+                    totalSupply: 1_000n,
+                    decimalsOffset: 0,
+                },
+            }),
+            'CONTRACT_GATE',
+            '#732',
+        ],
+        [
+            'negative retired direct redeem without vault state',
+            creation({
+                status: Status.Retired,
+                action: 'redeem',
+                amount: -1n,
+            }),
+            'CONTRACT_GATE',
+            '#732',
+        ],
+        [
             'negative minimum output',
             creation({ minOut: -1n }),
             'CONTRACT_GATE',
@@ -210,7 +235,7 @@ describe('quoteVaultOrderCreation', () => {
         });
     });
 
-    it('represents an impossible later publish timestamp explicitly', () => {
+    it('represents an impossible later fill ledger time explicitly', () => {
         const result = quoteVaultOrderCreation(creation({ now: U64_MAX }));
 
         expect(result.kind).toBe('exact');
