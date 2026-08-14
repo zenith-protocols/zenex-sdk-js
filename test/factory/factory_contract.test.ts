@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, Address } from '@stellar/stellar-sdk';
-import { FactoryContract, FactoryConstructorArgs } from '../../src/factory/factory_contract.js';
-import { TradingConfig } from '../../src/trading/trading_types.js';
+import { FactoryContract, FactoryConstructorArgs } from '../../src/contracts/factory/factory_contract.js';
+import { TradingConfig } from '../../src/contracts/trading/trading_types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const ADMIN = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -51,7 +51,7 @@ function makeConfig(): TradingConfig {
         maxUtilWithdraw: 23n,
         maxVaultBalance: 24n,
         minDeposit: 25n,
-        minOrderCollateral: 26n,
+        minOrderMargin: 26n,
         minOrderNotional: 27n,
         minPositionNotional: 28n,
         notionalLock: 29n,
@@ -91,7 +91,7 @@ const EXPECTED_CONFIG_ENTRIES: [string, bigint][] = [
     ['max_util_withdraw', 23n],
     ['max_vault_balance', 24n],
     ['min_deposit', 25n],
-    ['min_order_collateral', 26n],
+    ['min_order_margin', 26n],
     ['min_order_notional', 27n],
     ['min_position_notional', 28n],
     ['notional_lock', 29n],

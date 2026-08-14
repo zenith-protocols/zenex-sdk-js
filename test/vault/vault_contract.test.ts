@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey } from '@stellar/stellar-sdk';
-import { VaultContract, VaultConstructorArgs } from '../../src/vault/vault_contract.js';
+import { VaultContract, VaultConstructorArgs } from '../../src/contracts/vault/vault_contract.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const DEPLOYER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));

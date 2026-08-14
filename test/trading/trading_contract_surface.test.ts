@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { TradingContract, DeployArgs } from '../../src/trading/trading_contract.js';
+import { TradingContract, DeployArgs } from '../../src/contracts/trading/trading_contract.js';
 import {
     OrderKind, VaultOrderKind, FULL_CLOSE, TradingConfig, tradingConfigToScVal,
-} from '../../src/trading/trading_types.js';
+} from '../../src/contracts/trading/trading_types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -28,7 +28,7 @@ function decodeInvoke(operation: string) {
 function makeConfig(): TradingConfig {
     return {
         keeperRate: 1n, minPositionNotional: 1n, maxPositionNotional: 2n,
-        maxOpenInterest: 2n, minOrderNotional: 1n, minOrderCollateral: 1n,
+        maxOpenInterest: 2n, minOrderNotional: 1n, minOrderMargin: 1n,
         execFee: 1n, feeDom: 1n, feeNonDom: 1n, impactScalar: 1n,
         maxUtilOpen: 1n, maxUtilWithdraw: 1n, initMargin: 1n,
         maintenanceMargin: 1n, liqFee: 1n, notionalLock: 60n, targetUtil: 1n,
@@ -52,7 +52,7 @@ const sidePair = (long: bigint, short: bigint) =>
 const marketDataScVal = () => xdr.ScVal.scvMap([
     entry('borrowing_idx', sidePair(1n, 2n)),
     entry('borrowing_update', u64(3n)),
-    entry('collateral', sidePair(4n, 5n)),
+    entry('margin', sidePair(4n, 5n)),
     entry('funding_idx', sidePair(6n, 7n)),
     entry('funding_owed', i128(8n)),
     entry('funding_pool', i128(9n)),
@@ -174,12 +174,12 @@ describe('TradingContract full surface', () => {
 
     it('builds every semantic helper on top of create_order / create_vault_order', () => {
         const openMarket = decodeInvoke(contract.openMarket({
-            user: USER, isLong: true, notional: 100n, collateral: 10n, priceBound: 5n, expiration: 99,
+            user: USER, isLong: true, notional: 100n, margin: 10n, priceBound: 5n, expiration: 99,
         }));
         expect(openMarket.args).toEqual([USER, true, OrderKind.MarketIncrease, 100n, 10n, 0n, 5n, 99]);
 
         const openLimit = decodeInvoke(contract.openLimit({
-            user: USER, isLong: true, notional: 100n, collateral: 10n,
+            user: USER, isLong: true, notional: 100n, margin: 10n,
             triggerPrice: 42n, priceBound: 5n, expiration: 99,
         }));
         expect(openLimit.args).toEqual([USER, true, OrderKind.LimitIncrease, 100n, 10n, 42n, 5n, 99]);
@@ -190,14 +190,14 @@ describe('TradingContract full surface', () => {
         expect(close.args).toEqual([USER, true, OrderKind.MarketDecrease, FULL_CLOSE, 0n, 0n, 6n, 4]);
 
         const decrease = decodeInvoke(contract.decreasePosition({
-            user: USER, isLong: false, notional: 40n, collateral: 4n, priceBound: 0n, expiration: 1,
+            user: USER, isLong: false, notional: 40n, margin: 4n, priceBound: 0n, expiration: 1,
         }));
         expect(decrease.args).toEqual([USER, false, OrderKind.MarketDecrease, 40n, 4n, 0n, 0n, 1]);
 
-        const add = decodeInvoke(contract.addCollateral({ user: USER, isLong: true, amount: 7n, expiration: 2 }));
+        const add = decodeInvoke(contract.addMargin({ user: USER, isLong: true, amount: 7n, expiration: 2 }));
         expect(add.args).toEqual([USER, true, OrderKind.MarketIncrease, 0n, 7n, 0n, 0n, 2]);
 
-        const withdraw = decodeInvoke(contract.withdrawCollateral({ user: USER, isLong: true, amount: 7n, expiration: 2 }));
+        const withdraw = decodeInvoke(contract.withdrawMargin({ user: USER, isLong: true, amount: 7n, expiration: 2 }));
         expect(withdraw.args).toEqual([USER, true, OrderKind.MarketDecrease, 0n, 7n, 0n, 0n, 2]);
 
         const takeProfit = decodeInvoke(contract.placeTakeProfit({
@@ -291,7 +291,7 @@ describe('TradingContract full surface', () => {
 
             const position = xdr.ScVal.scvMap([
                 entry('borrowing_idx', i128(1n)),
-                entry('collateral', i128(2n)),
+                entry('margin', i128(2n)),
                 entry('decrease_orders', xdr.ScVal.scvVec([xdr.ScVal.scvU32(11), xdr.ScVal.scvU32(12)])),
                 entry('funding_idx', i128(3n)),
                 entry('locked_notional', i128(4n)),
@@ -301,7 +301,7 @@ describe('TradingContract full surface', () => {
                 entry('unlocks_at', u64(7n)),
             ]).toXDR('base64');
             const parsedPosition = parsers.getPosition(position);
-            expect(parsedPosition.collateral).toBe(2n);
+            expect(parsedPosition.margin).toBe(2n);
             expect(parsedPosition.lockedNotional).toBe(4n);
             expect(parsedPosition.pricedAt).toBe(8n);
             expect(parsedPosition.decreaseOrders).toEqual([11, 12]);
@@ -309,7 +309,7 @@ describe('TradingContract full surface', () => {
 
         it('parses Option views (Order, VaultOrder) and the Config mirror', () => {
             const order = xdr.ScVal.scvMap([
-                entry('collateral', i128(1n)),
+                entry('margin', i128(1n)),
                 entry('created_at', u64(2n)),
                 entry('exec_fee', i128(7n)),
                 entry('expiration', xdr.ScVal.scvU32(3)),

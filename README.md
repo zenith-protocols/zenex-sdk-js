@@ -1,7 +1,7 @@
 # @zenith-protocols/zenex-sdk
 
-TypeScript SDK for Zenex v2 contracts, exact transaction quotes, Router relay
-policies, and the public platform API on Stellar.
+TypeScript SDK for the Zenex protocol on Stellar Soroban: contract bindings,
+ledger-state loaders, exact transaction quotes, and transaction building.
 
 ## Installation
 
@@ -13,243 +13,105 @@ Atomic token, price, ledger, and source-time values are `bigint`. Convert them
 to decimal display text only at the UI boundary. Never convert a transaction
 input through `number`, `parseFloat`, or display formatting.
 
-## Exact account-fill economics
+## Load market state
 
-The account-fill API field `pnlAtomic` is **gross PnL**, not the amount left
-after fees and settlement. Use `deriveAccountFillNetPnl` before displaying or
-aggregating fill-level net PnL:
-
-```ts
-import { deriveAccountFillNetPnl } from '@zenith-protocols/zenex-sdk';
-
-const result = deriveAccountFillNetPnl(fill);
-if (result.kind === 'unavailable') {
-    // Render an unavailable state. Never replace missing components with zero.
-    console.log(result.economicsCompleteness, result.missingComponents);
-} else {
-    console.log(result.grossPnlAtomic, result.netPnlAtomic);
-}
-```
-
-Net PnL is returned only when `economicsCompleteness === 'complete'` and gross,
-base, impact, funding, borrowing, liquidation, forfeit, keeper-execution, and
-relay atomics are all present. The exact signed formula subtracts every listed
-component; therefore negative funding or impact is a trader credit. Bad debt is
-audited separately and is not subtracted from trader PnL. All values and
-arithmetic remain checked signed-i128 `bigint` operations.
-
-## Exact margin adjustment
-
-Load one coherent snapshot, quote the action, and pass the quote directly to
-the operation builder. A Max withdrawal is an exact contract-gated search, not
-a percentage of the displayed balance.
+A market's full contract state (trading instance, market data, position, vault,
+treasury rate) collapses to six ledger entries, read in one
+`getLedgerEntries` round trip. Project the read onto a `TradingSnapshot` with
+the market's current numeric price to feed the quote layer:
 
 ```ts
 import {
-    buildMarginAdjustmentExecution,
-    quoteMarginAdjustment,
+    loadTradingEntries,
+    snapshotFromEntries,
 } from '@zenith-protocols/zenex-sdk';
 
-const quote = quoteMarginAdjustment({
-    ...marginQuoteContext, // coherent ledger, market, position, vault, and price state
-    direction: 'withdraw',
-    amount: { kind: 'max' },
-    executionFee: 0n,
-    relayFee: 0n,
-});
-if (quote.kind !== 'exact') throw new Error(quote.reason);
-
-const requestedAtomicDelta = quote.value.requestedAtomicDelta;
-const execution = buildMarginAdjustmentExecution({
-    ...executionContext,
-    quote: quote.value,
-});
-if (execution.kind !== 'exact') throw new Error(execution.reason);
-```
-
-`positionEquity`, `liquidationPrice`, `MarketView.utilization`, and the numeric
-`VaultState` conversion methods remain available for display estimates. They
-are not transaction inputs. Use the exact position, margin, market-capacity,
-and vault quote APIs for transaction construction.
-
-## Exact position open and increase intent
-
-Load a `SubjectBoundTradingSnapshot`, then request the exact margin that must
-remain after the fill debits base, impact, borrowing, and paid funding fees.
-The SDK derives the gross order collateral and binds the quote to the
-snapshot's user, side, ADL flags, collateral token, verified price update, and
-all other coherent state. The caller does not supply a second user or side.
-
-```ts
-import {
-    buildPositionIncreaseIntentExecution,
-    quoteMaximumPositionIncreaseIntent,
-    quotePositionIncreaseIntent,
-} from '@zenith-protocols/zenex-sdk';
-
-const maximum = quoteMaximumPositionIncreaseIntent({
-    snapshot,
-    desiredPostFeeMarginDelta: 0n,
-    execution: {
-        transport: 'direct',
-        executionFee: snapshot.config.execFee,
-    },
-    maximumSlippage: { numerator: 1n, denominator: 200n },
-    validForLedgers: 60,
-    maximumWalletDebit: walletBalance,
-    // 0.01 collateral tokens when the deployment uses 7 decimals.
-    quantum: 100_000n,
-});
-if (maximum.kind !== 'exact') throw new Error(maximum.reason);
-
-const quote = quotePositionIncreaseIntent({
-    snapshot,
-    notional: 1_000_000_000n,
-    desiredPostFeeMarginDelta: 200_000_000n,
-    execution: {
-        transport: 'direct',
-        executionFee: snapshot.config.execFee,
-    },
-    maximumSlippage: { numerator: 1n, denominator: 200n },
-    validForLedgers: 60,
-});
-if (quote.kind !== 'exact') throw new Error(quote.reason);
-
-const execution = buildPositionIncreaseIntentExecution({
-    snapshot,
-    quote,
-    policy: {
-        kind: 'fillOrKill',
-        transport: 'direct',
-        keeper: snapshot.subject.user,
-        price: snapshot.priceUpdate,
-    },
-});
-if (execution.kind !== 'exact') throw new Error(execution.reason);
-```
-
-`grossOrderCollateral` equals `desiredPostFeeMarginDelta` plus the exact
-position-margin debit. `walletMaximumDebit` additionally includes the keeper
-execution escrow and, for relay execution, the configured signed fee-token
-maximum. Relay quotes take the full exact one-to-one USD-peg fee-token config,
-require its contract and decimals to match the snapshot collateral, and derive
-the reserve from `maxSignedFeeAtomic`; callers cannot supply separate relay
-fee arithmetic.
-
-`quoteMaximumPositionIncreaseIntent` searches only exact, quantum-aligned
-atomic inputs against the same snapshot-bound quote gates. It returns the
-greatest quote that also fits `maximumWalletDebit`, so UI Max controls never
-round a display number above the admissible transaction amount.
-
-Only size-growing market orders are accepted. The market must be Active and
-the selected side must not have ADL enabled. Both direct and relay builders
-produce a single `fillOrKill` Router operation using `create_and_fill` or
-`create_and_fill_with_fee`; there is no resting, try-fill, TP/SL, or Max form
-on this intent surface. `validForLedgers` is bounded by the exported maximum
-of 60 ledgers.
-
-## Exact position decrease intent
-
-Quote a close or partial decrease from the same coherent
-`SubjectBoundTradingSnapshot` that will be supplied to the execution builder.
-The snapshot records the canonical user and position side used by the view
-simulation. The explicit `isLong` quote input and `user` builder input must
-match that subject, so accidental cross-account or cross-side reuse fails
-closed. Size, collateral return, slippage, and absolute expiration stay in
-bigint and ledger arithmetic inside the SDK.
-
-```ts
-import {
-    buildPositionDecreaseIntentExecution,
-    quoteMaximumPositionDecreaseIntent,
-    quotePositionDecreaseIntent,
-} from '@zenith-protocols/zenex-sdk';
-
-const maximum = quoteMaximumPositionDecreaseIntent({
-    snapshot,
-    isLong,
-    collateralReturn: { kind: 'explicit', amount: 0n },
-    execution: {
-        transport: 'direct',
-        executionFee: snapshot.config.execFee,
-    },
-    maximumSlippage: { numerator: 1n, denominator: 200n },
-    validForLedgers: 60,
-    // 0.01 collateral tokens when the deployment uses 7 decimals.
-    quantum: 100_000n,
-});
-if (maximum.kind !== 'exact') throw new Error(maximum.reason);
-
-const quote = quotePositionDecreaseIntent({
-    snapshot,
-    isLong,
-    size: {
-        kind: 'fraction',
-        ratio: { numerator: 1n, denominator: 3n },
-    },
-    collateralReturn: { kind: 'proRata' },
-    execution: {
-        transport: 'direct',
-        executionFee: snapshot.config.execFee,
-    },
-    maximumSlippage: { numerator: 1n, denominator: 200n },
-    validForLedgers: 60,
-});
-if (quote.kind !== 'exact') throw new Error(quote.reason);
-
-const execution = buildPositionDecreaseIntentExecution({
-    snapshot,
+const entries = await loadTradingEntries(network, {
+    trading,
+    vault,
+    treasury,
+    collateralToken,
     user,
-    quote,
-    policy: {
-        kind: 'fillOrKill',
-        transport: 'direct',
-        keeper: user,
-        price: snapshot.priceUpdate,
-    },
+    isLong: true,
 });
-if (execution.kind !== 'exact') throw new Error(execution.reason);
+
+const snapshot = snapshotFromEntries({
+    entries,
+    router,
+    ledgerTime,
+    price, // numeric feed price: { feedId, exponent, price, bid, ask, ... }
+});
 ```
 
-Fractional notional rounds down in atomic units. Pro-rata collateral then
-rounds down from that resolved atomic notional, not independently from the
-original fraction. Explicit partial collateral may be zero but cannot exceed
-the position collateral; `quotePositionAction` applies the surviving-position
-health gates after fee settlement.
+`loadTradingEntriesBatch` reads many markets in one request.
+`loadTradingSnapshot` is the simulation-backed alternative: it runs the same
+state views through a Router `multicall_try` simulation and can serve as a
+low-frequency cross-check against the ledger reads
+(`crossCheckVaultTotalAssets`).
 
-`quoteMaximumPositionDecreaseIntent` keeps the live locked notional and minimum
-position remainder in exact atomic units, aligns candidates downward to the
-requested quantum, and returns the greatest candidate accepted by the same
-snapshot-bound decrease quote.
+## Apply an order
 
-Use `size: { kind: 'full' }` for every whole-position request. It accepts no
-`collateralReturn` and always builds the `FULL_CLOSE` sentinel. An explicit
-notional or fraction that resolves to the whole position fails closed and
-directs the caller to the full size form, so collateral intent is never
-silently ignored.
+The SDK models trading exactly the way the chain does: you hold the chain's
+own nouns (`Position`, `MarketData`, `TradingConfig`, `OrderParams`,
+`PriceData`) and one verb. `applyOrder(snapshot, order)` applies an
+`OrderParams` to the snapshot's position at the current (or a what-if) price
+and reports what the chain would do:
 
-Maximum slippage is an exact ratio below one. A long decrease gets a
-lower bid bound rounded up on the final price; a short decrease gets an upper
-ask bound rounded down on the final price. `validForLedgers` is from 1 through
-the exported `POSITION_DECREASE_MAX_VALIDITY_LEDGERS` value of 60, and the SDK
-derives the inclusive absolute expiration. The snapshot price update must be
-nonempty and no larger than 32 KiB.
+```ts
+import {
+    applyOrder,
+    orderPriceBound,
+    buildOrderOperation,
+    OrderKind,
+} from '@zenith-protocols/zenex-sdk';
 
-`executionFee` must equal `snapshot.config.execFee`. It is an upfront order
-escrow rather than a position-margin debit. An atomic direct fill pays it to
-the selected keeper, so choosing the user as self-keeper returns that escrow
-to the same user. A relay quote uses `transport: 'relay'` and the complete
-`ExactRelayFeeToken` as `feeToken`. The quote validates and retains the token
-contract, collateral identity, decimals, exact one-to-one pricing, and atomic
-fee bounds. Execution requires the same token configuration, its quoted
-`maxSignedFeeAtomic` as the policy `maxFeeAmount`, and the quote expiration as
-the policy fee expiration. Both direct and relay execution require
-`fillOrKill`.
+const order = {
+    trading,
+    user,
+    isLong: true,
+    kind: OrderKind.MarketIncrease,
+    notional: 1_000_0000000n,
+    margin: 100_0000000n,
+    triggerPrice: 0n,
+    priceBound: orderPriceBound(
+        snapshot.price,
+        true,
+        OrderKind.MarketIncrease,
+        100n, // 1% maximum slippage in basis points
+    ),
+    expiration: snapshot.ledger + 60,
+};
 
-## Exact vault action intent
+const result = applyOrder(snapshot, order);
+// result.kind === 'fills' → exact post-position, fees, and payout
+// result.kind === 'rests' → creates but does not fill at this price
+// result.kind === 'gate'  → can never fill: result.code is the contract gate
+```
 
-Keep a vault fill estimate explicit when deriving `minOut`. The SDK applies an
-exact rational slippage bound with bigint floor rounding, but returns estimate
+This is the only validation the SDK performs: creation would succeed on-chain
+even for an order that can never fill (for example a decrease that would break
+the margin gate — `#713`), so `applyOrder` is the pre-flight that predicts the
+fill outcome. What you preview is exactly what you sign: pass the same
+`OrderParams` to `buildOrderOperation`.
+
+Margin adjustments are orders with `notional: 0n` — `margin` is the amount,
+`MarketIncrease` adds, `MarketDecrease` withdraws. A full close is
+`notional: FULL_CLOSE`. `maxWithdrawableMargin(snapshot)` binary-searches the
+largest withdrawal that still fills.
+
+## Execute
+
+Resting orders build as direct `Trading.create_order` /
+`Trading.create_vault_order` operations. Atomic fill-or-kill builds as
+`Router.create_and_fill`, which creates the order and fills it against the
+keeper's verified price in one transaction. `simulateAndParse` runs any built
+operation through a simulation and decodes the result with the matching
+contract parser.
+
+## Vault orders
+
+Keep a vault fill estimate explicit when deriving `minOut`. The SDK applies a
+basis-point slippage bound with bigint floor rounding, but returns estimate
 provenance because a keeper fills the order against later state.
 
 ```ts
@@ -261,7 +123,7 @@ import {
 
 const minimum = deriveVaultMinimumOutput({
     reference: { kind: 'estimate', output: estimatedOutputAtomic },
-    maximumSlippage: { numerator: 1n, denominator: 200n },
+    maximumSlippageBps: 50n, // 0.5%
 });
 if (minimum.kind === 'unavailable') throw new Error(minimum.reason);
 if (minimum.kind !== 'estimate') throw new Error('unexpected vault provenance');
@@ -289,143 +151,26 @@ Active, OnIce, and Delisted vault actions create resting orders. A Retired
 redeem is a distinct direct-only action. It charges no execution fee and does
 not apply the estimate-derived minimum output.
 
-## Public data
+## Display estimates
 
-`ZenexDataClient` validates the exact v1 response schema for each route. It
-converts only declared atomic fields to `bigint` and fails closed on missing,
-invented, or malformed data.
+`positionPnl`, `positionEquity`, `pendingFunding`, `pendingBorrowing`,
+`liquidationPrice`, and `unlockedNotional` mark a stored position at a single
+price without settling accruals. They are display estimates, not transaction
+inputs; transaction code quotes through `applyOrder`.
 
-```ts
-import { ZenexDataClient } from '@zenith-protocols/zenex-sdk';
+## Events
 
-const data = new ZenexDataClient({ baseUrl: 'https://api.zenex.example' });
-const [config, leaderboard, price] = await Promise.all([
-    data.getConfig(),
-    data.getRollingStandings('7d'),
-    data.getLatestPrice(23n),
-]);
-
-console.log(config.data.markets);
-console.log(leaderboard.data.items);
-console.log(price.data.price); // bigint
-```
-
-JSON requests have a 30-second default timeout and an 8 MiB response ceiling.
-Set `requestTimeoutMs` or `maxResponseBytes` on the client, or pass
-`{ signal, timeoutMs }` as the final argument of an individual route call. A
-timeout or caller cancellation during relay submission is still an ambiguous
-handoff and must be resolved through relay status.
-
-Call `createZenexTrustBundle(config.data)` before using public identities for
-relay or smart-account construction. It pins the known network passphrase,
-Router capabilities, smart-account-kit artifacts, verifier deployments, and
-session-policy evidence. A user's smart-account instance is never inferred
-from global config; pass its separately verified deployment record explicitly.
-The returned `priceFree` configuration contains only verified public contract
-identities and can be passed directly to the safe price-free builder.
-
-The scoped event stream emits resource invalidations and exact `price.tick`
-events. Invalidations never alter SDK state. If the durable cursor is outside
-retention, the stream either executes a complete caller-declared REST resync
-plan or throws `ZenexResyncRequiredError`.
-
-## Relay handoff
-
-Relay requests are built by the strict policy builders and submitted through
-the one policy-scoped endpoint. The SDK never retries a POST after an ambiguous
-transport handoff.
-
-```ts
-import {
-    RelaySubmissionAmbiguousError,
-    buildRelayCallRequest,
-} from '@zenith-protocols/zenex-sdk';
-
-const request = buildRelayCallRequest({
-    requestId: crypto.randomUUID(),
-    policy: 'fillOrKill',
-    func,
-    auth,
-    contracts: trust.relayContracts,
-});
-
-try {
-    await data.submitRelayRequest(request);
-} catch (error) {
-    if (!(error instanceof RelaySubmissionAmbiguousError)) throw error;
-    const authoritative = await data.getRelayRequest(error.requestId);
-    console.log(authoritative.data.state);
-}
-```
-
-Execution policy maps directly to the v2 Router contract:
-
-- `fillOrKill` uses `Router.create_and_fill_with_fee` for relayed execution.
-- `restOnly` uses `Router.multicall_with_fee` for relayed resting orders.
-- `priceFree` uses `Router.multicall_with_fee` with the exact public action
-  allowlist: order or vault-order cancellation, funding claim, configured
-  collateral transfer, referral attribution, and verified session-rule add or
-  removal.
-- `smartAccountDeployment` accepts only the dedicated signed deployment envelope
-  with an active time bound expiring within 30 seconds.
-
-The high-level execution API exposes no generic transaction submitter, try-fill
-path, restore builder, Fee Forwarder identity, or unsafe call escape hatch.
-Deprecated low-level Router try-fill bindings remain only for ABI compatibility;
-new integrations should use the strict `fillOrKill` builders.
-
-Relayed order policies accept only the exact public fee token, maximum fee, and
-fee expiration. The SDK encodes the structural unsigned fee amount as `1`, the fee
-recipient as the user, and, for fill-or-kill, the keeper as the user. Strict
-fill authorization discovery uses the verified public `priceUpdate` from
-`getLatestPrice`, decoded with `decodeLatestPriceUpdate`. The relay replaces
-that unsigned update with its fresher update after signing. Callers never
-provide the relay's private fee recipient, keeper, or Pyth source. Address
-authorization signs exactly `(calls, feeToken, maxFeeAmount, feeExpiration)`;
-the outer user selects the credential and is not duplicated in the signed
-argument prefix.
-
-```ts
-import { buildPriceFreeRelayOperation } from '@zenith-protocols/zenex-sdk';
-
-const prepared = buildPriceFreeRelayOperation({
-    user: smartAccount,
-    currentLedger,
-    configuration: trust.priceFree,
-    feeToken,
-    maxFeeAmount,
-    feeExpiration,
-    actions: [
-        { kind: 'cancelOrder', trading, id: orderId },
-        { kind: 'claimFunding', trading },
-    ],
-});
-if (prepared.kind !== 'ready') throw new Error(prepared.reason);
-```
-
-The action union has no raw contract/function/argument variant. Price-bearing
-operations use the normal relay submission route; there is no public
-`/v1/relay/price` endpoint.
-
-## Close all positions
-
-Close all is an application controller sequence, not one atomic cross-market
-batch. Take a deterministic snapshot of visible positions, assign a unique UUID
-to one `fillOrKill` request per position, quote each with
-`size: { kind: 'full' }`, and build and submit them one at a time. After every
-ambiguous handoff, read the durable relay status before continuing or retrying.
-Keep prior successes and failures in the final result.
-
-The smart-account session capability is
-`single-transfer-destination-v1`. Multi-market session setup is unavailable
-under that capability and must not be represented as a valid request.
+Every contract event ships as a typed interface (discriminated unions keyed on
+the `TradingEventType` / `VaultEventType` / `GovernanceEventType` enums).
+The surface is types-only: consumers reading events from RPC or an indexer own
+their decode path and import the types to stay aligned with the on-chain
+schemas.
 
 ## Build verification
 
 ```bash
 npm run specs:check
-npm run vectors:check
-npm run api:check
+npm run architecture:check
 npm test
 npm run build
 ```

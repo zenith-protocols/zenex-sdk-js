@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, Address } from '@stellar/stellar-sdk';
-import { TradingRouterContract } from '../../src/trading-router/router_contract.js';
-import { Call, createOrderCall, parseCallOutcome } from '../../src/trading-router/router_types.js';
-import { TradingContract } from '../../src/trading/trading_contract.js';
-import { OrderKind } from '../../src/trading/trading_types.js';
+import { TradingRouterContract } from '../../src/contracts/router/router_contract.js';
+import { Call, createOrderCall, parseCallOutcome } from '../../src/contracts/router/router_types.js';
+import { TradingContract } from '../../src/contracts/trading/trading_contract.js';
+import { OrderKind } from '../../src/contracts/trading/trading_types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 4));
@@ -24,7 +24,7 @@ function decodeInvoke(op: string) {
 function fillCall(): Call {
     return TradingRouterContract.createOrderCall({
         trading: TRADING, user: USER, isLong: true, kind: OrderKind.MarketIncrease,
-        notional: 100n, collateral: 10n, triggerPrice: 0n, priceBound: 200n, expiration: 12345,
+        notional: 100n, margin: 10n, triggerPrice: 0n, priceBound: 200n, expiration: 12345,
     });
 }
 
@@ -61,13 +61,13 @@ describe('TradingRouterContract', () => {
     it('createAndFill carries a multi-call batch: fill first, trigger resting', () => {
         const trigger = TradingRouterContract.createOrderCall({
             trading: TRADING, user: USER, isLong: true, kind: OrderKind.LimitDecrease,
-            notional: 50n, collateral: 0n, triggerPrice: 300n, priceBound: 0n, expiration: 12345,
+            notional: 50n, margin: 0n, triggerPrice: 300n, priceBound: 0n, expiration: 12345,
         });
         const op = contract.createAndFill([fillCall(), trigger], USER, KEEPER, Buffer.from([0]));
         const { args } = decodeInvoke(op);
         const calls = args[0] as Record<string, unknown>[];
         expect(calls).toHaveLength(2);
-        // calls[0].args = create_order tuple: (user, is_long, kind, notional, collateral, trigger_price, price_bound, expiration)
+        // calls[0].args = create_order tuple: (user, is_long, kind, notional, margin, trigger_price, price_bound, expiration)
         expect(calls[0].args).toEqual([USER, true, 0, 100n, 10n, 0n, 200n, 12345]);
         expect(calls[1].args).toEqual([USER, true, 4, 50n, 0n, 300n, 0n, 12345]);
     });
@@ -106,7 +106,7 @@ describe('TradingRouterContract', () => {
     it('createOrderCall mirrors TradingContract.createOrderCall byte-for-byte and crosses kind as u32', () => {
         const params = {
             trading: TRADING, user: USER, isLong: false, kind: OrderKind.StopDecrease,
-            notional: 77n, collateral: 3n, triggerPrice: 250n, priceBound: 9n, expiration: 42,
+            notional: 77n, margin: 3n, triggerPrice: 250n, priceBound: 9n, expiration: 42,
         };
         const routerCall = TradingRouterContract.createOrderCall(params);
         const helperCall = createOrderCall(params);

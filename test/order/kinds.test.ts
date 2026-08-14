@@ -8,8 +8,8 @@ import {
     isTriggerOrderKind,
     orderKindCrossing,
     orderKindFiresAbove,
-} from '../../src/order/kinds.js';
-import { OrderKind } from '../../src/trading/trading_types.js';
+} from '../../src/trading/order/kinds.js';
+import { OrderKind } from '../../src/contracts/trading/trading_types.js';
 
 type ExpectedSemantics = {
     kind: OrderKind;

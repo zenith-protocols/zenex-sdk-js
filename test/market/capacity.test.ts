@@ -10,27 +10,17 @@ import {
     marketSidePnl,
     quoteTradeFees,
     reserveUtilization,
-    sideCapacity,
     sideReserved,
-} from '../../src/market/capacity.js';
-import type { VerifiedPrice } from '../../src/market/types.js';
+} from '../../src/trading/market/capacity.js';
+import type { PriceData } from '../../src/trading/market/types.js';
 import type {
     MarketData,
     Position,
     SidePair,
     TradingConfig,
-} from '../../src/trading/trading_types.js';
-import { loadGoldenCases } from '../helpers/golden.js';
-import type { GoldenCase } from '../helpers/golden.js';
+} from '../../src/contracts/trading/trading_types.js';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-
-function record(value: unknown): Record<string, unknown> {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-        throw new TypeError('Expected a golden vector record');
-    }
-    return value as Record<string, unknown>;
-}
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -39,7 +29,7 @@ function pair(long = 0n, short = 0n): SidePair {
 function market(overrides: Partial<MarketData> = {}): MarketData {
     return {
         notional: pair(),
-        collateral: pair(),
+        margin: pair(),
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
@@ -55,7 +45,7 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
 
 function position(overrides: Partial<Position> = {}): Position {
     return {
-        collateral: 0n,
+        margin: 0n,
         notional: 0n,
         tokens: 0n,
         fundingIdx: 0n,
@@ -75,7 +65,7 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
         maxPositionNotional: 1_000_000_000_000n,
         maxOpenInterest: 10_000_000_000_000n,
         minOrderNotional: 1n,
-        minOrderCollateral: 1n,
+        minOrderMargin: 1n,
         execFee: 0n,
         feeDom: 5_000_000_000_000_000n,
         feeNonDom: 3_000_000_000_000_000n,
@@ -108,31 +98,13 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
     };
 }
 
-function verifiedPrice(inputs: Record<string, unknown>, source: VerifiedPrice['source'] = 'pyth'): VerifiedPrice {
-    const terminal = inputs.terminal_price as bigint | undefined;
-    return {
-        feedId: Number(inputs.feed_id),
-        exponent: Number(inputs.exponent),
-        bid: terminal ?? inputs.bid as bigint,
-        ask: terminal ?? inputs.ask as bigint,
-        publishTime: (inputs.publish_time ?? inputs.now) as bigint,
-        source,
-    };
-}
-
-const positionVectors = loadGoldenCases('trading', 'position');
-const pnlVectors = positionVectors.filter((entry) => entry.operation === 'pnl');
-const feeVectors = positionVectors.filter((entry) => record(entry.work).base_fee !== undefined);
-
 describe('exact market marks and capacity', () => {
     it('selects the contract entry and exit sides', () => {
-        const price: VerifiedPrice = {
+        const price: PriceData = {
             feedId: 1,
             exponent: -8,
             bid: 900_000_000n,
             ask: 1_100_000_000n,
-            publishTime: 10n,
-            source: 'pyth',
         };
 
         expect(entryPrice(price, true)).toBe(price.ask);
@@ -141,25 +113,12 @@ describe('exact market marks and capacity', () => {
         expect(exitPrice(price, false)).toBe(price.ask);
     });
 
-    it.each(pnlVectors)('$id uses adverse exit rounding', (golden) => {
-        const inputs = record(golden.inputs);
-        const expected = record(golden.expected);
-
-        expect(exactPositionPnl(
-            position({ notional: inputs.notional as bigint, tokens: inputs.tokens as bigint }),
-            verifiedPrice(inputs),
-            inputs.is_long as boolean,
-        )).toBe(expected.pnl);
-    });
-
     it('floors a fractional long exit and ceils the mirrored short exit', () => {
-        const price: VerifiedPrice = {
+        const price: PriceData = {
             feedId: 1,
             exponent: -8,
             bid: 250_000_000n,
             ask: 250_000_000n,
-            publishTime: 1n,
-            source: 'pyth',
         };
         const open = position({
             notional: 100_000_000n,
@@ -170,39 +129,12 @@ describe('exact market marks and capacity', () => {
         expect(exactPositionPnl(open, price, false)).toBe(16_666_666n);
     });
 
-    it.each(loadGoldenCases('trading', 'capacity'))('$id matches reserve and side-capacity boundaries', (golden) => {
-        const inputs = record(golden.inputs);
-        const work = record(golden.work);
-        const expected = record(golden.expected);
-        const data = market({
-            notional: pair(0n, (inputs.short_notional ?? 0n) as bigint),
-            tokens: pair((inputs.long_tokens ?? 0n) as bigint, 0n),
-        });
-        const price = verifiedPrice(inputs);
-        const longReserve = sideReserved(data, price, true);
-        const shortReserve = sideReserved(data, price, false);
-
-        if (golden.operation === 'reserve') {
-            expect(longReserve).toBe(expected.long_reserved);
-            expect(shortReserve).toBe(expected.short_reserved);
-            return;
-        }
-
-        const capacity = sideCapacity(inputs.vault_balance as bigint, inputs.cap as bigint);
-        expect(capacity).toBe(work.capacity);
-        expect(longReserve).toBe(work.long_reserved);
-        expect(shortReserve).toBe(work.short_reserved);
-        expect(longReserve <= capacity && shortReserve <= capacity).toBe(expected.accepted);
-    });
-
     it('rounds a long ask reserve up by one atomic unit', () => {
-        const price: VerifiedPrice = {
+        const price: PriceData = {
             feedId: 1,
             exponent: 0,
             bid: 1n,
             ask: 1n,
-            publishTime: 0n,
-            source: 'pyth',
         };
 
         expect(sideReserved(market({ tokens: pair(1n, 0n) }), price, true)).toBe(1n);
@@ -211,16 +143,14 @@ describe('exact market marks and capacity', () => {
     it('marks both side PnLs in the maximizing and minimizing directions', () => {
         const data = market({
             notional: pair(200_000_000n, 50_000_000n),
-            collateral: pair(100_000_000n, 30_000_000n),
+            margin: pair(100_000_000n, 30_000_000n),
             tokens: pair(2_000_000_000_000_000_000n, 500_000_000_000_000_000n),
         });
-        const price: VerifiedPrice = {
+        const price: PriceData = {
             feedId: 1,
             exponent: -7,
             bid: 90_000_000n,
             ask: 110_000_000n,
-            publishTime: 0n,
-            source: 'pyth',
         };
 
         expect(marketSidePnl(data, price, true, true)).toBe(20_000_000n);
@@ -231,19 +161,17 @@ describe('exact market marks and capacity', () => {
         expect(marketNetPnl(data, price, false)).toBe(-25_000_000n);
     });
 
-    it('floors a marked side loss at posted collateral', () => {
+    it('floors a marked side loss at posted margin', () => {
         const data = market({
             notional: pair(200_000_000n, 50_000_000n),
-            collateral: pair(10_000_000n, 30_000_000n),
+            margin: pair(10_000_000n, 30_000_000n),
             tokens: pair(2_000_000_000_000_000_000n, 500_000_000_000_000_000n),
         });
-        const price: VerifiedPrice = {
+        const price: PriceData = {
             feedId: 1,
             exponent: -7,
             bid: 90_000_000n,
             ask: 110_000_000n,
-            publishTime: 0n,
-            source: 'pyth',
         };
 
         expect(marketSidePnl(data, price, true, false)).toBe(-10_000_000n);
@@ -259,39 +187,6 @@ describe('exact market marks and capacity', () => {
 });
 
 describe('exact skew and trade fees', () => {
-    it.each(feeVectors)('$id matches the Rust-owned fee work values', (golden: GoldenCase) => {
-        const inputs = record(golden.inputs);
-        const work = record(golden.work);
-        const expected = record(golden.expected);
-        const isIncrease = golden.operation === 'increase';
-        const closedNotional = (work.closed_notional
-            ?? expected.closed_notional
-            ?? inputs.position_notional) as bigint;
-        const signedNotional = isIncrease
-            ? inputs.notional_delta as bigint
-            : -closedNotional;
-        const signedTokens = isIncrease
-            ? work.tokens_added as bigint
-            : -(work.closed_tokens as bigint);
-        const data = market({
-            tokens: pair((inputs.position_tokens ?? 0n) as bigint, 0n),
-        });
-        const fees = quoteTradeFees(
-            data,
-            config({
-                feeDom: inputs.fee_dom as bigint,
-                feeNonDom: inputs.fee_non_dom as bigint,
-                impactScalar: inputs.impact_scalar as bigint,
-            }),
-            inputs.is_long as boolean,
-            signedNotional,
-            signedTokens,
-        );
-
-        expect(fees.base).toBe(work.base_fee);
-        expect(fees.impact).toBe(work.impact_fee);
-    });
-
     it('splits a balance crossing by token skew and maps it to notional with fee ceil', () => {
         const fees = quoteTradeFees(
             market({ tokens: pair(10_000_000_000_000_000_000n, 12_000_000_000_000_000_000n) }),
@@ -332,7 +227,7 @@ describe('exact skew and trade fees', () => {
 
 describe('exact market architecture', () => {
     it('contains no display or JavaScript-number conversion path', () => {
-        const marketRoot = `${repoRoot}/src/market`;
+        const marketRoot = `${repoRoot}/src/trading/market`;
         const source = readdirSync(marketRoot)
             .filter((filename) => filename.endsWith('.ts'))
             .map((filename) => readFileSync(`${marketRoot}/${filename}`, 'utf8'))

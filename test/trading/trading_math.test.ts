@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { SCALAR_18 } from '../../src/math.js';
-import { Position, MarketData, SidePair, TradingConfig } from '../../src/trading/trading_types.js';
+import { SCALAR_18 } from '../../src/math/index.js';
+import { Position, MarketData, SidePair, TradingConfig } from '../../src/contracts/trading/trading_types.js';
 import {
     positionPnl,
     pendingFunding,
@@ -8,15 +8,7 @@ import {
     positionEquity,
     unlockedNotional,
     liquidationPrice,
-} from '../../src/trading/trading_position.js';
-import {
-    sidePnl,
-    netPnl,
-    utilization,
-    impactFee,
-    skewSplitFees,
-} from '../../src/trading/trading_market.js';
-import { validateTradingConfig } from '../../src/trading/trading_config.js';
+} from '../../src/trading/position/estimates.js';
 
 // =============================================================================
 // Hand-computed test vectors on the canonical test-data decimal system:
@@ -35,7 +27,7 @@ import { validateTradingConfig } from '../../src/trading/trading_config.js';
 //   entry price $100,000 -> 10_000_000_000_000n (1e13)
 //   notional    $50,000  -> 500_000_000_000n (5e11)
 //   tokens      = 5e11 * 1e18 / 1e13 = 5e16 (= 0.5 base units at 1e17/unit)
-//   collateral  $5,000   -> 50_000_000_000n (5e10), 10x leverage
+//   margin  $5,000   -> 50_000_000_000n (5e10), 10x leverage
 // =============================================================================
 
 const PRICE_100K = 10_000_000_000_000n; // $100,000 at 8 oracle decimals
@@ -55,7 +47,7 @@ const BORROWING_IDX_ONE_DAY = 432_000_000_000_000n;
 
 function makePosition(overrides: Partial<Position> = {}): Position {
     return {
-        collateral: 0n,
+        margin: 0n,
         notional: 0n,
         tokens: 0n,
         fundingIdx: 0n,
@@ -75,7 +67,7 @@ function pairOf(long: bigint, short: bigint): SidePair {
 function makeMarket(overrides: Partial<MarketData> = {}): MarketData {
     return {
         notional: pairOf(0n, 0n),
-        collateral: pairOf(0n, 0n),
+        margin: pairOf(0n, 0n),
         tokens: pairOf(0n, 0n),
         fundingIdx: pairOf(0n, 0n),
         borrowingIdx: pairOf(0n, 0n),
@@ -97,7 +89,7 @@ function baselineConfig(): TradingConfig {
         maxPositionNotional: 1_000_000_000_000n,
         maxOpenInterest: 10_000_000_000_000n,
         minOrderNotional: 1_000_000n,
-        minOrderCollateral: 1_000_000n,
+        minOrderMargin: 1_000_000n,
         execFee: 100_000n, // $0.01, token-dec
         feeDom: SCALAR_18 / 200n, // 0.5%
         feeNonDom: (3n * SCALAR_18) / 1000n, // 0.3%
@@ -191,16 +183,16 @@ describe('pendingFunding / pendingBorrowing (port math::accrued_amount, ceil)', 
     });
 });
 
-describe('positionEquity (collateral + pnl - max(0, funding) - borrowing)', () => {
+describe('positionEquity (margin + pnl - max(0, funding) - borrowing)', () => {
     const longPosition = makePosition({
-        collateral: COLLATERAL_5K,
+        margin: COLLATERAL_5K,
         notional: NOTIONAL_50K,
         tokens: TOKENS_HALF_UNIT,
     });
 
-    // collateral 5e10 + pnl 5e10 ($100k -> $110k) - funding 3_600_000
+    // margin 5e10 + pnl 5e10 ($100k -> $110k) - funding 3_600_000
     // - borrowing 216_000_000 = 100,000,000,000 - 219,600,000 = 99,780,400,000.
-    it('debits paid funding and borrowing from collateral + pnl', () => {
+    it('debits paid funding and borrowing from margin + pnl', () => {
         const market = makeMarket({
             fundingIdx: pairOf(FUNDING_IDX_ONE_HOUR, 0n),
             borrowingIdx: pairOf(BORROWING_IDX_ONE_DAY, 0n),
@@ -213,7 +205,7 @@ describe('positionEquity (collateral + pnl - max(0, funding) - borrowing)', () =
     // borrowing-only figure 1e11 - 216_000_000 = 99,784,000,000.
     it('earned funding never raises equity (clamped at zero)', () => {
         const earnedFundingPosition = makePosition({
-            collateral: COLLATERAL_5K,
+            margin: COLLATERAL_5K,
             notional: NOTIONAL_50K,
             tokens: TOKENS_HALF_UNIT,
             fundingIdx: FUNDING_IDX_ONE_HOUR,
@@ -258,14 +250,14 @@ describe('unlockedNotional (ports Position::locked, boundary at now == unlocks_a
 });
 
 describe('liquidationPrice (inverts the maintenance-margin equity line)', () => {
-    // $5,000 collateral on $50,000 notional (10x), maintenance 5%:
+    // $5,000 margin on $50,000 notional (10x), maintenance 5%:
     // maintenanceAmount = ceil(5e11 * 5e16 / 1e18) = 2.5e10 ($2,500).
     // Long: allowed loss = 5,000 - 2,500 = $2,500 on 0.5 base units
     //       = $5,000/unit drop, so $100,000 - $5,000 = $95,000 (9.5e12).
     //       Via the solver: target = 2.5e10 + 5e11 - 5e10 = 4.75e11;
     //       price = floor(4.75e11 * 1e18 / 5e16) = 9,500,000,000,000.
     const tenXPosition = makePosition({
-        collateral: COLLATERAL_5K,
+        margin: COLLATERAL_5K,
         notional: NOTIONAL_50K,
         tokens: TOKENS_HALF_UNIT,
     });
@@ -296,7 +288,7 @@ describe('liquidationPrice (inverts the maintenance-margin equity line)', () => 
     // zero: it must not widen the loss budget below the no-accrual threshold.
     it('earned funding does not lower the liquidation price', () => {
         const earnedFundingPosition = makePosition({
-            collateral: COLLATERAL_5K,
+            margin: COLLATERAL_5K,
             notional: NOTIONAL_50K,
             tokens: TOKENS_HALF_UNIT,
             fundingIdx: FUNDING_IDX_ONE_HOUR,
@@ -318,9 +310,9 @@ describe('liquidationPrice (inverts the maintenance-margin equity line)', () => 
 
     // Over-collateralized long: target = 2.5e10 + 5e11 - 6e11 = -7.5e10 < 0,
     // clamped to zero (no reachable liquidation price).
-    it('clamps to zero when collateral exceeds notional plus maintenance', () => {
+    it('clamps to zero when margin exceeds notional plus maintenance', () => {
         const overCollateralized = makePosition({
-            collateral: 600_000_000_000n,
+            margin: 600_000_000_000n,
             notional: NOTIONAL_50K,
             tokens: TOKENS_HALF_UNIT,
         });
@@ -329,309 +321,5 @@ describe('liquidationPrice (inverts the maintenance-margin equity line)', () => 
 
     it('zero position has no liquidation price', () => {
         expect(liquidationPrice(makePosition(), baselineConfig(), makeMarket(), true)).toBe(0n);
-    });
-});
-
-describe('sidePnl / netPnl (port MarketData::side_pnl / net_pnl)', () => {
-    // Longs: $50,000 entered at $100,000 (tokens 5e16), collateral $10,000.
-    // Shorts: $30,000 entered at $100,000 (tokens 3e16), collateral $6,000.
-    const market = makeMarket({
-        notional: pairOf(500_000_000_000n, 300_000_000_000n),
-        collateral: pairOf(100_000_000_000n, 60_000_000_000n),
-        tokens: pairOf(50_000_000_000_000_000n, 30_000_000_000_000_000n),
-    });
-
-    // At $110,000: long floor(5e16 * 1.1e13 / 1e18) - 5e11 = +5e10;
-    // short 3e11 - ceil(3e16 * 1.1e13 / 1e18) = 3e11 - 3.3e11 = -3e10; net +2e10.
-    it('long +$5,000, short -$3,000, net +$2,000 at $110k', () => {
-        expect(sidePnl(market, PRICE_110K, SCALAR_18, true)).toBe(50_000_000_000n);
-        expect(sidePnl(market, PRICE_110K, SCALAR_18, false)).toBe(-30_000_000_000n);
-        expect(netPnl(market, PRICE_110K, SCALAR_18)).toBe(20_000_000_000n);
-    });
-
-    // At $300,000 the raw short loss is 3e11 - 9e11 = -6e11, floored at the
-    // posted collateral -6e10. Long gains 1.5e12 - 5e11 = +1e12;
-    // net = 1e12 - 6e10 = 9.4e11.
-    it('a side loss floors at its posted collateral', () => {
-        expect(sidePnl(market, PRICE_300K, SCALAR_18, false)).toBe(-60_000_000_000n);
-        expect(sidePnl(market, PRICE_300K, SCALAR_18, true)).toBe(1_000_000_000_000n);
-        expect(netPnl(market, PRICE_300K, SCALAR_18)).toBe(940_000_000_000n);
-    });
-});
-
-describe('utilization (open interest / vault, SCALAR_18 ratio)', () => {
-    // Open interest = $50,000 + $30,000 = $80,000 (8e11).
-    const market = makeMarket({ notional: pairOf(500_000_000_000n, 300_000_000_000n) });
-
-    it('$80k open interest over a $320k vault = 0.25 * SCALAR_18', () => {
-        expect(utilization(market, 3_200_000_000_000n)).toBe(SCALAR_18 / 4n);
-    });
-
-    it('can exceed SCALAR_18: $80k over a $40k vault = 2 * SCALAR_18', () => {
-        expect(utilization(market, 400_000_000_000n)).toBe(2n * SCALAR_18);
-    });
-
-    it('zero vault balance yields zero', () => {
-        expect(utilization(market, 0n)).toBe(0n);
-    });
-});
-
-describe('impactFee (ports math::impact_fee, min(quadratic, 10% cap))', () => {
-    // impactScalar $100,000 (1e12 token-dec) throughout.
-    const impactScalar = 1_000_000_000_000n;
-
-    // $100 fill: quadratic = ceil(1e9^2 / 1e12) = 1e6 ($0.10, a 0.1% rate);
-    // cap = ceil(1e9 * 0.1) = 1e8; quadratic wins.
-    it('below the cap the quadratic term applies ($100 -> $0.10)', () => {
-        expect(impactFee(1_000_000_000n, impactScalar)).toBe(1_000_000n);
-    });
-
-    // Dust fill $0.0001 (1_000): quadratic = ceil(1e6 / 1e12) = 1; never zero.
-    it('ceils a dust fill to one unit', () => {
-        expect(impactFee(1_000n, impactScalar)).toBe(1n);
-    });
-
-    // At notional = impactScalar / 10 ($10,000, 1e11) the quadratic rate meets
-    // the 10% cap exactly: quadratic = ceil(1e22 / 1e12) = 1e10 = ceil(1e11 * 0.1).
-    it('quadratic and cap meet exactly at notional = impactScalar / 10', () => {
-        expect(impactFee(100_000_000_000n, impactScalar)).toBe(10_000_000_000n);
-    });
-
-    // $100,000 fill (1e12): quadratic = ceil(1e24 / 1e12) = 1e12 (a 100% rate);
-    // cap = ceil(1e12 * 0.1) = 1e11 binds -> $10,000.
-    it('above the boundary the 10% cap binds ($100k -> $10k)', () => {
-        expect(impactFee(1_000_000_000_000n, impactScalar)).toBe(100_000_000_000n);
-    });
-
-    it('zero notional pays zero', () => {
-        expect(impactFee(0n, impactScalar)).toBe(0n);
-    });
-});
-
-describe('skewSplitFees (ports MarketData::skew_split + Market::trade_fees)', () => {
-    // Crossing fill: book long 1.0 / short 1.2 base units (imbalance -2e16).
-    // A long increase of 0.5 units (+5e16) lands at +3e16: 2e16 improves (the
-    // run to zero), 3e16 worsens (the overshoot). Pro-rata on the $50,000
-    // notional: worsening = ceil(5e11 * 3e16 / 5e16) = 3e11, improving = 2e11.
-    // base = ceil(3e11 * 0.5%) + ceil(2e11 * 0.3%) = 1.5e9 + 6e8 = 2.1e9 ($210).
-    // impact = min(ceil(5e11^2 / 1e12) = 2.5e11, ceil(5e11 * 0.1) = 5e10) = 5e10.
-    it('a crossing fill splits into both legs; the oversized impact fee caps at 10%', () => {
-        const market = makeMarket({
-            notional: pairOf(1_000_000_000_000n, 1_200_000_000_000n),
-            tokens: pairOf(100_000_000_000_000_000n, 120_000_000_000_000_000n),
-        });
-        const fees = skewSplitFees(baselineConfig(), market, true, NOTIONAL_50K, TOKENS_HALF_UNIT);
-        expect(fees.worsening).toBe(300_000_000_000n);
-        expect(fees.improving).toBe(200_000_000_000n);
-        expect(fees.base).toBe(2_100_000_000n);
-        expect(fees.impact).toBe(50_000_000_000n);
-    });
-
-    // Widening fill: book long 1.2 / short 1.0 (imbalance +2e16); a long
-    // increase of 0.5 units widens to +7e16, fully worsening. base =
-    // ceil(5e11 * 0.5%) = 2.5e9 ($250); impact caps at 5e10 as above.
-    it('an increase on the dominant side is fully worsening', () => {
-        const market = makeMarket({
-            notional: pairOf(1_200_000_000_000n, 1_000_000_000_000n),
-            tokens: pairOf(120_000_000_000_000_000n, 100_000_000_000_000_000n),
-        });
-        const fees = skewSplitFees(baselineConfig(), market, true, NOTIONAL_50K, TOKENS_HALF_UNIT);
-        expect(fees.worsening).toBe(NOTIONAL_50K);
-        expect(fees.improving).toBe(0n);
-        expect(fees.base).toBe(2_500_000_000n);
-        expect(fees.impact).toBe(50_000_000_000n);
-    });
-
-    // Narrowing fill: book long 1.0 / short 1.2 (imbalance -2e16); a $1,000
-    // long increase (tokens 1e10 * 1e18 / 1e13 = 1e15) lands at -1.9e16,
-    // fully improving. base = ceil(1e10 * 0.3%) = 3e7 ($3);
-    // impact = min(ceil(1e10^2 / 1e12) = 1e8, ceil(1e10 * 0.1) = 1e9) = 1e8 ($10).
-    it('an increase toward balance is fully improving with a below-cap impact fee', () => {
-        const market = makeMarket({
-            notional: pairOf(1_000_000_000_000n, 1_200_000_000_000n),
-            tokens: pairOf(100_000_000_000_000_000n, 120_000_000_000_000_000n),
-        });
-        const fees = skewSplitFees(baselineConfig(), market, true, 10_000_000_000n, 1_000_000_000_000_000n);
-        expect(fees.worsening).toBe(0n);
-        expect(fees.improving).toBe(10_000_000_000n);
-        expect(fees.base).toBe(30_000_000n);
-        expect(fees.impact).toBe(100_000_000n);
-    });
-
-    // Rounding: book long 0 / short 1 token unit (imbalance -1); a long
-    // increase of 3 token units crosses to +2 (worsening 2, improving 1).
-    // Pro-rata on 100 notional units: worsening = ceil(100 * 2 / 3) = 67,
-    // improving = 33 (exact remainder). base = ceil(67 * 0.5%) = ceil(0.335)
-    // = 1 plus ceil(33 * 0.3%) = ceil(0.099) = 1, total 2.
-    // impact = min(ceil(100^2 / 1e12) = 1, ceil(100 * 0.1) = 10) = 1.
-    it('the worsening notional leg rounds up and the improving leg takes the remainder', () => {
-        const market = makeMarket({ tokens: pairOf(0n, 1n) });
-        const fees = skewSplitFees(baselineConfig(), market, true, 100n, 3n);
-        expect(fees.worsening).toBe(67n);
-        expect(fees.improving).toBe(33n);
-        expect(fees.base).toBe(2n);
-        expect(fees.impact).toBe(1n);
-    });
-
-    it('a collateral-only order (zero notional, zero tokens) charges nothing', () => {
-        const market = makeMarket({
-            notional: pairOf(1_000_000_000_000n, 1_200_000_000_000n),
-            tokens: pairOf(100_000_000_000_000_000n, 120_000_000_000_000_000n),
-        });
-        const fees = skewSplitFees(baselineConfig(), market, true, 0n, 0n);
-        expect(fees.worsening).toBe(0n);
-        expect(fees.improving).toBe(0n);
-        expect(fees.base).toBe(0n);
-        expect(fees.impact).toBe(0n);
-    });
-});
-
-describe('validateTradingConfig (ports Config::check_valid)', () => {
-    // 1000% APR over a 365-day year: 10 * 1e18 / 31,536,000 = 317,097,919,837
-    // (floor; 31,536,000 * 317,097,919,837 = 9,999,999,999,979,632,000 <= 1e19).
-    const maxFundingRatePerSecond = 317_097_919_837n;
-
-    it('accepts the known-good baseline config', () => {
-        expect(validateTradingConfig(baselineConfig())).toEqual([]);
-    });
-
-    // --- v2 fields, one rejection each ---
-
-    it('flags a negative execFee', () => {
-        const config = { ...baselineConfig(), execFee: -1n };
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/execFee/);
-        expect(violations[0]).toMatch(/non-negative/);
-    });
-
-    it('flags depositFee above MAX_FEE_RATE (1%)', () => {
-        const config = { ...baselineConfig(), depositFee: SCALAR_18 / 100n + 1n };
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/depositFee/);
-    });
-
-    it('flags redeemFee above MAX_FEE_RATE (1%)', () => {
-        const config = { ...baselineConfig(), redeemFee: SCALAR_18 / 100n + 1n };
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/redeemFee/);
-    });
-
-    it('accepts depositFee and redeemFee exactly at MAX_FEE_RATE', () => {
-        const config = {
-            ...baselineConfig(),
-            depositFee: SCALAR_18 / 100n,
-            redeemFee: SCALAR_18 / 100n,
-        };
-        expect(validateTradingConfig(config)).toEqual([]);
-    });
-
-    it('flags a non-positive impactScalar', () => {
-        const zeroScalar = { ...baselineConfig(), impactScalar: 0n };
-        const zeroViolations = validateTradingConfig(zeroScalar);
-        expect(zeroViolations).toHaveLength(1);
-        expect(zeroViolations[0]).toMatch(/impactScalar/);
-
-        const negativeScalar = { ...baselineConfig(), impactScalar: -1n };
-        expect(validateTradingConfig(negativeScalar).some((violation) => /impactScalar/.test(violation))).toBe(true);
-    });
-
-    // --- carried-over bounds and ladders ---
-
-    it('flags a negative keeperRate with the non-negative family message', () => {
-        const config = { ...baselineConfig(), keeperRate: -1n };
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/keeperRate/);
-        expect(violations[0]).toMatch(/non-negative/);
-    });
-
-    it('flags keeperRate above MAX_KEEPER_RATE (50%)', () => {
-        const config = { ...baselineConfig(), keeperRate: SCALAR_18 / 2n + 1n };
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/keeperRate/);
-    });
-
-    it('flags maintenanceMargin at or above initMargin', () => {
-        const config = { ...baselineConfig(), maintenanceMargin: SCALAR_18 / 10n }; // == initMargin
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/initMargin must exceed maintenanceMargin/);
-    });
-
-    it('flags a degenerate notional band', () => {
-        const config = { ...baselineConfig(), maxPositionNotional: 10_000_000n }; // == minPositionNotional
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/maxPositionNotional/);
-    });
-
-    it('enforces the notionalLock band [15s, 1 day] inclusively', () => {
-        expect(
-            validateTradingConfig({ ...baselineConfig(), notionalLock: 14n }).some((violation) =>
-                /notionalLock.*MIN_NOTIONAL_LOCK/.test(violation),
-            ),
-        ).toBe(true);
-        expect(
-            validateTradingConfig({ ...baselineConfig(), notionalLock: 86_401n }).some((violation) =>
-                /notionalLock.*MAX_NOTIONAL_LOCK/.test(violation),
-            ),
-        ).toBe(true);
-        expect(validateTradingConfig({ ...baselineConfig(), notionalLock: 15n })).toEqual([]);
-        expect(validateTradingConfig({ ...baselineConfig(), notionalLock: 86_400n })).toEqual([]);
-    });
-
-    it('flags redeemLock above MAX_REDEEM_LOCK (30 days)', () => {
-        const config = { ...baselineConfig(), redeemLock: 2_592_001n };
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/redeemLock/);
-        expect(validateTradingConfig({ ...baselineConfig(), redeemLock: 2_592_000n })).toEqual([]);
-    });
-
-    it('flags a fundingMax above MAX_FUNDING_RATE (1000% APR per second)', () => {
-        const config = { ...baselineConfig(), fundingMax: maxFundingRatePerSecond + 1n };
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/fundingMax/);
-        expect(validateTradingConfig({ ...baselineConfig(), fundingMax: maxFundingRatePerSecond })).toEqual([]);
-    });
-
-    it('flags adlMaxPnl below MIN_ADL_TRIGGER (45%)', () => {
-        const minAdlTrigger = (45n * SCALAR_18) / 100n;
-        const config = { ...baselineConfig(), adlMaxPnl: minAdlTrigger - 1n };
-        const violations = validateTradingConfig(config);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/adlMaxPnl/);
-    });
-
-    it('bounds maxPnlWithdraw to (0, maxPnlTrader]', () => {
-        expect(
-            validateTradingConfig({ ...baselineConfig(), maxPnlWithdraw: 0n }).some((violation) =>
-                /maxPnlWithdraw must be positive/.test(violation),
-            ),
-        ).toBe(true);
-        // one unit above the 90% maxPnlTrader
-        const aboveTrader = { ...baselineConfig(), maxPnlWithdraw: (9n * SCALAR_18) / 10n + 1n };
-        expect(
-            validateTradingConfig(aboveTrader).some((violation) =>
-                /maxPnlWithdraw must not exceed maxPnlTrader/.test(violation),
-            ),
-        ).toBe(true);
-        // boundary: equal to maxPnlTrader passes
-        const atTrader = { ...baselineConfig(), maxPnlWithdraw: (9n * SCALAR_18) / 10n };
-        expect(validateTradingConfig(atTrader)).toEqual([]);
-    });
-
-    it('bounds minDeposit to maxVaultBalance / 100 inclusively', () => {
-        // maxVaultBalance 1e13, so the boundary is 1e11.
-        const oneUnitOver = { ...baselineConfig(), minDeposit: 100_000_000_001n };
-        const violations = validateTradingConfig(oneUnitOver);
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatch(/minDeposit/);
-        expect(validateTradingConfig({ ...baselineConfig(), minDeposit: 100_000_000_000n })).toEqual([]);
     });
 });

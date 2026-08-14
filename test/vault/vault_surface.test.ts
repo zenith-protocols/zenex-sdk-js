@@ -1,9 +1,14 @@
-import { describe, it, expect } from 'vitest';
-import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { VaultContract } from '../../src/vault/vault_contract.js';
-import { VaultState } from '../../src/vault/vault_state.js';
-import { decodeVaultEvent, VaultEventType } from '../../src/vault/vault_events.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { rpc, xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
+import { VaultContract } from '../../src/contracts/vault/vault_contract.js';
+import { decodeVaultEvent, VaultEventType } from '../../src/contracts/vault/vault_events.js';
 import { NormalizedEvent } from '../../src/base_event.js';
+import { contractInstanceLedgerKey, tokenBalanceLedgerKey } from '../../src/ledger-keys.js';
+import {
+    vaultInstanceScVal,
+    balanceMapScVal,
+    ledgerEntryFor,
+} from '../helpers/trading_state.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -84,55 +89,5 @@ describe('VaultContract surface', () => {
         expect(parsers.strategyDeposit(i128Res(8n))).toBe(8n);
         expect(parsers.strategyRedeem(i128Res(17n))).toBe(17n);
         expect(parsers.strategyWithdraw()).toBeUndefined();
-    });
-});
-
-describe('decodeVaultEvent', () => {
-    function normalized(eventType: string, topicArgs: unknown[], data: Record<string, unknown>): NormalizedEvent {
-        return {
-            contractId: CONTRACT_ID, txHash: 't', ledger: 1,
-            ledgerClosedAt: '2026-07-06T00:00:00Z', id: 'e-1',
-            eventType, topicArgs, data,
-        };
-    }
-
-    it('decodes StrategyWithdraw and rejects unknown types', () => {
-        const ev = decodeVaultEvent(normalized('StrategyWithdraw', [STRATEGY], { amount: 5n }));
-        expect(ev).toMatchObject({
-            eventType: VaultEventType.StrategyWithdraw, strategy: STRATEGY, amount: 5n,
-        });
-        expect(decodeVaultEvent(normalized('NotAVaultEvent', [], {}))).toBeUndefined();
-    });
-});
-
-describe('VaultState computed properties', () => {
-    const network = { rpc: 'http://localhost', passphrase: 'Test' };
-    const state = new VaultState(
-        {
-            asset: ASSET, totalShares: 200, totalAssets: 100,
-            decimalsOffset: 1, shareDecimals: 8, assetDecimals: 7,
-        },
-        network,
-        CONTRACT_ID,
-    );
-
-    it('sharePrice, assetsToShares, sharesToAssets', () => {
-        expect(state.sharePrice()).toBe(0.5);
-        expect(state.assetsToShares(50)).toBe(100);
-        expect(state.sharesToAssets(100)).toBe(50);
-    });
-
-    it('handles empty vault edge cases', () => {
-        const empty = new VaultState(
-            {
-                asset: ASSET, totalShares: 0, totalAssets: 0,
-                decimalsOffset: 0, shareDecimals: 7, assetDecimals: 7,
-            },
-            network,
-            CONTRACT_ID,
-        );
-        expect(empty.sharePrice()).toBe(1);
-        expect(empty.assetsToShares(5)).toBe(5);
-        expect(empty.sharesToAssets(5)).toBe(5);
     });
 });

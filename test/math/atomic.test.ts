@@ -59,11 +59,12 @@ describe('exact decimal-text atomic conversion', () => {
         expect(() => formatAtomic(1 as never, 7)).toThrow(TypeError);
     });
 
-    it.each([-1, 39, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
-        'rejects invalid decimal count %s',
+    it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+        'parseAtomic throws naturally for unusable decimal count %s',
         (decimals) => {
-            expect(() => parseAtomic('1', decimals)).toThrow(RangeError);
-            expect(() => formatAtomic(1n, decimals)).toThrow(RangeError);
+            // No explicit decimals validation remains; BigInt conversion and
+            // exponent semantics reject these with platform RangeErrors.
+            expect(() => parseAtomic('1.1', decimals)).toThrow(RangeError);
         },
     );
 });

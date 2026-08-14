@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "contractsCommit": "4c631eb17af53ec5e6875f42bf71a43af295e521",
-  "productionSourceTree": "3c9815124a70cd8ee3f6fddad2baf072606588bb",
+  "contractsCommit": "fc85144123622676d77c4e72b10aad7eab43d321",
+  "productionSourceTree": "d7537b81ec8ecf4f64b1dcb56dadac71894e04f7",
   "toolchain": {
     "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
     "cargo": "cargo 1.93.1 (083ac5135 2025-12-15)",
@@ -12,26 +12,14 @@
   },
   "cargoLock": {
     "path": "Cargo.lock",
-    "sha256": "1b07b1d4d9e7d55ecb66d01b3d9c0e367bf342ab5ea9ed11f2b3c495d7c9eab2"
+    "sha256": "79a15142a56b0a97f1b0d3af1f9c0625feaa6e9eb3804089f9e31e268f5484a0"
   },
-  "vectors": [
-    {
-      "path": "test-vectors/strategy-vault-v2.json",
-      "sha256": "55e80e219e5ecb8a5177425df6445274b467fd69ca9436fbadbc13d3e9bff172",
-      "bytes": 12355
-    },
-    {
-      "path": "test-vectors/trading-v2.json",
-      "sha256": "15b8ff1b98a10733abfae9d9bbc25772fa617f88a30f89dea05095ed859b250e",
-      "bytes": 56276
-    }
-  ],
   "contracts": [
     {
       "package": "factory",
       "path": "artifacts/v2/wasm/factory.wasm",
-      "sha256": "3b4fb39c1733aeb2704acd9bfdc10ba185933ac8624f43b0124a56573adac7bd",
-      "bytes": 7722
+      "sha256": "ad47c71dfa109f4c035c84f8e2b412f0087422d510872d5792c2a7e3de8bc6b8",
+      "bytes": 7714
     },
     {
       "package": "governance",
@@ -54,8 +42,8 @@
     {
       "package": "trading",
       "path": "artifacts/v2/wasm/trading.wasm",
-      "sha256": "c5e821f5903ada0021e521af259848b9ea9dd89ae08760dbba950b4fea092794",
-      "bytes": 64947
+      "sha256": "1a99a7c8f90b094be36909aa8c180f68c13dbe99861bfb76777b481336fadc92",
+      "bytes": 66036
     },
     {
       "package": "trading-router",

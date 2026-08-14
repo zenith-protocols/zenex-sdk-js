@@ -7,7 +7,7 @@ import {
     xdr,
 } from '@stellar/stellar-sdk';
 import { Network } from './index.js';
-import { prepareStrictTransaction } from './order/simulation.js';
+import { parseError } from './response_parser.js';
 
 // Dummy account for simulations (doesn't need to exist on chain)
 const SIMULATION_ACCOUNT =
@@ -27,30 +27,29 @@ export async function simulateAndParse<T>(
     parser: (result: string) => T,
 ): Promise<{ result: T; latestLedger: number }> {
     const stellarRpc = new rpc.Server(network.rpc, network.opts);
-    const account = new Account(SIMULATION_ACCOUNT, SIMULATION_SEQUENCE);
+    const transaction = new TransactionBuilder(
+        new Account(SIMULATION_ACCOUNT, SIMULATION_SEQUENCE),
+        {
+            networkPassphrase: network.passphrase,
+            fee: BASE_FEE,
+            timebounds: { maxTime: TimeoutInfinite, minTime: 0 },
+        },
+    )
+        .addOperation(xdr.Operation.fromXDR(operation, 'base64'))
+        .build();
 
-    const txBuilder = new TransactionBuilder(account, {
-        networkPassphrase: network.passphrase,
-        fee: BASE_FEE,
-        timebounds: { maxTime: TimeoutInfinite, minTime: 0 },
-    }).addOperation(xdr.Operation.fromXDR(operation, 'base64'));
-
-    const transaction = txBuilder.build();
-    const simulation = await prepareStrictTransaction({
-        network,
-        transaction,
-        parser,
-        server: stellarRpc,
-    });
-    if (simulation.kind === 'ready') {
-        return {
-            result: simulation.result,
-            latestLedger: simulation.latestLedger,
-        };
+    const simulation = await stellarRpc.simulateTransaction(transaction);
+    if (rpc.Api.isSimulationRestore(simulation)) {
+        throw new Error('Simulation failed: restore required');
     }
-    const reason =
-        simulation.kind === 'rejected'
-            ? simulation.error.message
-            : 'restore required';
-    throw new Error(`Simulation failed: ${reason}`);
+    if (rpc.Api.isSimulationError(simulation)) {
+        throw new Error(`Simulation failed: ${parseError(simulation).message}`);
+    }
+    if (!simulation.result?.retval) {
+        throw new Error('Simulation failed: no return value');
+    }
+    return {
+        result: parser(simulation.result.retval.toXDR('base64')),
+        latestLedger: simulation.latestLedger,
+    };
 }

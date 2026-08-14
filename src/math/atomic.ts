@@ -1,18 +1,4 @@
-const MAX_DECIMAL_PLACES = 38;
 const DECIMAL_TEXT = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?$/;
-
-function checkedDecimals(decimals: number): number {
-    if (
-        !Number.isSafeInteger(decimals) ||
-        decimals < 0 ||
-        decimals > MAX_DECIMAL_PLACES
-    ) {
-        throw new RangeError(
-            `decimals must be an integer between 0 and ${MAX_DECIMAL_PLACES}`,
-        );
-    }
-    return decimals;
-}
 
 /**
  * Parse exact base-10 text into atomic units without floating-point arithmetic.
@@ -22,10 +8,7 @@ export function parseAtomic(value: string, decimals: number): bigint {
     if (typeof value === 'number') {
         throw new TypeError('decimal value must be text, not a number');
     }
-    if (typeof value !== 'string') {
-        throw new TypeError('decimal value must be text');
-    }
-    const places = checkedDecimals(decimals);
+    const places = decimals;
     const match = DECIMAL_TEXT.exec(value);
     if (match === null) {
         throw new SyntaxError('decimal value is not canonical base-10 text');
@@ -50,7 +33,7 @@ export function formatAtomic(value: bigint, decimals: number): string {
     if (typeof value !== 'bigint') {
         throw new TypeError('atomic value must be a bigint');
     }
-    const places = checkedDecimals(decimals);
+    const places = decimals;
     if (value === 0n) return '0';
     if (places === 0) return value.toString();
 

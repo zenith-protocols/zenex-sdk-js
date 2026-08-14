@@ -3,123 +3,47 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 describe('package root type exports', () => {
-    it('exports every generated account query used by client signatures', () => {
+    it('exports every intent and vault type used by execution builders', () => {
         const consumerPath = fileURLToPath(
             new URL('./root-account-query-consumer.ts', import.meta.url),
         );
         const source = `
             import type {
-                AccountOrderQuery,
-                AccountFillQuery,
-                AccountFillNetPnlInput,
-                AccountFillNetPnlResult,
-                AccountVaultOrderQuery,
-                AccountLifecycleQuery,
-                RankingDenomination,
-                BuildPositionDecreaseIntentExecutionInput,
-                BuildPositionIncreaseIntentExecutionInput,
+                ApplyOrderOptions,
                 BuildVaultActionExecutionInput,
                 DeriveVaultMinimumOutputInput,
-                ExactPositionDecreaseIntentQuote,
-                ExactPositionIncreaseIntentQuote,
-                ExactRatio,
                 ExactVaultOrderCreationQuote,
-                NormalizedPositionDecreaseIntent,
-                NormalizedPositionIncreaseIntent,
-                PositionDecreaseCollateralReturnIntent,
-                PositionDecreaseExecutionIntent,
-                PositionDecreaseFillOrKillPolicy,
-                PositionDecreaseIntentOutcome,
-                PositionDecreasePartialSizeIntent,
-                PositionDecreaseSizeIntent,
-                PositionIncreaseExecutionIntent,
-                PositionIncreaseFillOrKillPolicy,
-                PositionIncreaseIntentOutcome,
+                FeeBreakdown,
+                MarginState,
+                OrderApplication,
+                PositionActionOutcome,
                 PreparedVaultActionExecution,
                 PreparedVaultRestingExecution,
                 PreparedVaultRetiredImmediateRedeemExecution,
                 VaultEstimatedOutputReference,
                 VaultMinimumOutput,
-                VaultRationalSlippageBound,
-                QuotePositionDecreaseIntentInput,
-                QuoteMaximumPositionDecreaseIntentInput,
-                QuoteMaximumPositionIncreaseIntentInput,
-                QuotePositionIncreaseIntentInput,
             } from '../src/index.js';
 
-            export type PositionDecreasePublicTypes = readonly [
-                BuildPositionDecreaseIntentExecutionInput,
-                ExactPositionDecreaseIntentQuote,
-                ExactRatio,
-                NormalizedPositionDecreaseIntent,
-                PositionDecreaseCollateralReturnIntent,
-                PositionDecreaseExecutionIntent,
-                PositionDecreaseFillOrKillPolicy,
-                PositionDecreaseIntentOutcome,
-                PositionDecreasePartialSizeIntent,
-                PositionDecreaseSizeIntent,
-                QuoteMaximumPositionDecreaseIntentInput,
-                QuotePositionDecreaseIntentInput,
+            export type PositionPublicTypes = readonly [
+                ApplyOrderOptions,
+                FeeBreakdown,
+                MarginState,
+                OrderApplication,
+                PositionActionOutcome,
             ];
-
-            export type PositionIncreasePublicTypes = readonly [
-                BuildPositionIncreaseIntentExecutionInput,
-                ExactPositionIncreaseIntentQuote,
-                NormalizedPositionIncreaseIntent,
-                PositionIncreaseExecutionIntent,
-                PositionIncreaseFillOrKillPolicy,
-                PositionIncreaseIntentOutcome,
-                QuoteMaximumPositionIncreaseIntentInput,
-                QuotePositionIncreaseIntentInput,
-            ];
-
-            export const queries: readonly [
-                AccountOrderQuery,
-                AccountFillQuery,
-                AccountVaultOrderQuery,
-                AccountLifecycleQuery,
-            ] = [{}, {}, {}, {}];
-
-            export const denomination: RankingDenomination = {
-                collateralAssetId: 'xlm',
-                decimals: 7,
-            };
-
-            export const fillEconomicsInput: AccountFillNetPnlInput = {
-                economicsCompleteness: 'complete',
-                pnlAtomic: 50n,
-                fees: {
-                    baseAtomic: 5n,
-                    impactAtomic: 2n,
-                    fundingAtomic: -3n,
-                    borrowingAtomic: 1n,
-                    liquidationAtomic: 0n,
-                    forfeitAtomic: 0n,
-                    keeperExecutionAtomic: 11n,
-                    relayAtomic: 13n,
-                },
-            };
-            export const fillEconomicsResult: AccountFillNetPnlResult = {
-                kind: 'exact',
-                grossPnlAtomic: 50n,
-                netPnlAtomic: 21n,
-            };
 
             const reference: VaultEstimatedOutputReference = {
                 kind: 'estimate',
                 output: 100n,
             };
-            const maximumSlippage: VaultRationalSlippageBound = {
-                numerator: 1n,
-                denominator: 100n,
-            };
+            const maximumSlippageBps = 100n;
             export const minimumOutputInput: DeriveVaultMinimumOutputInput = {
                 reference,
-                maximumSlippage,
+                maximumSlippageBps,
             };
             export const minimumOutput: VaultMinimumOutput = {
                 reference,
-                maximumSlippage,
+                maximumSlippageBps,
                 rounding: 'floor',
                 minOut: 99n,
             };
@@ -127,7 +51,6 @@ describe('package root type exports', () => {
             export const vaultQuote: ExactVaultOrderCreationQuote = {
                 kind: 'exact',
                 ledger: 1,
-                priceTime: 2n,
                 value: {
                     kind: 'retiredImmediateRedeem',
                     policy: 'direct',
@@ -205,7 +128,7 @@ describe('package root type exports', () => {
             } from '../src/index.js';
             import type {
                 SubjectBoundTradingSnapshot as TradingEntryBoundSnapshot,
-            } from '../src/trading/index.js';
+            } from '../src/contracts/trading/index.js';
             import { loadTradingSnapshot } from '../src/index.js';
 
             const legacyFields = {} as Omit<TradingSnapshot, 'subject'>;

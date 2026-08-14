@@ -4,21 +4,13 @@ import {
     advanceBorrowing,
     advanceFunding,
     advanceMarketAccruals,
-} from '../../src/market/rates.js';
-import type { VerifiedPrice } from '../../src/market/types.js';
+} from '../../src/trading/market/rates.js';
+import type { PriceData } from '../../src/trading/market/types.js';
 import type {
     MarketData,
     SidePair,
     TradingConfig,
-} from '../../src/trading/trading_types.js';
-import { loadGoldenCases } from '../helpers/golden.js';
-
-function record(value: unknown): Record<string, unknown> {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-        throw new TypeError('Expected a golden vector record');
-    }
-    return value as Record<string, unknown>;
-}
+} from '../../src/contracts/trading/trading_types.js';
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -27,7 +19,7 @@ function pair(long = 0n, short = 0n): SidePair {
 function market(overrides: Partial<MarketData> = {}): MarketData {
     return {
         notional: pair(),
-        collateral: pair(),
+        margin: pair(),
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
@@ -48,7 +40,7 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
         maxPositionNotional: 1_000_000_000_000n,
         maxOpenInterest: 10_000_000_000_000n,
         minOrderNotional: 1n,
-        minOrderCollateral: 1n,
+        minOrderMargin: 1n,
         execFee: 0n,
         feeDom: 0n,
         feeNonDom: 0n,
@@ -81,51 +73,16 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
     };
 }
 
-function price(inputs: Record<string, unknown> = {}): VerifiedPrice {
+function price(): PriceData {
     return {
-        feedId: Number(inputs.feed_id ?? 1n),
-        exponent: Number(inputs.exponent ?? -8n),
-        bid: (inputs.bid ?? 1_000_000_000n) as bigint,
-        ask: (inputs.ask ?? 1_000_000_000n) as bigint,
-        publishTime: (inputs.publish_time ?? 0n) as bigint,
-        source: 'pyth',
+        feedId: 1,
+        exponent: -8,
+        bid: 1_000_000_000n,
+        ask: 1_000_000_000n,
     };
 }
 
 describe('exact borrowing advancement', () => {
-    it.each(loadGoldenCases('trading', 'borrowing'))('$id', (golden) => {
-        const inputs = record(golden.inputs);
-        const expected = record(golden.expected);
-        const original = market({
-            notional: pair(inputs.long_notional as bigint, inputs.short_notional as bigint),
-            tokens: pair(inputs.long_tokens as bigint, inputs.short_tokens as bigint),
-            borrowingIdx: pair(inputs.long_borrowing_idx as bigint, inputs.short_borrowing_idx as bigint),
-            borrowingUpdate: inputs.borrowing_update as bigint,
-        });
-        const before = structuredClone(original);
-        const advanced = advanceBorrowing(
-            original,
-            config({
-                maxUtilOpen: inputs.max_util_open as bigint,
-                targetUtil: inputs.target_util as bigint,
-                borrowRate: inputs.borrow_rate as bigint,
-                increasedBorrowRate: inputs.increased_borrow_rate as bigint,
-            }),
-            price(inputs),
-            inputs.vault_balance as bigint,
-            inputs.now as bigint,
-        );
-
-        expect(advanced.borrowingIdx).toEqual({
-            long: expected.long_borrowing_idx,
-            short: expected.short_borrowing_idx,
-        });
-        expect(advanced.borrowingUpdate).toBe(expected.borrowing_update);
-        expect(original).toEqual(before);
-        expect(advanced).not.toBe(original);
-        expect(advanced.borrowingIdx).not.toBe(original.borrowingIdx);
-    });
-
     it('handles empty reserve and full utilization against zero capacity', () => {
         const empty = advanceBorrowing(market(), config(), price(), 0n, 10n);
         const full = advanceBorrowing(
@@ -173,40 +130,6 @@ describe('exact borrowing advancement', () => {
 });
 
 describe('exact funding advancement', () => {
-    it.each(loadGoldenCases('trading', 'funding'))('$id', (golden) => {
-        const inputs = record(golden.inputs);
-        const expected = record(golden.expected);
-        const original = market({
-            notional: pair(inputs.long_notional as bigint, inputs.short_notional as bigint),
-            tokens: pair(inputs.long_tokens as bigint, inputs.short_tokens as bigint),
-            fundingIdx: pair(inputs.long_funding_idx as bigint, inputs.short_funding_idx as bigint),
-            fundingRate: inputs.funding_rate as bigint,
-            fundingUpdate: inputs.funding_update as bigint,
-        });
-        const before = structuredClone(original);
-        const advanced = advanceFunding(
-            original,
-            config({
-                fundingIncrease: inputs.funding_increase as bigint,
-                fundingDecrease: inputs.funding_decrease as bigint,
-                thresholdStableFunding: inputs.threshold_stable_funding as bigint,
-                thresholdDecreaseFunding: inputs.threshold_decrease_funding as bigint,
-                fundingMin: inputs.funding_min as bigint,
-                fundingMax: inputs.funding_max as bigint,
-            }),
-            inputs.now as bigint,
-        );
-
-        expect(advanced.fundingRate).toBe(expected.funding_rate);
-        expect(advanced.fundingIdx).toEqual({
-            long: expected.long_funding_idx,
-            short: expected.short_funding_idx,
-        });
-        expect(advanced.fundingUpdate).toBe(expected.funding_update);
-        expect(original).toEqual(before);
-        expect(advanced.fundingIdx).not.toBe(original.fundingIdx);
-    });
-
     it('holds, decays, parks at one, and clamps the saved rate', () => {
         const hold = advanceFunding(
             market({ tokens: pair(1_030n, 970n), fundingRate: 5_000n }),
@@ -311,7 +234,9 @@ describe('coherent market accrual ordering and chronology', () => {
             .toThrowError(new RangeError('quote timestamp predates stored borrowing accrual'));
         expect(() => advanceFunding(data, config(), 19n))
             .toThrowError(new RangeError('quote timestamp predates stored funding accrual'));
+        // The composite no longer duplicates the chronology check up front; the
+        // inner funding advancement still rejects the stale timestamp.
         expect(() => advanceMarketAccruals(data, config(), price(), 1_000n, 15n))
-            .toThrowError(new RangeError('quote timestamp predates stored accrual'));
+            .toThrowError(new RangeError('quote timestamp predates stored funding accrual'));
     });
 });

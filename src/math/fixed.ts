@@ -2,6 +2,9 @@ export const I128_MIN = -(2n ** 127n);
 export const I128_MAX = 2n ** 127n - 1n;
 export const SCALAR_18 = 1_000_000_000_000_000_000n;
 
+/** Basis-point denominator: 10_000 bps = 100%. */
+export const BPS_DENOMINATOR = 10_000n;
+
 export function checkedI128(value: bigint): bigint {
     if (typeof value !== 'bigint') {
         throw new TypeError('i128 value must be a bigint');
@@ -46,4 +49,13 @@ export function mulDivFloor(left: bigint, right: bigint, denominator: bigint): b
 export function mulDivCeil(left: bigint, right: bigint, denominator: bigint): bigint {
     const numerator = checkedI128(left) * checkedI128(right);
     return checkedI128(divCeil(numerator, checkedI128(denominator)));
+}
+
+/** Validate a basis-point fraction in [0, 10_000] (10_000 = 100%). */
+export function checkedBps(value: bigint): bigint {
+    const bps = checkedI128(value);
+    if (bps < 0n || bps > BPS_DENOMINATOR) {
+        throw new RangeError('basis points must be between 0 and 10000');
+    }
+    return bps;
 }

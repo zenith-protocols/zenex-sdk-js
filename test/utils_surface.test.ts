@@ -13,16 +13,7 @@ import {
     decodeEntryKey,
     contractInstanceLedgerKey,
 } from '../src/ledger-keys.js';
-import {
-    Asset,
-    assetToScVal,
-    assetFromScVal,
-    getAssetKey,
-    getAssetName,
-    assetsEqual,
-    assetFromKey,
-} from '../src/asset.js';
-import { toFixed, toFloat, divFloor, divCeil, SCALAR_18 } from '../src/math.js';
+import { toFixed, toFloat, mulDivFloor, mulDivCeil, SCALAR_18 } from '../src/math/index.js';
 import { simulateAndParse } from '../src/simulate.js';
 import { ContractError } from '../src/errors.js';
 import {
@@ -30,8 +21,8 @@ import {
     signerToScVal,
     contextRuleTypeToScVal,
     sessionConfigToScVal,
-} from '../src/smart-account/smart_account_contract.js';
-import { TreasuryContract } from '../src/treasury/treasury_contract.js';
+} from '../src/contracts/smart-account/smart_account_contract.js';
+import { TreasuryContract } from '../src/contracts/treasury/treasury_contract.js';
 import { Network } from '../src/index.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
@@ -85,51 +76,6 @@ describe('ledger-keys generic builders', () => {
     });
 });
 
-describe('asset helpers', () => {
-    const stellar: Asset = { tag: 'Stellar', values: [TOKEN] };
-    const other: Asset = { tag: 'Other', values: ['BTC'] };
-
-    it('round-trips through ScVal', () => {
-        expect(assetFromScVal(assetToScVal(stellar))).toEqual(stellar);
-        expect(assetFromScVal(assetToScVal(other))).toEqual(other);
-        expect(
-            assetFromScVal(
-                assetToScVal({
-                    tag: 'Stellar',
-                    values: [Address.fromString(TOKEN)],
-                }),
-            ),
-        ).toEqual(stellar);
-        expect(() =>
-            assetFromScVal(
-                xdr.ScVal.scvVec([
-                    xdr.ScVal.scvSymbol('Bogus'),
-                    xdr.ScVal.scvSymbol('x'),
-                ]),
-            ),
-        ).toThrow(/Invalid asset tag/);
-        expect(() => assetFromScVal(xdr.ScVal.scvVec([]))).toThrow(
-            /expected vec/,
-        );
-    });
-
-    it('keys, names, equality, and key round-trip', () => {
-        expect(getAssetKey(stellar)).toBe(TOKEN);
-        expect(getAssetKey(other)).toBe('BTC');
-        expect(getAssetName(stellar)).toBe(`Stellar:${TOKEN}`);
-        expect(getAssetName(other)).toBe('BTC');
-        expect(assetsEqual(stellar, { tag: 'Stellar', values: [TOKEN] })).toBe(
-            true,
-        );
-        expect(assetsEqual(stellar, other)).toBe(false);
-        expect(assetsEqual(other, { tag: 'Other', values: ['ETH'] })).toBe(
-            false,
-        );
-        expect(assetFromKey(TOKEN)).toEqual(stellar);
-        expect(assetFromKey('BTC')).toEqual(other);
-    });
-});
-
 describe('math extras', () => {
     it('toFixed / toFloat round-trip with explicit decimals', () => {
         expect(toFixed(1.5, 7)).toBe(15000000n);
@@ -138,9 +84,9 @@ describe('math extras', () => {
         expect(toFloat(200n, 2)).toBe(2);
     });
 
-    it('divFloor and divCeil', () => {
-        expect(divFloor(7n, 2n, 1n)).toBe(3n);
-        expect(divCeil(7n, 2n, 1n)).toBe(4n);
+    it('mulDivFloor and mulDivCeil divide with true floor and ceil', () => {
+        expect(mulDivFloor(7n, 1n, 2n)).toBe(3n);
+        expect(mulDivCeil(7n, 1n, 2n)).toBe(4n);
     });
 });
 

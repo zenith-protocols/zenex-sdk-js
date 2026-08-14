@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { GovernanceContract } from '../../src/governance/governance_contract.js';
-import { decodeGovernanceEvent, GovernanceEventType } from '../../src/governance/governance_events.js';
+import { GovernanceContract } from '../../src/contracts/governance/governance_contract.js';
+import { decodeGovernanceEvent, GovernanceEventType } from '../../src/contracts/governance/governance_events.js';
 import { NormalizedEvent } from '../../src/base_event.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
@@ -87,41 +87,5 @@ describe('GovernanceContract surface', () => {
         expect(qc.target).toBe(TARGET);
         expect(qc.fn_name).toBe('set_rate');
         expect(qc.unlock_time).toBe(99n);
-    });
-});
-
-describe('decodeGovernanceEvent', () => {
-    it('decodes every governance event type', () => {
-        const queued = decodeGovernanceEvent(normalized('Queued', [1], {
-            target: TARGET, fn_name: 'set_rate', unlock_time: 100n,
-        }));
-        expect(queued).toMatchObject({
-            eventType: GovernanceEventType.Queued, nonce: 1,
-            target: TARGET, fnName: 'set_rate', unlockTime: 100n,
-        });
-
-        const executed = decodeGovernanceEvent(normalized('Executed', [2], {
-            target: TARGET, fn_name: 'set_rate',
-        }));
-        expect(executed).toMatchObject({ eventType: GovernanceEventType.Executed, nonce: 2 });
-
-        const cancelled = decodeGovernanceEvent(normalized('Cancelled', [3], {}));
-        expect(cancelled).toMatchObject({ eventType: GovernanceEventType.Cancelled, nonce: 3 });
-
-        const statusSet = decodeGovernanceEvent(normalized('StatusSet', [TARGET], { status: 4 }));
-        expect(statusSet).toMatchObject({
-            eventType: GovernanceEventType.StatusSet, target: TARGET, status: 4,
-        });
-
-        const delaySet = decodeGovernanceEvent(normalized('DelaySet', [], {
-            old_delay: 60n, new_delay: 120n,
-        }));
-        expect(delaySet).toMatchObject({
-            eventType: GovernanceEventType.DelaySet, oldDelay: 60n, newDelay: 120n,
-        });
-    });
-
-    it('returns undefined for unknown event types', () => {
-        expect(decodeGovernanceEvent(normalized('NotAGovEvent', [], {}))).toBeUndefined();
     });
 });

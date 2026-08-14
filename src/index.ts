@@ -1,5 +1,5 @@
 // =============================================================================
-// Zenex SDK v2 - Public API
+// Zenex SDK - Public API
 // =============================================================================
 
 import { rpc } from '@stellar/stellar-sdk';
@@ -22,36 +22,12 @@ export interface Network {
     opts?: rpc.Server.Options;
 }
 
-// Types - Asset
-export type { Asset } from './asset.js';
-export {
-    getAssetKey,
-    getAssetName,
-    assetsEqual,
-    assetToScVal,
-    assetFromScVal,
-    assetFromKey,
-} from './asset.js';
-
-// Base Event types, normalizers, and unified decoder
-export {
-    ZenexContractType,
-    normalizeRpc,
-    normalizeMercury,
-    normalizeGoldsky,
-    decodeEvent,
-} from './base_event.js';
-export type {
-    BaseZenexEvent,
-    NormalizedEvent,
-    MercuryWebhookEvent,
-    MercuryScVal,
-    GoldskyWebhookEvent,
-    ZenexEvent,
-} from './base_event.js';
+// Typed event surface (types only; consumers own their decode path)
+export { ZenexContractType } from './base_event.js';
+export type { BaseZenexEvent, ZenexEvent } from './base_event.js';
 
 // =============================================================================
-// Trading Module (v2 order -> keeper-execute contract)
+// Trading Module (order -> keeper-execute contract)
 // =============================================================================
 
 export {
@@ -70,27 +46,14 @@ export {
     parseMarketData,
     parseAdlState,
     parseTradingConfig,
-    // Position math + loader
-    PositionView,
-    positionPnl,
-    positionEquity,
-    pendingFunding,
-    pendingBorrowing,
-    liquidationPrice,
-    unlockedNotional,
-    // Market math + loader
-    MarketView,
-    sidePnl,
-    netPnl,
-    utilization,
-    impactFee,
-    skewSplitFees,
-    // Config validation
-    validateTradingConfig,
     // Events
     TradingEventType,
-    decodeTradingEvent,
-} from './trading/index.js';
+} from './contracts/trading/index.js';
+
+export {
+    loadTradingSnapshot,
+    snapshotFromEntries,
+} from './contracts/trading/index.js';
 
 export type {
     // Argument interfaces
@@ -99,7 +62,7 @@ export type {
     OpenLimitArgs,
     ClosePositionArgs,
     DecreasePositionArgs,
-    ModifyCollateralArgs,
+    ModifyMarginArgs,
     TriggerOrderArgs,
     VaultDepositArgs,
     VaultRedeemArgs,
@@ -111,7 +74,6 @@ export type {
     MarketData,
     AdlState,
     TradingConfig,
-    SkewSplitFees,
     // Events
     BaseTradingEvent,
     TradingCreateOrderEvent,
@@ -127,19 +89,32 @@ export type {
     TradingStatusUpdateEvent,
     TradingConfigUpdateEvent,
     TradingTerminalPriceUpdateEvent,
+    TradingOpenFillEvent,
     TradingIncreaseFillEvent,
     TradingDecreaseFillEvent,
     TradingCloseFillEvent,
     TradingLiquidationEvent,
     TradingEvent,
+    SnapshotFromEntriesInput,
     SubjectBoundTradingSnapshot,
     TradingDeployment,
     TradingSnapshot,
+    TradingSnapshotPrice,
     TradingSnapshotRequest,
     TradingSnapshotSubject,
-} from './trading/index.js';
+    TradingInstanceState,
+    TradingEntriesRequest,
+    TradingEntriesSnapshot,
+    TradingEntriesFailureCode,
+} from './contracts/trading/index.js';
 
-export { loadTradingSnapshot } from './trading/index.js';
+export {
+    parseTradingInstance,
+    loadTradingEntries,
+    loadTradingEntriesBatch,
+    crossCheckVaultTotalAssets,
+    TradingEntriesError,
+} from './contracts/trading/index.js';
 
 // =============================================================================
 // Trading Router Module (stateless batching + create-and-fill flows)
@@ -151,7 +126,7 @@ export {
     createOrderCall,
     parseCallOutcome,
     UNTYPED_FAILURE,
-} from './trading-router/index.js';
+} from './contracts/router/index.js';
 
 export type {
     Call,
@@ -159,18 +134,18 @@ export type {
     OrderParams,
     CreateAndFillWithFeeArgs,
     MulticallWithFeeArgs,
-} from './trading-router/index.js';
+} from './contracts/router/index.js';
 
 // =============================================================================
 // Factory Module
 // =============================================================================
 
-export { FactoryContract } from './factory/index.js';
+export { FactoryContract } from './contracts/factory/index.js';
 
 export type {
     FactoryInitMeta,
     FactoryConstructorArgs,
-} from './factory/index.js';
+} from './contracts/factory/index.js';
 
 // =============================================================================
 // Governance Module (generic timelock)
@@ -179,8 +154,7 @@ export type {
 export {
     GovernanceContract,
     GovernanceEventType,
-    decodeGovernanceEvent,
-} from './governance/index.js';
+} from './contracts/governance/index.js';
 
 export type {
     QueuedCall,
@@ -192,26 +166,26 @@ export type {
     GovernanceStatusSetEvent,
     GovernanceDelaySetEvent,
     GovernanceEvent,
-} from './governance/index.js';
+} from './contracts/governance/index.js';
 
 // =============================================================================
 // Price Verifier Module
 // =============================================================================
 
-export { PriceVerifierContract } from './price-verifier/index.js';
+export { PriceVerifierContract } from './contracts/price-verifier/index.js';
 
 export type {
     PriceVerifierPriceData,
     PriceVerifierConstructorArgs,
-} from './price-verifier/index.js';
+} from './contracts/price-verifier/index.js';
 
 // =============================================================================
 // Treasury Module
 // =============================================================================
 
-export { TreasuryContract } from './treasury/index.js';
+export { TreasuryContract, parseTreasuryRate } from './contracts/treasury/index.js';
 
-export type { TreasuryConstructorArgs } from './treasury/index.js';
+export type { TreasuryConstructorArgs } from './contracts/treasury/index.js';
 
 // =============================================================================
 // Smart Account Module
@@ -222,14 +196,28 @@ export {
     signerToScVal,
     contextRuleTypeToScVal,
     sessionConfigToScVal,
-} from './smart-account/index.js';
+    addContextRuleCall,
+    buildSingleMarketSessionRule,
+    ED25519_VERIFIER_SPEC_SHA256,
+    ED25519_VERIFIER_WASM_SHA256,
+    SESSION_POLICY_SPEC_SHA256,
+    SESSION_POLICY_WASM_SHA256,
+    SMART_ACCOUNT_DEPLOYER,
+    SMART_ACCOUNT_DEPLOYMENT_MAX_TIMEOUT_SECONDS,
+    SMART_ACCOUNT_SPEC_SHA256,
+    SMART_ACCOUNT_WASM_SHA256,
+    WEBAUTHN_VERIFIER_SPEC_SHA256,
+    WEBAUTHN_VERIFIER_WASM_SHA256,
+} from './contracts/smart-account/index.js';
 
 export type {
     Signer as SmartAccountSigner,
     ContextRuleType,
     SessionConfig,
     AddContextRuleArgs,
-} from './smart-account/index.js';
+    PolicyBuildResult,
+    SingleMarketSessionInput,
+} from './contracts/smart-account/index.js';
 
 // =============================================================================
 // Vault Module
@@ -237,18 +225,18 @@ export type {
 
 export {
     VaultContract,
-    VaultState,
     VaultEventType,
-    decodeVaultEvent,
-} from './vault/index.js';
+    parseVaultInstance,
+    parseTokenBalanceValue,
+} from './contracts/vault/index.js';
 
 export type {
     VaultConstructorArgs,
-    VaultStateData,
+    VaultInstanceState,
     BaseVaultEvent,
     VaultStrategyWithdrawEvent,
     VaultEvent,
-} from './vault/index.js';
+} from './contracts/vault/index.js';
 
 // =============================================================================
 // Errors / Response Parsing
@@ -298,21 +286,20 @@ export {
 } from './ledger-keys.js';
 
 // Fixed-Point Math
-export * as FixedMath from './math.js';
+export * as FixedMath from './math/index.js';
 
 // Simulation
 export { simulateAndParse } from './simulate.js';
 
 // =============================================================================
-// Exact quote, order, relay, and data boundaries
+// Exact quote and order boundaries
 // =============================================================================
 
 export * from './math/index.js';
-export * from './quote/index.js';
-export * from './market/index.js';
-export * from './position/index.js';
-export * from './order/index.js';
-export * from './relay/index.js';
+export * from './trading/quote/index.js';
+export * from './trading/market/index.js';
+export * from './trading/position/index.js';
+export * from './trading/order/index.js';
 
 export {
     convertVaultAssetsToShares,
@@ -323,12 +310,12 @@ export {
     quoteVaultOrderCreation,
     quoteVaultRedeem,
     quoteVaultRedeemFill,
-} from './vault/quote.js';
+} from './trading/quote/vault.js';
 export {
     checkVaultWithdrawGates,
     evaluateVaultWithdrawGates,
     VaultProtocolGateError,
-} from './vault/gates.js';
+} from './trading/quote/vault_gates.js';
 export type {
     DeriveVaultMinimumOutputInput,
     ExactVaultOrderCreationQuote,
@@ -338,7 +325,6 @@ export type {
     VaultMinimumOutput,
     VaultOrderCreationOutcome,
     VaultOrderCreationQuoteInput,
-    VaultRationalSlippageBound,
     VaultRestingOrderCreation,
     VaultRetiredImmediateRedeem,
     VaultQuoteOutcome,
@@ -346,116 +332,9 @@ export type {
     VaultDepositQuoteInput,
     VaultRedeemQuoteInput,
     VaultGateInput,
-} from './vault/quote.js';
-export type { VaultWithdrawHeadroom } from './vault/gates.js';
+} from './trading/quote/vault.js';
+export type { VaultWithdrawHeadroom } from './trading/quote/vault_gates.js';
 
-export * from './data/client.js';
-export * from './data/events.js';
-export * from './data/fill_economics.js';
-export * from './data/price.js';
-export * from './data/resync.js';
-export * from './data/trust.js';
-export { decodeApiSchema, ZenexDataDecodeError } from './data/codec.js';
-export {
-    API_CONTRACT_PACKAGE_VERSION,
-    API_CONTRACT_SOURCE_COMMIT,
-    API_OPENAPI_SHA256,
-    API_PACKAGE_CONTENT_SHA256,
-    API_VERSION,
-    API_PUBLIC_PATHS,
-    ATOMIC_FIELD_POINTERS,
-} from './data/generated.js';
-export type {
-    AccountFill,
-    AccountFillQuery,
-    AccountFillsResponse,
-    AccountLifecycle,
-    AccountLifecycleQuery,
-    AccountLifecyclesResponse,
-    AccountOrder,
-    AccountOrderQuery,
-    AccountOrdersResponse,
-    AccountVaultOrderQuery,
-    AccountVaultOrdersResponse,
-    AtomicString,
-    BaseMetadata,
-    Candle,
-    CandleMetadata,
-    CandleQuery,
-    CandlesResponse,
-    Competition,
-    CompetitionDetailResponse,
-    CompetitionLifecycle,
-    CompetitionLifecyclesResponse,
-    CompetitionListQuery,
-    CompetitionListResponse,
-    CompetitionResponse,
-    CompetitionStanding,
-    CompetitionStandingsResponse,
-    CompetitionState,
-    ConfigMetadata,
-    ConfigResponse,
-    ErrorEnvelope,
-    FaucetClaimResponse,
-    FaucetClaimStatus,
-    FaucetStatusResponse,
-    FillFees,
-    IndexedMetadata,
-    LatestPrice,
-    LatestPriceResponse,
-    LeaderboardResponse,
-    LifecycleFees,
-    LifecyclePageQuery,
-    LifecyclePageResponse,
-    MarketSnapshot,
-    MarketSnapshotQuery,
-    MarketSnapshotsResponse,
-    MarketTrade,
-    MarketTradeQuery,
-    MarketTradesResponse,
-    OrderStatus,
-    PageQuery,
-    PriceMetadata,
-    PriceResponse,
-    PriceTickData,
-    ProductMetadata,
-    PublicConfig,
-    PublicConfigResponse,
-    RankingDenomination,
-    RankedLifecycle,
-    RankedMetadata,
-    RankedStanding,
-    ReferralCodeResponse,
-    ReferralLookupResponse,
-    ReferralStatsResponse,
-    RelayMetadata,
-    RelayRequestStatus,
-    RelayRequestStatusResponse,
-    RelayStatusResponse,
-    RelaySubmitResponse,
-    Resolution,
-    RollingLifecyclesResponse,
-    RollingStandingsResponse,
-    RollingWindow,
-    RouterFeeMethods,
-    Side,
-    StreamEvent as ZenexStreamEvent,
-    UdfConfigResponse,
-    UdfHistoryResponse,
-    UdfQuery,
-    UdfResponse,
-    UdfRoute,
-    UdfSearchResponse,
-    UdfSymbolResponse,
-    VaultOrder as IndexedVaultOrder,
-    VaultOrderStatus,
-    VaultOrdersResponse,
-    VaultPerformance,
-    VaultPerformanceQuery,
-    VaultPerformanceResponse,
-    RelayExecutionPolicy as ApiRelayExecutionPolicy,
-    RelayRequest as ApiRelayRequest,
-} from './data/generated.js';
 
 // =============================================================================
 // Browser compatibility

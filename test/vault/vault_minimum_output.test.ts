@@ -3,7 +3,7 @@ import { I128_MAX } from '../../src/math/fixed.js';
 import {
     deriveVaultMinimumOutput,
     type DeriveVaultMinimumOutputInput,
-} from '../../src/vault/quote.js';
+} from '../../src/trading/quote/vault.js';
 
 const assumptions = [
     'minimum output is derived from a caller-supplied estimated fill output',
@@ -19,7 +19,7 @@ function derive(
             kind: 'estimate',
             output: 20_000_000_000_000_003n,
         },
-        maximumSlippage: { numerator: 5n, denominator: 1_000n },
+        maximumSlippageBps: 50n,
         ...overrides,
     });
 }
@@ -34,25 +34,25 @@ describe('deriveVaultMinimumOutput', () => {
                     kind: 'estimate',
                     output: 20_000_000_000_000_003n,
                 },
-                maximumSlippage: { numerator: 1n, denominator: 200n },
+                maximumSlippageBps: 50n,
                 rounding: 'floor',
                 minOut: 19_900_000_000_000_002n,
             },
         });
     });
 
-    it('keeps zero slippage exact and canonical', () => {
+    it('keeps zero slippage exact', () => {
         expect(
             derive({
                 reference: { kind: 'estimate', output: I128_MAX },
-                maximumSlippage: { numerator: 0n, denominator: 10_000n },
+                maximumSlippageBps: 0n,
             }),
         ).toEqual({
             kind: 'estimate',
             assumptions,
             value: {
                 reference: { kind: 'estimate', output: I128_MAX },
-                maximumSlippage: { numerator: 0n, denominator: 1n },
+                maximumSlippageBps: 0n,
                 rounding: 'floor',
                 minOut: I128_MAX,
             },
@@ -62,17 +62,17 @@ describe('deriveVaultMinimumOutput', () => {
     it('maps full slippage and a zero reference to zero atomics', () => {
         const full = derive({
             reference: { kind: 'estimate', output: 99n },
-            maximumSlippage: { numerator: 25n, denominator: 25n },
+            maximumSlippageBps: 10_000n,
         });
         const empty = derive({
             reference: { kind: 'estimate', output: 0n },
-            maximumSlippage: { numerator: 1n, denominator: 3n },
+            maximumSlippageBps: 33n,
         });
 
         expect(full).toMatchObject({
             kind: 'estimate',
             value: {
-                maximumSlippage: { numerator: 1n, denominator: 1n },
+                maximumSlippageBps: 10_000n,
                 minOut: 0n,
             },
         });
@@ -84,39 +84,15 @@ describe('deriveVaultMinimumOutput', () => {
 
     it.each([
         [
-            'an exact reference discriminator',
+            'negative basis points',
             {
-                reference: { kind: 'exact', output: 100n },
+                maximumSlippageBps: -1n,
             },
         ],
         [
-            'a negative reference output',
+            'basis points above 10000',
             {
-                reference: { kind: 'estimate', output: -1n },
-            },
-        ],
-        [
-            'a zero denominator',
-            {
-                maximumSlippage: { numerator: 0n, denominator: 0n },
-            },
-        ],
-        [
-            'a negative denominator',
-            {
-                maximumSlippage: { numerator: 0n, denominator: -1n },
-            },
-        ],
-        [
-            'a negative numerator',
-            {
-                maximumSlippage: { numerator: -1n, denominator: 10n },
-            },
-        ],
-        [
-            'a numerator above the denominator',
-            {
-                maximumSlippage: { numerator: 11n, denominator: 10n },
+                maximumSlippageBps: 10_001n,
             },
         ],
         [
@@ -126,9 +102,9 @@ describe('deriveVaultMinimumOutput', () => {
             },
         ],
         [
-            'a numeric rational component',
+            'numeric basis points',
             {
-                maximumSlippage: { numerator: 5, denominator: 100n },
+                maximumSlippageBps: 5,
             },
         ],
     ] as const)('rejects %s without inventing an estimate', (_label, input) => {
@@ -153,10 +129,7 @@ describe('deriveVaultMinimumOutput', () => {
         });
         expect(
             derive({
-                maximumSlippage: {
-                    numerator: 0n,
-                    denominator: I128_MAX + 1n,
-                },
+                maximumSlippageBps: I128_MAX + 1n,
             }),
         ).toMatchObject({
             kind: 'unavailable',

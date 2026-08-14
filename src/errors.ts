@@ -183,7 +183,7 @@ const errorMessages: Record<number, string> = {
     [409]: 'Decimals offset exceeds maximum (10)',
     [410]: 'Vault math overflow',
 
-    // Trading: the v2 trading messages live in `tradingErrorMessages` below
+    // Trading: the trading messages live in `tradingErrorMessages` below
     // and resolve through the dedicated `TradingError` enum (see the note in
     // ContractErrorType above).
 
@@ -266,7 +266,7 @@ export function parseContractErrorCode(rpcError: string): number | undefined {
 }
 
 /**
- * TradingError - exact v2 `trading/src/errors.rs` `TradingError` enum.
+ * TradingError - exact `trading/src/errors.rs` `TradingError` enum.
  *
  * Kept as its own enum so the trading domain (the largest error surface)
  * mirrors `errors.rs` one-to-one; `contractErrorFromCode` resolves trading
@@ -358,7 +358,7 @@ export enum TradingError {
     AdlNotEligible = 772,
 }
 
-/** Human-readable messages for the v2 TradingError codes. */
+/** Human-readable messages for the TradingError codes. */
 export const tradingErrorMessages: Record<number, string> = {
     [700]: 'Trading config value out of bounds or invariant violated',
     [701]: 'Flat settlement price is not strictly positive',

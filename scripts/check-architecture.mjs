@@ -44,24 +44,7 @@ function normalizedFilePath(path) {
 
 export function isExactModulePath(path) {
     const normalized = normalizedFilePath(path);
-    return (
-        /\/src\/(?:math|market|position|quote|order|relay|data)\//.test(
-            normalized,
-        ) || /\/src\/vault\/(?:quote|gates)\.ts$/.test(normalized)
-    );
-}
-
-function unwrap(expression) {
-    let current = expression;
-    while (
-        ts.isAsExpression(current) ||
-        ts.isTypeAssertionExpression(current) ||
-        ts.isSatisfiesExpression(current) ||
-        ts.isParenthesizedExpression(current)
-    ) {
-        current = current.expression;
-    }
-    return current;
+    return /\/src\/(?:math|trading)\//.test(normalized);
 }
 
 function nodeName(node) {
@@ -71,19 +54,6 @@ function nodeName(node) {
 
 function normalizedName(value) {
     return value.replaceAll('_', '').replaceAll('-', '').toLowerCase();
-}
-
-function templatePath(node) {
-    if (ts.isStringLiteralLike(node)) return node.text;
-    if (!ts.isTemplateExpression(node)) return undefined;
-    return `${node.head.text}${node.templateSpans
-        .map((span) => `{}` + span.literal.text)
-        .join('')}`;
-}
-
-function normalizedRoute(value) {
-    const withSlash = value.startsWith('v1/') ? `/${value}` : value;
-    return withSlash.replaceAll(/\{[^}]+\}/g, '{}');
 }
 
 function lineOf(source, node) {
@@ -99,36 +69,10 @@ function diagnostic(root, path, source, node, rule, message) {
     };
 }
 
-function generatedRoutes(source) {
-    let routes = [];
-    function visit(node) {
-        if (
-            ts.isVariableDeclaration(node) &&
-            ts.isIdentifier(node.name) &&
-            node.name.text === 'API_PUBLIC_PATHS' &&
-            node.initializer
-        ) {
-            const initializer = unwrap(node.initializer);
-            if (ts.isArrayLiteralExpression(initializer)) {
-                routes = initializer.elements
-                    .filter(ts.isStringLiteralLike)
-                    .map((element) => normalizedRoute(element.text));
-            }
-        }
-        ts.forEachChild(node, visit);
-    }
-    visit(source);
-    return new Set(routes);
-}
-
-function inspectSource(root, path, source, allowedRoutes) {
+function inspectSource(root, path, source) {
     const findings = [];
     const normalizedPath = normalizedFilePath(path);
-    const exact =
-        isExactModulePath(normalizedPath) &&
-        !normalizedPath.endsWith('/data/generated.ts');
-    const dataClient = normalizedPath.endsWith('/src/data/client.ts');
-    const dataEvents = normalizedPath.endsWith('/src/data/events.ts');
+    const exact = isExactModulePath(normalizedPath);
 
     function add(node, rule, message) {
         findings.push(diagnostic(root, path, source, node, rule, message));
@@ -166,23 +110,16 @@ function inspectSource(root, path, source, allowedRoutes) {
             const forbidden = FORBIDDEN_NAMES.find((candidate) =>
                 normalized.includes(candidate),
             );
-            if (forbidden !== undefined) {
+            // snapshot.ts drives a read-only multicall_try simulation; it
+            // never submits, so the try-boundary rule does not apply there.
+            const exempt =
+                forbidden === 'multicalltry' &&
+                normalizedPath.endsWith('/src/trading/snapshot.ts');
+            if (forbidden !== undefined && !exempt) {
                 add(
                     node,
                     'forbidden-public-boundary',
                     `${name} exposes forbidden ${forbidden} behavior`,
-                );
-            }
-            if (
-                dataClient &&
-                (ts.isMethodDeclaration(node) || ts.isMethodSignature(node)) &&
-                normalized.startsWith('submit') &&
-                name !== 'submitRelayRequest'
-            ) {
-                add(
-                    node,
-                    'generic-submit',
-                    `${name} is not the validated relay submission boundary`,
                 );
             }
         }
@@ -208,64 +145,9 @@ function inspectSource(root, path, source, allowedRoutes) {
             }
         }
 
-        if (
-            (dataClient || dataEvents) &&
-            (ts.isStringLiteralLike(node) || ts.isTemplateExpression(node))
-        ) {
-            const route = templatePath(node);
-            if (
-                route !== undefined &&
-                (route.startsWith('/v1/') ||
-                    route.startsWith('/udf/') ||
-                    route === 'v1/stream') &&
-                !allowedRoutes.has(normalizedRoute(route))
-            ) {
-                add(
-                    node,
-                    'unknown-api-route',
-                    `${route} is absent from API_PUBLIC_PATHS`,
-                );
-            }
-        }
         ts.forEachChild(node, visit);
     }
     visit(source);
-
-    if (dataEvents) {
-        const text = source.getFullText();
-        const required = [
-            [
-                "append('scope'",
-                'scoped-sse',
-                'SSE URL must append repeated scope values',
-            ],
-            [
-                'last-event-id',
-                'durable-cursor',
-                'SSE reconnect must carry Last-Event-ID',
-            ],
-            [
-                'executeZenexResync',
-                'authoritative-resync',
-                'resync-required must execute authoritative reads',
-            ],
-            [
-                "event.type === 'price.tick'",
-                'financial-event-boundary',
-                'Only price.tick may expose live financial payloads',
-            ],
-        ];
-        for (const [needle, rule, message] of required) {
-            if (!text.includes(needle)) {
-                findings.push({
-                    file: normalizedFilePath(relative(root, path)),
-                    line: 1,
-                    rule,
-                    message,
-                });
-            }
-        }
-    }
     return findings;
 }
 
@@ -285,12 +167,8 @@ export async function checkArchitecture(root = DEFAULT_ROOT) {
             ]),
         ),
     );
-    const generated = [...sources.entries()].find(([path]) =>
-        normalizedFilePath(path).endsWith('/src/data/generated.ts'),
-    )?.[1];
-    const allowedRoutes = generated ? generatedRoutes(generated) : new Set();
     return [...sources.entries()].flatMap(([path, source]) =>
-        inspectSource(root, path, source, allowedRoutes),
+        inspectSource(root, path, source),
     );
 }
 

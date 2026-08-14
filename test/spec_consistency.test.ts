@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { TradingContract } from '../src/trading/trading_contract.js';
-import { TradingRouterContract } from '../src/trading-router/router_contract.js';
-import { FactoryContract } from '../src/factory/factory_contract.js';
-import { VaultContract } from '../src/vault/vault_contract.js';
-import { PriceVerifierContract } from '../src/price-verifier/price_verifier_contract.js';
-import { TreasuryContract } from '../src/treasury/treasury_contract.js';
-import { GovernanceContract } from '../src/governance/governance_contract.js';
+import { TradingContract } from '../src/contracts/trading/trading_contract.js';
+import { TradingRouterContract } from '../src/contracts/router/router_contract.js';
+import { FactoryContract } from '../src/contracts/factory/factory_contract.js';
+import { VaultContract } from '../src/contracts/vault/vault_contract.js';
+import { PriceVerifierContract } from '../src/contracts/price-verifier/price_verifier_contract.js';
+import { TreasuryContract } from '../src/contracts/treasury/treasury_contract.js';
+import { GovernanceContract } from '../src/contracts/governance/governance_contract.js';
 import {
     factorySpec,
     governanceSpec,
@@ -16,7 +16,7 @@ import {
     tradingRouterSpec,
     tradingSpec,
     treasurySpec,
-} from '../src/generated/contract_specs.js';
+} from '../src/contracts/contract_specs.js';
 
 import factoryFixture from './fixtures/specs/factory.json';
 import governanceFixture from './fixtures/specs/governance.json';
@@ -36,9 +36,9 @@ const contracts = [
         spec: tradingSpec,
         fixture: tradingFixture,
         contract: TradingContract,
-        source: 'src/trading/trading_contract.ts',
-        sha256: 'c5e821f5903ada0021e521af259848b9ea9dd89ae08760dbba950b4fea092794',
-        bytes: 64_947,
+        source: 'src/contracts/trading/trading_contract.ts',
+        sha256: '1a99a7c8f90b094be36909aa8c180f68c13dbe99861bfb76777b481336fadc92',
+        bytes: 66_036,
     },
     {
         package: 'trading-router',
@@ -46,7 +46,7 @@ const contracts = [
         spec: tradingRouterSpec,
         fixture: tradingRouterFixture,
         contract: TradingRouterContract,
-        source: 'src/trading-router/router_contract.ts',
+        source: 'src/contracts/router/router_contract.ts',
         sha256: '1affc4279fdc11de0ae14d2a8958f34aa88dfed4759f93a5a49b85c5c545caaa',
         bytes: 12_350,
     },
@@ -56,9 +56,9 @@ const contracts = [
         spec: factorySpec,
         fixture: factoryFixture,
         contract: FactoryContract,
-        source: 'src/factory/factory_contract.ts',
-        sha256: '3b4fb39c1733aeb2704acd9bfdc10ba185933ac8624f43b0124a56573adac7bd',
-        bytes: 7_722,
+        source: 'src/contracts/factory/factory_contract.ts',
+        sha256: 'ad47c71dfa109f4c035c84f8e2b412f0087422d510872d5792c2a7e3de8bc6b8',
+        bytes: 7_714,
     },
     {
         package: 'strategy-vault',
@@ -66,7 +66,7 @@ const contracts = [
         spec: strategyVaultSpec,
         fixture: strategyVaultFixture,
         contract: VaultContract,
-        source: 'src/vault/vault_contract.ts',
+        source: 'src/contracts/vault/vault_contract.ts',
         sha256: '26899099b15ef633220eabfd0871d2678170a3faab12a4e45eb1b986964950eb',
         bytes: 20_915,
     },
@@ -76,7 +76,7 @@ const contracts = [
         spec: priceVerifierSpec,
         fixture: priceVerifierFixture,
         contract: PriceVerifierContract,
-        source: 'src/price-verifier/price_verifier_contract.ts',
+        source: 'src/contracts/price-verifier/price_verifier_contract.ts',
         sha256: 'a305fb2c74d335602fc4c29e33f12772e747f80d0734293fbea83b709db0a2b3',
         bytes: 15_247,
     },
@@ -86,7 +86,7 @@ const contracts = [
         spec: treasurySpec,
         fixture: treasuryFixture,
         contract: TreasuryContract,
-        source: 'src/treasury/treasury_contract.ts',
+        source: 'src/contracts/treasury/treasury_contract.ts',
         sha256: '85322d7b3edd30ac9c5f9a7dfb187dfa9eadf0781333ad841fe1bedb75a0eae9',
         bytes: 6_248,
     },
@@ -96,7 +96,7 @@ const contracts = [
         spec: governanceSpec,
         fixture: governanceFixture,
         contract: GovernanceContract,
-        source: 'src/governance/governance_contract.ts',
+        source: 'src/contracts/governance/governance_contract.ts',
         sha256: '751b7cc97b3c348e1eaf263eaef0c694ac1c5b3879256e68afe4ab9be8efac87',
         bytes: 10_130,
     },
@@ -106,11 +106,11 @@ describe('approved v2 contract spec consistency', () => {
     it('pins source commit, source tree, Cargo.lock, and toolchain evidence', () => {
         expect(manifest).toMatchObject({
             schemaVersion: 1,
-            contractsCommit: '4c631eb17af53ec5e6875f42bf71a43af295e521',
-            productionSourceTree: '3c9815124a70cd8ee3f6fddad2baf072606588bb',
+            contractsCommit: 'fc85144123622676d77c4e72b10aad7eab43d321',
+            productionSourceTree: 'd7537b81ec8ecf4f64b1dcb56dadac71894e04f7',
             cargoLock: {
                 path: 'Cargo.lock',
-                sha256: '1b07b1d4d9e7d55ecb66d01b3d9c0e367bf342ab5ea9ed11f2b3c495d7c9eab2',
+                sha256: '79a15142a56b0a97f1b0d3af1f9c0625feaa6e9eb3804089f9e31e268f5484a0',
             },
             toolchain: {
                 stellarCli: 'stellar 25.2.0 (28484880988199233a7e8e87c97cb12dac323cb3)',
@@ -136,7 +136,7 @@ describe('approved v2 contract spec consistency', () => {
     it.each(contracts)('$source consumes only its generated $exportName array', (entry) => {
         const source = readFileSync(`${repoRoot}/${entry.source}`, 'utf8');
 
-        expect(source).toContain(`import { ${entry.exportName} } from '../generated/contract_specs.js';`);
+        expect(source).toContain(`import { ${entry.exportName} } from '../contract_specs.js';`);
         expect(source).toContain(`static spec: contract.Spec = new contract.Spec(${entry.exportName});`);
         expect(source).not.toMatch(/new contract\.Spec\(\[\s*['"]/);
     });

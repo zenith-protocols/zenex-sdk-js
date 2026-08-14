@@ -2,47 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
     I128_MAX,
     I128_MIN,
-    SCALAR_18,
     addI128,
     checkedI128,
     mulDivCeil,
     mulDivFloor,
     subI128,
 } from '../../src/math/fixed.js';
-import { loadGoldenCases } from '../helpers/golden.js';
-
-function record(value: unknown): Record<string, unknown> {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-        throw new TypeError('Expected a golden vector record');
-    }
-    return value as Record<string, unknown>;
-}
 
 describe('checked contract fixed-point primitives', () => {
-    it.each(loadGoldenCases('trading', 'fixed'))('$id', (golden) => {
-        const inputs = record(golden.inputs);
-        const expected = record(golden.expected).value as bigint;
-
-        switch (golden.operation) {
-            case 'factor_floor':
-                expect(mulDivFloor(inputs.amount as bigint, inputs.factor as bigint, SCALAR_18)).toBe(expected);
-                break;
-            case 'factor_ceil':
-                expect(mulDivCeil(inputs.amount as bigint, inputs.factor as bigint, SCALAR_18)).toBe(expected);
-                break;
-            case 'ratio_floor':
-                expect(mulDivFloor(inputs.numerator as bigint, SCALAR_18, inputs.denominator as bigint))
-                    .toBe(expected);
-                break;
-            case 'ratio_ceil':
-                expect(mulDivCeil(inputs.numerator as bigint, SCALAR_18, inputs.denominator as bigint))
-                    .toBe(expected);
-                break;
-            default:
-                throw new Error(`Unknown fixed vector operation: ${golden.operation}`);
-        }
-    });
-
     it('uses mathematical floor and ceil for every sign combination', () => {
         expect(mulDivFloor(-1n, 1n, 2n)).toBe(-1n);
         expect(mulDivCeil(-1n, 1n, 2n)).toBe(0n);

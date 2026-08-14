@@ -5,12 +5,12 @@ import {
     estimate,
     exact,
     unavailable,
-} from '../../src/quote/result.js';
+} from '../../src/trading/quote/result.js';
 
 function describeResult(result: QuoteResult<bigint>): string {
     switch (result.kind) {
         case 'exact':
-            return `${result.ledger}:${result.priceTime}:${result.value}`;
+            return `${result.ledger}:${result.value}`;
         case 'estimate':
             return `${result.assumptions.join(',')}:${result.value}`;
         case 'unavailable':
@@ -23,13 +23,14 @@ function describeResult(result: QuoteResult<bigint>): string {
 }
 
 describe('quote results and provenance', () => {
-    it('preserves exact bigint source time above the safe integer boundary', () => {
-        const priceTime = 9_007_199_254_740_993n;
-        const result = exact(42n, 4_294_967_295, priceTime);
+    it('constructs an exact result with ledger provenance', () => {
+        const result = exact(42n, 4_294_967_295);
 
-        expect(result).toEqual({ kind: 'exact', value: 42n, ledger: 4_294_967_295, priceTime });
-        expect(describeResult(result)).toBe('4294967295:9007199254740993:42');
-        expectTypeOf(result.priceTime).toEqualTypeOf<bigint>();
+        expect(result).toEqual({ kind: 'exact', value: 42n, ledger: 4_294_967_295 });
+        expect(describeResult(result)).toBe('4294967295:42');
+        if (result.kind === 'exact') {
+            expectTypeOf(result.ledger).toEqualTypeOf<number>();
+        }
     });
 
     it('accepts a ledger only as a safe nonnegative u32 integer', () => {
@@ -43,9 +44,7 @@ describe('quote results and provenance', () => {
     });
 
     it('rejects invalid exact quote provenance', () => {
-        expect(() => exact(1n, -1, 1n)).toThrow(RangeError);
-        expect(() => exact(1n, 1, -1n)).toThrow(RangeError);
-        expect(() => exact(1n, 1, 2n ** 64n)).toThrow(RangeError);
+        expect(() => exact(1n, -1)).toThrow(RangeError);
     });
 
     it('constructs estimate and unavailable variants without fake exact provenance', () => {

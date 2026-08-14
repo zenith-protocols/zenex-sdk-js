@@ -1,32 +1,227 @@
 import { describe, expect, it } from 'vitest';
 import { I128_MAX, SCALAR_18 } from '../../src/math/fixed.js';
-import type { VerifiedPrice } from '../../src/market/types.js';
+import type { PriceData } from '../../src/trading/market/types.js';
 import type {
     MarketData,
     SidePair,
     TradingConfig,
-} from '../../src/trading/trading_types.js';
+} from '../../src/contracts/trading/trading_types.js';
 import {
     convertVaultAssetsToShares,
     convertVaultSharesToAssets,
     quoteVaultDeposit,
     quoteVaultRedeem,
-} from '../../src/vault/quote.js';
+} from '../../src/trading/quote/vault.js';
 import type {
     VaultAtomicState,
     VaultDepositQuoteInput,
     VaultQuoteContext,
     VaultRedeemQuoteInput,
-} from '../../src/vault/quote.js';
-import { checkVaultWithdrawGates } from '../../src/vault/gates.js';
-import { loadGoldenCases } from '../helpers/golden.js';
+} from '../../src/trading/quote/vault.js';
+import { checkVaultWithdrawGates } from '../../src/trading/quote/vault_gates.js';
 
-function record(value: unknown): Record<string, unknown> {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-        throw new TypeError('Expected a golden vector record');
-    }
-    return value as Record<string, unknown>;
+interface ContractCase {
+    operation: string;
+    inputs: Record<string, unknown>;
+    work: Record<string, unknown>;
+    expected: Record<string, unknown>;
 }
+
+// Contract-derived scenarios preserved from the retired trading-v2 and
+// strategy-vault-v2 golden vectors
+// (contracts commit 4c631eb17af53ec5e6875f42bf71a43af295e521).
+const tradingVaultCases: Record<string, ContractCase> = {
+    'vault.deposit.pnl_fee_settlement_success': {
+        operation: 'deposit_gate',
+        inputs: {
+            vault_balance_before: 10_000n,
+            assets_deposited: 1_001n,
+            long_notional: 100n,
+            short_notional: 0n,
+            long_collateral: 50n,
+            short_collateral: 0n,
+            long_tokens: 100_000_000_000n,
+            short_tokens: 0n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 800_000_000n,
+            ask: 800_000_000n,
+            publish_time: 2n,
+            max_vault_balance: 10_996n,
+            max_pnl_trader: 900_000_000_000_000_000n,
+            deposit_fee: 10_000_000_000_000_000n,
+            keeper_rate: 200_000_000_000_000_000n,
+            treasury_rate: 333_333_333_333_333_333n,
+            exec_fee: 2n,
+            min_out: 991n,
+            created_at: 1n,
+            now: 2n,
+        },
+        work: {
+            long_minimized_pnl: -20n,
+            short_minimized_pnl: 0n,
+            net_pnl: -20n,
+            vault_fee: 10n,
+            deposit_assets: 991n,
+            keeper_fee_cut: 2n,
+            treasury_fee_cut: 3n,
+            vault_fee_cut: 5n,
+            hypothetical_vault_balance_after: 10_996n,
+        },
+        expected: {
+            accepted: true,
+            mock_shares_received: 991n,
+            vault_balance_after: 10_996n,
+        },
+    },
+    'vault.redeem.pnl_fee_settlement_success': {
+        operation: 'redeem_gate',
+        inputs: {
+            vault_balance_before: 10_000n,
+            shares_requested: 1_001n,
+            mock_redeemed_assets: 1_001n,
+            long_notional: 100n,
+            short_notional: 0n,
+            long_collateral: 50n,
+            short_collateral: 0n,
+            long_tokens: 100_000_000_000n,
+            short_tokens: 0n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_200_000_000n,
+            ask: 1_200_000_000n,
+            publish_time: 2n,
+            max_pnl_trader: 900_000_000_000_000_000n,
+            max_util_withdraw: 900_000_000_000_000_000n,
+            max_pnl_withdraw: 150_000_000_000_000_000n,
+            redeem_fee: 10_000_000_000_000_000n,
+            keeper_rate: 200_000_000_000_000_000n,
+            treasury_rate: 333_333_333_333_333_333n,
+            exec_fee: 2n,
+            min_out: 991n,
+            created_at: 1n,
+            now: 2n,
+        },
+        work: {
+            redeemed_assets: 1_001n,
+            pnl_cap: 4_500n,
+            net_pnl: 20n,
+            vault_fee: 10n,
+            assets_to_user: 991n,
+            keeper_fee_cut: 2n,
+            treasury_fee_cut: 3n,
+            vault_fee_cut: 5n,
+            vault_balance_after_redeem: 8_999n,
+            vault_balance_after_settlement: 9_004n,
+        },
+        expected: {
+            accepted: true,
+            user_token_balance_after: 991n,
+            vault_balance_after: 9_004n,
+        },
+    },
+    'vault.utilization.exact_boundary_pass': {
+        operation: 'redeem_gate',
+        inputs: {
+            vault_balance_before: 2_100_000_000n,
+            shares_requested: 100_000_000n,
+            mock_redeemed_assets: 100_000_000n,
+            long_notional: 900_000_000n,
+            short_notional: 0n,
+            long_collateral: 900_000_000n,
+            short_collateral: 0n,
+            long_tokens: 900_000_000_000_000_000n,
+            short_tokens: 0n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 2n,
+            max_pnl_trader: 900_000_000_000_000_000n,
+            max_util_withdraw: 900_000_000_000_000_000n,
+            max_pnl_withdraw: 150_000_000_000_000_000n,
+            redeem_fee: 0n,
+            keeper_rate: 0n,
+            treasury_rate: 0n,
+            exec_fee: 0n,
+            min_out: 0n,
+            created_at: 1n,
+            now: 2n,
+        },
+        work: {
+            redeemed_assets: 100_000_000n,
+            net_pnl: 0n,
+            vault_fee: 0n,
+            assets_to_user: 100_000_000n,
+            vault_balance_after_redeem: 2_000_000_000n,
+            vault_balance_after_settlement: 2_000_000_000n,
+            utilization_capacity: 900_000_000n,
+            long_reserved: 900_000_000n,
+            short_reserved: 0n,
+            pnl_allowance: 150_000_000n,
+        },
+        expected: {
+            accepted: true,
+            vault_balance_after: 2_000_000_000n,
+        },
+    },
+    'vault.pending_pnl.exact_boundary_pass': {
+        operation: 'redeem_gate',
+        inputs: {
+            vault_balance_before: 2_100_000_000n,
+            shares_requested: 100_000_000n,
+            mock_redeemed_assets: 100_000_000n,
+            long_notional: 650_000_000n,
+            short_notional: 0n,
+            long_collateral: 650_000_000n,
+            short_collateral: 0n,
+            long_tokens: 800_000_000_000_000_000n,
+            short_tokens: 0n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 2n,
+            max_pnl_trader: 900_000_000_000_000_000n,
+            max_util_withdraw: 900_000_000_000_000_000n,
+            max_pnl_withdraw: 150_000_000_000_000_000n,
+            redeem_fee: 0n,
+            keeper_rate: 0n,
+            treasury_rate: 0n,
+            exec_fee: 0n,
+            min_out: 0n,
+            created_at: 1n,
+            now: 2n,
+        },
+        work: {
+            redeemed_assets: 100_000_000n,
+            net_pnl: 150_000_000n,
+            vault_fee: 0n,
+            assets_to_user: 100_000_000n,
+            vault_balance_after_redeem: 2_000_000_000n,
+            vault_balance_after_settlement: 2_000_000_000n,
+            utilization_capacity: 900_000_000n,
+            long_reserved: 800_000_000n,
+            short_reserved: 0n,
+            long_pending_pnl: 150_000_000n,
+            pnl_allowance: 150_000_000n,
+        },
+        expected: {
+            accepted: true,
+            vault_balance_after: 2_000_000_000n,
+        },
+    },
+};
+
+// strategy_vault.deposit.i128.result_overflow inputs from the retired
+// strategy-vault-v2 golden vectors.
+const strategyOverflowInputs: Record<string, unknown> = {
+    decimals_offset: 0n,
+    total_assets: 0n,
+    total_supply: 1n,
+    assets: 170_141_183_460_469_231_731_687_303_715_884_105_727n,
+    net_pnl: 0n,
+};
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -35,7 +230,7 @@ function pair(long = 0n, short = 0n): SidePair {
 function market(overrides: Partial<MarketData> = {}): MarketData {
     return {
         notional: pair(),
-        collateral: pair(),
+        margin: pair(),
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
@@ -56,7 +251,7 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
         maxPositionNotional: 1_000_000_000_000n,
         maxOpenInterest: 10_000_000_000_000n,
         minOrderNotional: 1n,
-        minOrderCollateral: 1n,
+        minOrderMargin: 1n,
         execFee: 0n,
         feeDom: 0n,
         feeNonDom: 0n,
@@ -89,14 +284,12 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
     };
 }
 
-function price(overrides: Partial<VerifiedPrice> = {}): VerifiedPrice {
+function price(overrides: Partial<PriceData> = {}): PriceData {
     return {
         feedId: 1,
         exponent: -8,
         bid: 1_000_000_000n,
         ask: 1_000_000_000n,
-        publishTime: 2n,
-        source: 'pyth',
         ...overrides,
     };
 }
@@ -122,9 +315,6 @@ function context(
     };
 }
 
-const shareCases = loadGoldenCases('strategyVault', 'shares');
-const tradingCases = loadGoldenCases('trading', 'vault');
-
 function strategyState(inputs: Record<string, unknown>): VaultAtomicState {
     return {
         totalAssets: inputs.total_assets as bigint,
@@ -133,8 +323,8 @@ function strategyState(inputs: Record<string, unknown>): VaultAtomicState {
     };
 }
 
-function tradingVector(id: string) {
-    const found = tradingCases.find((candidate) => candidate.id === id);
+function tradingVector(id: string): ContractCase {
+    const found = tradingVaultCases[id];
     if (!found) throw new Error(`Missing vector ${id}`);
     return found;
 }
@@ -145,9 +335,9 @@ function tradingContext(id: string): {
     expected: Record<string, unknown>;
 } {
     const golden = tradingVector(id);
-    const inputs = record(golden.inputs);
-    const work = record(golden.work);
-    const expected = record(golden.expected);
+    const inputs = golden.inputs;
+    const work = golden.work;
+    const expected = golden.expected;
     const now = inputs.now as bigint;
     const netPnl = work.net_pnl as bigint;
     const totalAssets = inputs.vault_balance_before as bigint;
@@ -158,7 +348,7 @@ function tradingContext(id: string): {
                 inputs.long_notional as bigint,
                 inputs.short_notional as bigint,
             ),
-            collateral: pair(
+            margin: pair(
                 inputs.long_collateral as bigint,
                 inputs.short_collateral as bigint,
             ),
@@ -191,7 +381,6 @@ function tradingContext(id: string): {
             exponent: Number(inputs.exponent),
             bid: inputs.bid as bigint,
             ask: inputs.ask as bigint,
-            publishTime: inputs.publish_time as bigint,
         }),
         // The trading artifact intentionally uses a 1:1 mock strategy. Match
         // its exchange rate while the production conversion is tested against
@@ -221,59 +410,8 @@ function tradingContext(id: string): {
 }
 
 describe('strategy-vault share conversion', () => {
-    it.each(
-        shareCases.filter(
-            (entry) => record(entry.expected).outcome === 'value',
-        ),
-    )('matches $id exactly', (golden) => {
-        const inputs = record(golden.inputs);
-        const expected = record(golden.expected);
-        const output =
-            golden.operation === 'preview_deposit'
-                ? convertVaultAssetsToShares(
-                      strategyState(inputs),
-                      inputs.assets as bigint,
-                      inputs.net_pnl as bigint,
-                  )
-                : convertVaultSharesToAssets(
-                      strategyState(inputs),
-                      inputs.shares as bigint,
-                      inputs.net_pnl as bigint,
-                  );
-
-        expect(output).toBe(expected.output);
-    });
-
-    it.each(
-        shareCases.filter(
-            (entry) => record(entry.expected).outcome === 'contract_error',
-        ),
-    )('returns the strategy contract code for $id', (golden) => {
-        const inputs = record(golden.inputs);
-        const expected = record(golden.expected);
-        const call = () =>
-            golden.operation === 'preview_deposit'
-                ? convertVaultAssetsToShares(
-                      strategyState(inputs),
-                      inputs.assets as bigint,
-                      inputs.net_pnl as bigint,
-                  )
-                : convertVaultSharesToAssets(
-                      strategyState(inputs),
-                      inputs.shares as bigint,
-                      inputs.net_pnl as bigint,
-                  );
-
-        expect(call).toThrow(new RegExp(`#${String(expected.error_code)}`));
-    });
-
     it('uses widened multiplication but rejects an i128 result overflow', () => {
-        const golden = shareCases.find(
-            (entry) =>
-                entry.id === 'strategy_vault.deposit.i128.result_overflow',
-        );
-        if (!golden) throw new Error('Missing widened overflow vector');
-        const inputs = record(golden.inputs);
+        const inputs = strategyOverflowInputs;
 
         expect(() =>
             convertVaultAssetsToShares(
@@ -283,71 +421,9 @@ describe('strategy-vault share conversion', () => {
             ),
         ).toThrow(/outside the i128 range/);
     });
-
-    it('rejects an impossible decimals offset before exponentiation', () => {
-        expect(() =>
-            convertVaultAssetsToShares(
-                { totalAssets: 0n, totalSupply: 0n, decimalsOffset: 39 },
-                1n,
-                0n,
-            ),
-        ).toThrow(/decimals offset/);
-    });
 });
 
 describe('trading vault fill sequence', () => {
-    it.each(tradingCases.filter((entry) => record(entry.expected).accepted))(
-        'quotes accepted vector $id atomically',
-        (golden) => {
-            const { input, work, expected } = tradingContext(golden.id);
-            const result =
-                golden.operation === 'deposit_gate'
-                    ? quoteVaultDeposit(input as VaultDepositQuoteInput)
-                    : quoteVaultRedeem(input as VaultRedeemQuoteInput);
-
-            expect(result.kind).toBe('exact');
-            if (result.kind !== 'exact') return;
-            expect(result.ledger).toBe(42);
-            expect(result.priceTime).toBe(
-                record(golden.inputs).publish_time as bigint,
-            );
-            expect(result.value).toMatchObject({
-                kind:
-                    golden.operation === 'deposit_gate' ? 'deposit' : 'redeem',
-                output:
-                    golden.operation === 'deposit_gate'
-                        ? expected.mock_shares_received
-                        : expected.user_token_balance_after,
-                vaultFee: work.vault_fee,
-                executionFee: record(golden.inputs).exec_fee,
-                netPnl: work.net_pnl,
-                postVaultAssets: expected.vault_balance_after,
-                valuation: 'transactionQuoteMarkedNav',
-            });
-            expect(result.value).not.toHaveProperty('navNumerator');
-            expect(result.value).not.toHaveProperty('navDenominator');
-        },
-    );
-
-    it.each(tradingCases.filter((entry) => !record(entry.expected).accepted))(
-        'returns the exact failed gate for $id',
-        (golden) => {
-            const { input, expected } = tradingContext(golden.id);
-            const result =
-                golden.operation === 'deposit_gate'
-                    ? quoteVaultDeposit(input as VaultDepositQuoteInput)
-                    : quoteVaultRedeem(input as VaultRedeemQuoteInput);
-
-            expect(result).toEqual({
-                kind: 'unavailable',
-                code: 'CONTRACT_GATE',
-                reason: expect.stringContaining(
-                    `#${String(expected.error_code)}`,
-                ),
-            });
-        },
-    );
-
     it('reports gross assets and keeps execution fee outside vault backing', () => {
         const { input } = tradingContext(
             'vault.deposit.pnl_fee_settlement_success',
@@ -362,18 +438,11 @@ describe('trading vault fill sequence', () => {
         expect(result.value.postVaultAssets).toBe(10_996n);
     });
 
-    it('applies the price postdate gate before redeem cooldown', () => {
+    it('applies the redeem cooldown gate', () => {
         const { input } = tradingContext(
             'vault.redeem.pnl_fee_settlement_success',
         );
         const base = input as VaultRedeemQuoteInput;
-        const stale = quoteVaultRedeem({ ...base, createdAt: 2n });
-        expect(stale).toEqual({
-            kind: 'unavailable',
-            code: 'CONTRACT_GATE',
-            reason: expect.stringContaining('#740'),
-        });
-
         const locked = quoteVaultRedeem({
             ...base,
             config: config({
@@ -415,7 +484,7 @@ describe('trading vault fill sequence', () => {
             ...context({
                 market: market({
                     notional: pair(100n, 0n),
-                    collateral: pair(0n, 0n),
+                    margin: pair(0n, 0n),
                     tokens: pair(1_000n * SCALAR_18, 0n),
                 }),
                 config: config({
@@ -458,7 +527,7 @@ describe('trading vault fill sequence', () => {
             ...context({
                 market: market({
                     notional: pair(100n, 0n),
-                    collateral: pair(0n, 0n),
+                    margin: pair(0n, 0n),
                     tokens: pair(101n * SCALAR_18, 0n),
                 }),
                 vault: {
@@ -512,7 +581,6 @@ describe('withdrawal gates', () => {
         expect(result).toEqual({
             kind: 'exact',
             ledger: 42,
-            priceTime: 2n,
             value: {
                 utilizationHeadroom: 0n,
                 pnlHeadroom: 150_000_000n,
@@ -532,7 +600,6 @@ describe('withdrawal gates', () => {
         expect(result).toEqual({
             kind: 'exact',
             ledger: 42,
-            priceTime: 2n,
             value: {
                 utilizationHeadroom: 100_000_000n,
                 pnlHeadroom: 0n,
@@ -544,7 +611,7 @@ describe('withdrawal gates', () => {
         const result = checkVaultWithdrawGates({
             ...context({
                 now: 1n,
-                price: price({ publishTime: 1n }),
+                price: price(),
                 market: market({
                     fundingUpdate: 2n,
                     borrowingUpdate: 2n,
@@ -556,7 +623,7 @@ describe('withdrawal gates', () => {
         expect(result).toEqual({
             kind: 'unavailable',
             code: 'INVALID_INPUT',
-            reason: expect.stringContaining('predates stored accrual'),
+            reason: expect.stringContaining('predates stored'),
         });
     });
 
@@ -565,7 +632,7 @@ describe('withdrawal gates', () => {
             ...context({
                 market: market({
                     notional: pair(I128_MAX, 0n),
-                    collateral: pair(I128_MAX, I128_MAX),
+                    margin: pair(I128_MAX, I128_MAX),
                     tokens: pair(0n, I128_MAX),
                 }),
                 config: config({

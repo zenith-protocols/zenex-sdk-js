@@ -44,7 +44,6 @@ describe('package root exports', () => {
         expect(SDK.parseMarketData).toBeTypeOf('function');
         expect(SDK.parseAdlState).toBeTypeOf('function');
         expect(SDK.parseTradingConfig).toBeTypeOf('function');
-        expect(SDK.validateTradingConfig).toBeTypeOf('function');
     });
 
     it('does not export the removed kind-to-ScVal converters', () => {
@@ -57,20 +56,22 @@ describe('package root exports', () => {
         ).toBeUndefined();
     });
 
-    it('exports the trading math helpers and loaders', () => {
-        expect(SDK.PositionView).toBeTypeOf('function');
-        expect(SDK.MarketView).toBeTypeOf('function');
+    it('exports the position display estimates', () => {
         expect(SDK.positionPnl).toBeTypeOf('function');
         expect(SDK.positionEquity).toBeTypeOf('function');
         expect(SDK.pendingFunding).toBeTypeOf('function');
         expect(SDK.pendingBorrowing).toBeTypeOf('function');
         expect(SDK.liquidationPrice).toBeTypeOf('function');
         expect(SDK.unlockedNotional).toBeTypeOf('function');
-        expect(SDK.sidePnl).toBeTypeOf('function');
-        expect(SDK.netPnl).toBeTypeOf('function');
-        expect(SDK.utilization).toBeTypeOf('function');
-        expect(SDK.impactFee).toBeTypeOf('function');
-        expect(SDK.skewSplitFees).toBeTypeOf('function');
+        // Per-key loader classes and approximate market math are not part
+        // of the public surface; the exact quote layer covers market math.
+        expect(SDK.PositionView).toBeUndefined();
+        expect(SDK.MarketView).toBeUndefined();
+        expect(SDK.sidePnl).toBeUndefined();
+        expect(SDK.netPnl).toBeUndefined();
+        expect(SDK.utilization).toBeUndefined();
+        expect(SDK.impactFee).toBeUndefined();
+        expect(SDK.skewSplitFees).toBeUndefined();
     });
 
     it('exports the event enums and decoders', () => {
@@ -90,21 +91,23 @@ describe('package root exports', () => {
         expect(SDK.TradingEventType.IncreaseFill).toBe('increase_fill');
         expect(SDK.TradingEventType.DecreaseFill).toBe('decrease_fill');
         expect(SDK.TradingEventType.Liquidation).toBe('liquidation');
-        expect(SDK.decodeTradingEvent).toBeTypeOf('function');
+        expect(SDK.decodeTradingEvent).toBeUndefined();
         expect(SDK.VaultEventType.StrategyWithdraw).toBe('StrategyWithdraw');
-        expect(SDK.decodeVaultEvent).toBeTypeOf('function');
+        expect(SDK.decodeVaultEvent).toBeUndefined();
         expect(SDK.GovernanceEventType.Queued).toBe('Queued');
-        expect(SDK.decodeGovernanceEvent).toBeTypeOf('function');
+        expect(SDK.decodeGovernanceEvent).toBeUndefined();
         expect(SDK.ZenexContractType.Trading).toBe('trading');
-        expect(SDK.decodeEvent).toBeTypeOf('function');
-        expect(SDK.normalizeRpc).toBeTypeOf('function');
-        expect(SDK.normalizeMercury).toBeTypeOf('function');
-        expect(SDK.normalizeGoldsky).toBeTypeOf('function');
+        // The event surface is types-only; consumers own their decode path.
+        expect(SDK.decodeEvent).toBeUndefined();
+        expect(SDK.normalizeRpc).toBeUndefined();
+        expect(SDK.normalizeMercury).toBeUndefined();
+        expect(SDK.normalizeGoldsky).toBeUndefined();
     });
 
-    it('does not carry the removed trading event kinds', () => {
-        // position_update and execute_vault_order left the contract ABI; the
-        // fill receipts (deposit_fill, redeem_fill, close_fill) replace them.
+    it('carries only the contract ABI event kinds', () => {
+        // The fill receipts (deposit_fill, redeem_fill, close_fill) are the
+        // lifecycle receipts; position_update / execute_vault_order are not
+        // contract events.
         const eventTypes = SDK.TradingEventType as Record<string, unknown>;
         expect(eventTypes.PositionUpdate).toBeUndefined();
         expect(eventTypes.ExecuteVaultOrder).toBeUndefined();
@@ -173,40 +176,34 @@ describe('package root exports', () => {
         expect(SDK.tradingOrderLedgerKey).toBeTypeOf('function');
     });
 
-    it('exports the asset, math, vault-state, and simulation helpers', () => {
-        expect(SDK.getAssetKey).toBeTypeOf('function');
-        expect(SDK.getAssetName).toBeTypeOf('function');
-        expect(SDK.assetsEqual).toBeTypeOf('function');
-        expect(SDK.assetToScVal).toBeTypeOf('function');
-        expect(SDK.assetFromScVal).toBeTypeOf('function');
-        expect(SDK.assetFromKey).toBeTypeOf('function');
+    it('exports the math and simulation helpers', () => {
         expect(SDK.FixedMath.SCALAR_18).toBe(10n ** 18n);
         expect(SDK.FixedMath.toFixed).toBeTypeOf('function');
         expect(SDK.FixedMath.toFloat).toBeTypeOf('function');
         expect(SDK.FixedMath.parseAtomic).toBeTypeOf('function');
         expect(SDK.FixedMath.formatAtomic).toBeTypeOf('function');
+        expect(SDK.FixedMath.mulDivFloor).toBeTypeOf('function');
+        expect(SDK.FixedMath.mulDivCeil).toBeTypeOf('function');
         expect(SDK.parseAtomic).toBeTypeOf('function');
         expect(SDK.formatAtomic).toBeTypeOf('function');
-        expect(SDK.FixedMath.mulFloor).toBeTypeOf('function');
-        expect(SDK.FixedMath.mulCeil).toBeTypeOf('function');
-        expect(SDK.FixedMath.divFloor).toBeTypeOf('function');
-        expect(SDK.FixedMath.divCeil).toBeTypeOf('function');
-        expect(SDK.VaultState).toBeTypeOf('function');
+        expect(SDK.toFloat).toBeTypeOf('function');
         expect(SDK.simulateAndParse).toBeTypeOf('function');
         expect(SDK.signerToScVal).toBeTypeOf('function');
         expect(SDK.contextRuleTypeToScVal).toBeTypeOf('function');
         expect(SDK.sessionConfigToScVal).toBeTypeOf('function');
+        // Not part of the public surface:
+        expect(SDK.getAssetKey).toBeUndefined();
+        expect(SDK.assetFromKey).toBeUndefined();
+        expect(SDK.FixedMath.mulFloor).toBeUndefined();
+        expect(SDK.FixedMath.divFloor).toBeUndefined();
+        expect(SDK.VaultState).toBeUndefined();
     });
 
-    it('exports exact quote, transaction, relay, and data boundaries', () => {
+    it('exports exact quote, transaction, and execution boundaries', () => {
         expect(SDK.quotePositionAction).toBeTypeOf('function');
-        expect(SDK.quotePositionDecreaseIntent).toBeTypeOf('function');
-        expect(SDK.quoteMaximumPositionDecreaseIntent).toBeTypeOf('function');
-        expect(SDK.POSITION_DECREASE_MAX_VALIDITY_LEDGERS).toBe(60);
-        expect(SDK.quotePositionIncreaseIntent).toBeTypeOf('function');
-        expect(SDK.quoteMaximumPositionIncreaseIntent).toBeTypeOf('function');
-        expect(SDK.POSITION_INCREASE_MAX_VALIDITY_LEDGERS).toBe(60);
-        expect(SDK.quoteMarginAdjustment).toBeTypeOf('function');
+        expect(SDK.applyOrder).toBeTypeOf('function');
+        expect(SDK.orderPriceBound).toBeTypeOf('function');
+        expect(SDK.maxWithdrawableMargin).toBeTypeOf('function');
         expect(SDK.quoteVaultDeposit).toBeTypeOf('function');
         expect(SDK.quoteVaultDepositFill).toBeTypeOf('function');
         expect(SDK.quoteVaultOrderCreation).toBeTypeOf('function');
@@ -217,10 +214,6 @@ describe('package root exports', () => {
         expect(SDK.buildOrderOperation).toBeTypeOf('function');
         expect(SDK.buildVaultOrderOperation).toBeTypeOf('function');
         expect(SDK.buildVaultActionExecution).toBeTypeOf('function');
-        expect(SDK.buildPositionActionExecution).toBeTypeOf('function');
-        expect(SDK.buildPositionDecreaseIntentExecution).toBeTypeOf('function');
-        expect(SDK.buildPositionIncreaseIntentExecution).toBeTypeOf('function');
-        expect(SDK.buildMarginAdjustmentExecution).toBeTypeOf('function');
         expect(SDK.isIncreaseOrderKind).toBeTypeOf('function');
         expect(SDK.isDecreaseOrderKind).toBeTypeOf('function');
         expect(SDK.isMarketOrderKind).toBeTypeOf('function');
@@ -228,24 +221,25 @@ describe('package root exports', () => {
         expect(SDK.isTriggerOrderKind).toBeTypeOf('function');
         expect(SDK.orderKindCrossing).toBeTypeOf('function');
         expect(SDK.orderKindFiresAbove).toBeTypeOf('function');
-        expect(SDK.buildRelayCallRequest).toBeTypeOf('function');
-        expect(SDK.prepareRelayAuthDiscovery).toBeTypeOf('function');
-        expect(SDK.extractRelayCallAuthorization).toBeTypeOf('function');
-        expect(SDK.buildRelayCallRequestFromTransaction).toBeTypeOf('function');
-        expect(SDK.buildPriceFreeRelayOperation).toBeTypeOf('function');
-        expect(SDK.buildSmartAccountDeploymentRequest).toBeTypeOf('function');
-        expect(SDK.verifySmartAccountInstance).toBeTypeOf('function');
-        expect(SDK.SMART_ACCOUNT_DEPLOYMENT_MAX_TIMEOUT_SECONDS).toBe(30);
         expect(SDK.buildSingleMarketSessionRule).toBeTypeOf('function');
-        expect(SDK.prepareStrictTransaction).toBeTypeOf('function');
-        expect(SDK.ZenexDataClient).toBeTypeOf('function');
-        expect(SDK.streamZenexEvents).toBeTypeOf('function');
-        expect(SDK.executeZenexResync).toBeTypeOf('function');
-        expect(SDK.createZenexTrustBundle).toBeTypeOf('function');
-        expect(SDK.decodeApiSchema).toBeTypeOf('function');
-        expect(SDK.deriveAccountFillNetPnl).toBeTypeOf('function');
-        expect(SDK.decodeLatestPriceUpdate).toBeTypeOf('function');
-        expect(SDK.API_VERSION).toBe('v1');
+        expect(SDK.MAX_SIGNED_PRICE_UPDATE_BYTES).toBeUndefined();
+    });
+
+    it('does not export the removed intent model', () => {
+        const sdk = SDK as Record<string, unknown>;
+        expect(sdk.quotePositionDecreaseIntent).toBeUndefined();
+        expect(sdk.quotePositionIncreaseIntent).toBeUndefined();
+        expect(sdk.quoteMaximumPositionDecreaseIntent).toBeUndefined();
+        expect(sdk.quoteMaximumPositionIncreaseIntent).toBeUndefined();
+        expect(sdk.quoteMarginAdjustment).toBeUndefined();
+        expect(sdk.buildPositionActionExecution).toBeUndefined();
+        expect(sdk.buildPositionDecreaseIntentExecution).toBeUndefined();
+        expect(sdk.buildPositionIncreaseIntentExecution).toBeUndefined();
+        expect(sdk.buildMarginAdjustmentExecution).toBeUndefined();
+        expect(sdk.validateTradingConfig).toBeUndefined();
+        expect(sdk.validateFillOrKillCalls).toBeUndefined();
+        expect(sdk.POSITION_DECREASE_MAX_VALIDITY_LEDGERS).toBeUndefined();
+        expect(sdk.POSITION_INCREASE_MAX_VALIDITY_LEDGERS).toBeUndefined();
     });
 
     it('does not carry the removed v1 FixedMath constants', () => {
@@ -262,5 +256,19 @@ describe('package root exports', () => {
         expect(
             (SDK as Record<string, unknown>).getOracleDecimals,
         ).toBeUndefined();
+    });
+
+    it('does not carry the extracted backend data and relay surface', () => {
+        // The data-service client and relay request building moved to the
+        // frontend-internal zenex-data lib; the SDK is chain-only.
+        const sdk = SDK as Record<string, unknown>;
+        expect(sdk.ZenexDataClient).toBeUndefined();
+        expect(sdk.streamZenexEvents).toBeUndefined();
+        expect(sdk.executeZenexResync).toBeUndefined();
+        expect(sdk.createZenexTrustBundle).toBeUndefined();
+        expect(sdk.decodeApiSchema).toBeUndefined();
+        expect(sdk.buildRelayCallRequest).toBeUndefined();
+        expect(sdk.RELAY_REQUEST_STATES).toBeUndefined();
+        expect(sdk.RelaySubmissionAmbiguousError).toBeUndefined();
     });
 });

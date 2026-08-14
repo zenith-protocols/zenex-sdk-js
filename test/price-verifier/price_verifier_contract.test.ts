@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, nativeToScVal, StrKey } from '@stellar/stellar-sdk';
-import { PriceVerifierContract, PriceVerifierConstructorArgs } from '../../src/price-verifier/price_verifier_contract.js';
+import { PriceVerifierContract, PriceVerifierConstructorArgs } from '../../src/contracts/price-verifier/price_verifier_contract.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));

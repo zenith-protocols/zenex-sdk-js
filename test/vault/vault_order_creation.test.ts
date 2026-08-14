@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { I128_MAX } from '../../src/math/fixed.js';
-import { Status } from '../../src/trading/trading_types.js';
-import type { TradingConfig } from '../../src/trading/trading_types.js';
+import { Status } from '../../src/contracts/trading/trading_types.js';
+import type { TradingConfig } from '../../src/contracts/trading/trading_types.js';
 import {
     quoteVaultOrderCreation,
     type VaultOrderCreationQuoteInput,
-} from '../../src/vault/quote.js';
+} from '../../src/trading/quote/vault.js';
 
 const U64_MAX = 2n ** 64n - 1n;
 
@@ -16,7 +16,7 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
         maxPositionNotional: 1_000_000n,
         maxOpenInterest: 2_000_000n,
         minOrderNotional: 1n,
-        minOrderCollateral: 1n,
+        minOrderMargin: 1n,
         execFee: 25n,
         feeDom: 0n,
         feeNonDom: 0n,
@@ -71,7 +71,6 @@ describe('quoteVaultOrderCreation', () => {
         expect(result).toEqual({
             kind: 'exact',
             ledger: 12_345,
-            priceTime: 50_000n,
             value: {
                 kind: 'resting',
                 policy: 'restOnly',
@@ -100,7 +99,6 @@ describe('quoteVaultOrderCreation', () => {
         expect(result).toEqual({
             kind: 'exact',
             ledger: 12_345,
-            priceTime: 50_000n,
             value: {
                 kind: 'resting',
                 policy: 'restOnly',
@@ -135,7 +133,6 @@ describe('quoteVaultOrderCreation', () => {
         expect(result).toEqual({
             kind: 'exact',
             ledger: 12_345,
-            priceTime: 50_000n,
             value: {
                 kind: 'retiredImmediateRedeem',
                 policy: 'direct',

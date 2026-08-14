@@ -4,22 +4,98 @@ import {
     impliedEntryPrice,
     liquidationState,
     positionLeverage,
-} from '../../src/position/lifecycle.js';
-import type { VerifiedPrice } from '../../src/market/types.js';
+} from '../../src/trading/position/lifecycle.js';
+import type { PriceData } from '../../src/trading/market/types.js';
 import type {
     MarketData,
     Position,
     SidePair,
     TradingConfig,
-} from '../../src/trading/trading_types.js';
-import { loadGoldenCases } from '../helpers/golden.js';
+} from '../../src/contracts/trading/trading_types.js';
 
-function record(value: unknown): Record<string, unknown> {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-        throw new TypeError('Expected a golden vector record');
-    }
-    return value as Record<string, unknown>;
+interface ContractCase {
+    operation: string;
+    inputs: Record<string, unknown>;
+    expected: Record<string, unknown>;
 }
+
+// Contract-derived scenarios preserved from the retired trading-v2 golden
+// vectors (contracts commit 4c631eb17af53ec5e6875f42bf71a43af295e521).
+const positionCases: Record<string, ContractCase> = {
+    'position.increase.empty_book': {
+        operation: 'increase',
+        inputs: {
+            is_long: true,
+            notional_delta: 600_000_000n,
+            collateral_delta: 250_000_000n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 1n,
+            vault_balance: 100_000_000_000n,
+            fee_dom: 5_000_000_000_000_000n,
+            fee_non_dom: 3_000_000_000_000_000n,
+            impact_scalar: 1_000_000_000_000n,
+            init_margin: 100_000_000_000_000_000n,
+            maintenance_margin: 50_000_000_000_000_000n,
+            now: 1n,
+        },
+        expected: {
+            position_notional: 600_000_000n,
+            position_tokens: 600_000_000_000_000_000n,
+            position_collateral: 246_640_000n,
+        },
+    },
+    'position.full_close.flat': {
+        operation: 'full_close',
+        inputs: {
+            is_long: true,
+            position_notional: 1_000_000_000n,
+            position_tokens: 1_000_000_000_000_000_000n,
+            position_collateral: 100_000_000n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 1n,
+            vault_balance: 100_000_000_000n,
+            fee_dom: 5_000_000_000_000_000n,
+            fee_non_dom: 3_000_000_000_000_000n,
+            impact_scalar: 1_000_000_000_000n,
+            init_margin: 100_000_000_000_000_000n,
+            maintenance_margin: 50_000_000_000_000_000n,
+            now: 1n,
+        },
+        expected: {
+            returned: 96_000_000n,
+        },
+    },
+    'position.full_close.underwater_voluntary_reject': {
+        operation: 'full_close_reject',
+        inputs: {
+            is_long: true,
+            position_notional: 100n,
+            position_tokens: 100_000_000_000n,
+            position_collateral: 10n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 800_000_000n,
+            ask: 800_000_000n,
+            publish_time: 1n,
+            vault_balance: 100_000_000_000n,
+            fee_dom: 0n,
+            fee_non_dom: 0n,
+            impact_scalar: 1_000_000_000_000_000_000n,
+            init_margin: 100_000_000_000_000_000n,
+            maintenance_margin: 50_000_000_000_000_000n,
+            now: 1n,
+        },
+        expected: {
+            error_code: 713n,
+        },
+    },
+};
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -27,7 +103,7 @@ function pair(long = 0n, short = 0n): SidePair {
 
 function emptyPosition(overrides: Partial<Position> = {}): Position {
     return {
-        collateral: 0n,
+        margin: 0n,
         notional: 0n,
         tokens: 0n,
         fundingIdx: 0n,
@@ -43,7 +119,7 @@ function emptyPosition(overrides: Partial<Position> = {}): Position {
 function emptyMarket(overrides: Partial<MarketData> = {}): MarketData {
     return {
         notional: pair(),
-        collateral: pair(),
+        margin: pair(),
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
@@ -64,7 +140,7 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
         maxPositionNotional: 1_000_000_000_000n,
         maxOpenInterest: 10_000_000_000_000n,
         minOrderNotional: 1n,
-        minOrderCollateral: 1n,
+        minOrderMargin: 1n,
         execFee: 0n,
         feeDom: 5_000_000_000_000_000n,
         feeNonDom: 3_000_000_000_000_000n,
@@ -97,32 +173,27 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
     };
 }
 
-function price(inputs: Record<string, unknown>): VerifiedPrice {
+function price(inputs: Record<string, unknown>): PriceData {
     return {
         feedId: Number(inputs.feed_id),
         exponent: Number(inputs.exponent),
         bid: inputs.bid as bigint,
         ask: inputs.ask as bigint,
-        publishTime: inputs.publish_time as bigint,
-        source: 'pyth',
     };
 }
 
-const positionCases = loadGoldenCases('trading', 'position');
-
-function vector(id: string) {
-    const found = positionCases.find((entry) => entry.id === id);
+function vector(id: string): ContractCase {
+    const found = positionCases[id];
     if (!found) throw new Error(`Missing position vector ${id}`);
     return found;
 }
 
 function liquidationContext(id: string) {
-    const golden = vector(id);
-    const inputs = record(golden.inputs);
+    const inputs = vector(id).inputs;
     const open = emptyPosition({
         notional: inputs.position_notional as bigint,
         tokens: inputs.position_tokens as bigint,
-        collateral: inputs.position_collateral as bigint,
+        margin: inputs.position_collateral as bigint,
     });
     return {
         ledger: 77,
@@ -132,7 +203,7 @@ function liquidationContext(id: string) {
         market: emptyMarket({
             notional: pair(open.notional, 0n),
             tokens: pair(open.tokens, 0n),
-            collateral: pair(open.collateral, 0n),
+            margin: pair(open.margin, 0n),
             fundingUpdate: inputs.now as bigint,
             borrowingUpdate: inputs.now as bigint,
         }),
@@ -152,8 +223,8 @@ function liquidationContext(id: string) {
 describe('position lifecycle state', () => {
     it('derives the exact implied entry and leaves an empty position undefined', () => {
         const golden = vector('position.increase.empty_book');
-        const inputs = record(golden.inputs);
-        const expected = record(golden.expected);
+        const inputs = golden.inputs;
+        const expected = golden.expected;
 
         expect(impliedEntryPrice(emptyPosition())).toBeUndefined();
         expect(
@@ -168,18 +239,18 @@ describe('position lifecycle state', () => {
 
     it('quotes marked-equity leverage without converting financial values to number', () => {
         const golden = vector('position.increase.empty_book');
-        const inputs = record(golden.inputs);
-        const expected = record(golden.expected);
+        const inputs = golden.inputs;
+        const expected = golden.expected;
         const open = emptyPosition({
             notional: expected.position_notional as bigint,
             tokens: expected.position_tokens as bigint,
-            collateral: expected.position_collateral as bigint,
+            margin: expected.position_collateral as bigint,
         });
         const result = positionLeverage(open, price(inputs), true);
 
         expect(result).toEqual({
             kind: 'estimate',
-            value: mulDivFloor(open.notional, SCALAR_18, open.collateral),
+            value: mulDivFloor(open.notional, SCALAR_18, open.margin),
             assumptions: ['excludes unsettled funding and borrowing accruals'],
         });
         expect(
@@ -192,7 +263,7 @@ describe('position lifecycle state', () => {
 
     it('matches the healthy full-close settled equity and maintenance line', () => {
         const golden = vector('position.full_close.flat');
-        const expected = record(golden.expected);
+        const expected = golden.expected;
         const result = liquidationState(
             liquidationContext('position.full_close.flat').position,
             liquidationContext('position.full_close.flat'),
@@ -201,7 +272,6 @@ describe('position lifecycle state', () => {
         expect(result).toEqual({
             kind: 'exact',
             ledger: 77,
-            priceTime: 1n,
             value: {
                 equity: expected.returned,
                 maintenanceRequired: 50_000_000n,
@@ -223,7 +293,6 @@ describe('position lifecycle state', () => {
         expect(result).toEqual({
             kind: 'exact',
             ledger: 77,
-            priceTime: 1n,
             value: {
                 equity: 0n,
                 maintenanceRequired: 5n,
@@ -232,17 +301,10 @@ describe('position lifecycle state', () => {
         });
     });
 
-    it('returns typed unavailable results for stale liquidation marks and chronology', () => {
-        const stale = liquidationContext('position.full_close.flat');
-        stale.position.pricedAt = 2n;
+    it('returns a typed unavailable result for inconsistent chronology', () => {
         const chronology = liquidationContext('position.full_close.flat');
         chronology.market.fundingUpdate = 2n;
 
-        expect(liquidationState(stale.position, stale)).toEqual({
-            kind: 'unavailable',
-            code: 'STALE_PRICE',
-            reason: 'verified price predates the position price floor',
-        });
         expect(liquidationState(chronology.position, chronology)).toMatchObject(
             {
                 kind: 'unavailable',

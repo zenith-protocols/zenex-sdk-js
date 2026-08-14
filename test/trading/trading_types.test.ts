@@ -5,7 +5,7 @@ import {
     tradingConfigToScVal, parseSidePair,
     parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState,
     parseTradingConfig, TradingConfig,
-} from '../../src/trading/trading_types.js';
+} from '../../src/contracts/trading/trading_types.js';
 
 // Each field gets a unique value, numbered in the declaration order of
 // zenex-contracts/trading/src/trading/config.rs (101 = keeper_rate, the
@@ -18,7 +18,7 @@ function makeDistinctConfig(): TradingConfig {
         maxPositionNotional: 103n,
         maxOpenInterest: 104n,
         minOrderNotional: 105n,
-        minOrderCollateral: 106n,
+        minOrderMargin: 106n,
         execFee: 107n,
         feeDom: 108n,
         feeNonDom: 109n,
@@ -78,7 +78,7 @@ const EXPECTED_CONFIG_KEYS = [
     'max_util_withdraw',
     'max_vault_balance',
     'min_deposit',
-    'min_order_collateral',
+    'min_order_margin',
     'min_order_notional',
     'min_position_notional',
     'notional_lock',
@@ -174,7 +174,7 @@ describe('trading_types', () => {
 
     it('parseOrder decodes the u32 kind and carries execFee', () => {
         const order = parseOrder({
-            is_long: true, kind: 4, notional: 1000n, collateral: 100n,
+            is_long: true, kind: 4, notional: 1000n, margin: 100n,
             trigger_price: 250n, price_bound: 260n, exec_fee: 3n,
             created_at: 500n, expiration: 1234,
         });
@@ -182,7 +182,7 @@ describe('trading_types', () => {
             isLong: true,
             kind: OrderKind.LimitDecrease,
             notional: 1000n,
-            collateral: 100n,
+            margin: 100n,
             triggerPrice: 250n,
             priceBound: 260n,
             execFee: 3n,
@@ -208,13 +208,13 @@ describe('trading_types', () => {
 
     it('parsePosition decodes pricedAt and decreaseOrders', () => {
         const position = parsePosition({
-            collateral: 100n, notional: 1000n, tokens: 5n,
+            margin: 100n, notional: 1000n, tokens: 5n,
             funding_idx: 11n, borrowing_idx: 12n,
             locked_notional: 13n, unlocks_at: 14n, priced_at: 15n,
             decrease_orders: [3, 9],
         });
         expect(position).toEqual({
-            collateral: 100n,
+            margin: 100n,
             notional: 1000n,
             tokens: 5n,
             fundingIdx: 11n,
@@ -229,7 +229,7 @@ describe('trading_types', () => {
 
     it('parseMarketData decodes SidePairs and lastPriceTime', () => {
         const marketData = parseMarketData({
-            notional: { long: 1n, short: 2n }, collateral: { long: 3n, short: 4n },
+            notional: { long: 1n, short: 2n }, margin: { long: 3n, short: 4n },
             tokens: { long: 5n, short: 6n }, funding_idx: { long: 7n, short: 8n },
             borrowing_idx: { long: 9n, short: 10n }, funding_rate: 11n,
             funding_update: 12n, borrowing_update: 13n, funding_pool: 14n,
@@ -237,7 +237,7 @@ describe('trading_types', () => {
         });
         expect(marketData).toEqual({
             notional: { long: 1n, short: 2n },
-            collateral: { long: 3n, short: 4n },
+            margin: { long: 3n, short: 4n },
             tokens: { long: 5n, short: 6n },
             fundingIdx: { long: 7n, short: 8n },
             borrowingIdx: { long: 9n, short: 10n },

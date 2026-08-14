@@ -14,12 +14,7 @@ async function fixture(
 ): Promise<string> {
     const root = await mkdtemp(join(tmpdir(), 'zenex-sdk-architecture-'));
     roots.push(root);
-    const complete = {
-        'src/data/generated.ts':
-            "export const API_PUBLIC_PATHS = ['/v1/config', '/v1/stream'] as const;",
-        ...files,
-    };
-    for (const [path, source] of Object.entries(complete)) {
+    for (const [path, source] of Object.entries(files)) {
         const destination = join(root, path);
         await mkdir(join(destination, '..'), { recursive: true });
         await writeFile(destination, source);
@@ -35,14 +30,19 @@ afterEach(async () => {
 
 describe('SDK architecture checker mutation fixtures', () => {
     it('recognizes exact modules through portable path separators', () => {
-        expect(isExactModulePath('/repo/src/order/bad.ts')).toBe(true);
-        expect(isExactModulePath('C:\\repo\\src\\order\\bad.ts')).toBe(true);
-        expect(isExactModulePath('C:\\repo\\src\\vault\\quote.ts')).toBe(true);
+        expect(isExactModulePath('/repo/src/trading/order/bad.ts')).toBe(true);
+        expect(
+            isExactModulePath('C:\\repo\\src\\trading\\order\\bad.ts'),
+        ).toBe(true);
+        expect(isExactModulePath('/repo/src/math/fixed.ts')).toBe(true);
+        expect(isExactModulePath('/repo/src/contracts/trading/types.ts')).toBe(
+            false,
+        );
     });
 
     it('rejects lossy number conversion in exact modules', async () => {
         const root = await fixture({
-            'src/order/bad.ts':
+            'src/trading/order/bad.ts':
                 'export const bad = (atomic: bigint) => Number(atomic);',
         });
         expect(await checkArchitecture(root)).toEqual(
@@ -54,7 +54,7 @@ describe('SDK architecture checker mutation fixtures', () => {
 
     it('rejects try-fill contract paths', async () => {
         const root = await fixture({
-            'src/relay/bad.ts':
+            'src/trading/order/bad.ts':
                 "export const func = 'create_and_try_fill_with_fee';",
         });
         expect(await checkArchitecture(root)).toEqual(
@@ -66,43 +66,41 @@ describe('SDK architecture checker mutation fixtures', () => {
         );
     });
 
-    it('rejects API routes absent from the generated contract', async () => {
+    it('rejects forbidden try boundaries in exact modules', async () => {
         const root = await fixture({
-            'src/data/client.ts':
-                "export const route = '/v1/private/invented-leaderboard';",
+            'src/trading/position/bad.ts':
+                'export const submitTransactionXdr = (value: string) => value;',
         });
         expect(await checkArchitecture(root)).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({ rule: 'unknown-api-route' }),
-            ]),
-        );
-    });
-
-    it('rejects generic submission methods', async () => {
-        const root = await fixture({
-            'src/data/client.ts':
-                'export class Client { submitTransactionXdr(value: string) { return value; } }',
-        });
-        expect(await checkArchitecture(root)).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ rule: 'generic-submit' }),
                 expect.objectContaining({ rule: 'forbidden-public-boundary' }),
             ]),
         );
     });
 
-    it('rejects unscoped streams without durable resync handling', async () => {
+    it('exempts only the snapshot read simulation from the try rule', async () => {
         const root = await fixture({
-            'src/data/events.ts':
-                "export const stream = () => new URL('v1/stream', 'https://example.test');",
+            'src/trading/snapshot.ts':
+                'export const multicallTry = (value: string) => value;',
+            'src/trading/market/bad.ts':
+                'export const multicallTry = (value: string) => value;',
         });
         const findings = await checkArchitecture(root);
-        expect(findings).toEqual(
+        expect(findings).toHaveLength(1);
+        expect(findings[0]).toMatchObject({
+            file: 'src/trading/market/bad.ts',
+            rule: 'forbidden-public-boundary',
+        });
+    });
+
+    it('rejects frontend dependencies in exact modules', async () => {
+        const root = await fixture({
+            'src/trading/market/bad.ts':
+                "export const dependency = 'zenex-trade';",
+        });
+        expect(await checkArchitecture(root)).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({ rule: 'scoped-sse' }),
-                expect.objectContaining({ rule: 'durable-cursor' }),
-                expect.objectContaining({ rule: 'authoritative-resync' }),
-                expect.objectContaining({ rule: 'financial-event-boundary' }),
+                expect.objectContaining({ rule: 'frontend-dependency' }),
             ]),
         );
     });

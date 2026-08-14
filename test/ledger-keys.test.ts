@@ -134,7 +134,7 @@ describe('ledger-keys: generic helpers', () => {
 
 describe('ledger-keys: vault instance keys (decodeEntryKey vs OZ storage enums)', () => {
     // The vault's instance storage carries four OZ unit-variant keys the
-    // VaultState loader matches by name (vault_state.ts), plus the vault's
+    // instance walker matches by name (vault_instance.ts), plus the vault's
     // own StrategyStorageKey::Strategy.
     it('decodes the OZ VaultStorageKey unit variants', () => {
         expect(decodeEntryKey(unitVariantScVal('AssetAddress'))).toBe('AssetAddress');

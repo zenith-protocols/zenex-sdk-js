@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey } from '@stellar/stellar-sdk';
-import { TreasuryContract, TreasuryConstructorArgs } from '../../src/treasury/treasury_contract.js';
+import { TreasuryContract, TreasuryConstructorArgs } from '../../src/contracts/treasury/treasury_contract.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));

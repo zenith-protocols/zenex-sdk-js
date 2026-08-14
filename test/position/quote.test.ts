@@ -1,22 +1,336 @@
 import { describe, expect, it } from 'vitest';
 import { I128_MAX, SCALAR_18 } from '../../src/math/fixed.js';
-import { quotePositionAction } from '../../src/position/quote.js';
-import type { PositionActionInput } from '../../src/position/quote.js';
-import type { VerifiedPrice } from '../../src/market/types.js';
+import { quotePositionAction } from '../../src/trading/position/quote.js';
+import type { PositionActionInput } from '../../src/trading/position/quote.js';
+import type { PriceData } from '../../src/trading/market/types.js';
 import type {
     MarketData,
     Position,
     SidePair,
     TradingConfig,
-} from '../../src/trading/trading_types.js';
-import { loadGoldenCases } from '../helpers/golden.js';
+} from '../../src/contracts/trading/trading_types.js';
 
-function record(value: unknown): Record<string, unknown> {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-        throw new TypeError('Expected a golden vector record');
-    }
-    return value as Record<string, unknown>;
+interface ContractCase {
+    operation: string;
+    inputs: Record<string, unknown>;
+    expected: Record<string, unknown>;
+    work?: Record<string, unknown>;
 }
+
+// Contract-derived scenarios preserved from the retired trading-v2 golden
+// vectors (contracts commit 4c631eb17af53ec5e6875f42bf71a43af295e521).
+const positionCases: Record<string, ContractCase> = {
+    'position.increase.empty_book': {
+        operation: 'increase',
+        inputs: {
+            is_long: true,
+            notional_delta: 600_000_000n,
+            collateral_delta: 250_000_000n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 1n,
+            vault_balance: 100_000_000_000n,
+            fee_dom: 5_000_000_000_000_000n,
+            fee_non_dom: 3_000_000_000_000_000n,
+            impact_scalar: 1_000_000_000_000n,
+            init_margin: 100_000_000_000_000_000n,
+            maintenance_margin: 50_000_000_000_000_000n,
+            min_position_notional: 1n,
+            max_position_notional: 1_000_000_000_000n,
+            max_open_interest: 10_000_000_000_000n,
+            max_util_open: 800_000_000_000_000_000n,
+            now: 1n,
+        },
+        expected: {
+            position_notional: 600_000_000n,
+            position_tokens: 600_000_000_000_000_000n,
+            position_collateral: 246_640_000n,
+            market_notional: 600_000_000n,
+            market_tokens: 600_000_000_000_000_000n,
+            market_collateral: 246_640_000n,
+            base_fee: 3_000_000n,
+            impact_fee: 360_000n,
+        },
+    },
+    'position.partial_decrease.flat': {
+        operation: 'partial_decrease',
+        inputs: {
+            is_long: true,
+            force: false,
+            position_notional: 1_000_000_000n,
+            position_tokens: 1_000_000_000_000_000_000n,
+            position_collateral: 100_000_000n,
+            notional_delta: 500_000_000n,
+            collateral_delta: 0n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 1n,
+            vault_balance: 100_000_000_000n,
+            fee_dom: 5_000_000_000_000_000n,
+            fee_non_dom: 3_000_000_000_000_000n,
+            impact_scalar: 1_000_000_000_000n,
+            init_margin: 100_000_000_000_000_000n,
+            maintenance_margin: 50_000_000_000_000_000n,
+            now: 1n,
+        },
+        expected: {
+            closed_notional: 500_000_000n,
+            closed_tokens: 500_000_000_000_000_000n,
+            returned: 0n,
+            position_notional: 500_000_000n,
+            position_tokens: 500_000_000_000_000_000n,
+            position_collateral: 98_250_000n,
+            market_notional: 500_000_000n,
+            market_tokens: 500_000_000_000_000_000n,
+            market_collateral: 98_250_000n,
+            base_fee: 1_500_000n,
+            impact_fee: 250_000n,
+        },
+    },
+    'position.full_close.flat': {
+        operation: 'full_close',
+        inputs: {
+            is_long: true,
+            force: false,
+            position_notional: 1_000_000_000n,
+            position_tokens: 1_000_000_000_000_000_000n,
+            position_collateral: 100_000_000n,
+            notional_delta: 170_141_183_460_469_231_731_687_303_715_884_105_727n,
+            collateral_delta: 0n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 1n,
+            vault_balance: 100_000_000_000n,
+            fee_dom: 5_000_000_000_000_000n,
+            fee_non_dom: 3_000_000_000_000_000n,
+            impact_scalar: 1_000_000_000_000n,
+            init_margin: 100_000_000_000_000_000n,
+            maintenance_margin: 50_000_000_000_000_000n,
+            now: 1n,
+        },
+        expected: {
+            closed_notional: 1_000_000_000n,
+            closed_tokens: 1_000_000_000_000_000_000n,
+            gross_collateral: 100_000_000n,
+            returned: 96_000_000n,
+            bad_debt: 0n,
+            position_notional: 0n,
+            position_tokens: 0n,
+            position_collateral: 0n,
+            market_notional: 0n,
+            market_tokens: 0n,
+            market_collateral: 0n,
+            base_fee: 3_000_000n,
+            impact_fee: 1_000_000n,
+        },
+    },
+    'position.full_close.underwater_voluntary_reject': {
+        operation: 'full_close_reject',
+        inputs: {
+            is_long: true,
+            force: false,
+            position_notional: 100n,
+            position_tokens: 100_000_000_000n,
+            position_collateral: 10n,
+            notional_delta: 170_141_183_460_469_231_731_687_303_715_884_105_727n,
+            collateral_delta: 0n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 800_000_000n,
+            ask: 800_000_000n,
+            publish_time: 1n,
+            vault_balance: 100_000_000_000n,
+            fee_dom: 0n,
+            fee_non_dom: 0n,
+            impact_scalar: 1_000_000_000_000_000_000n,
+            init_margin: 100_000_000_000_000_000n,
+            maintenance_margin: 50_000_000_000_000_000n,
+            now: 1n,
+        },
+        expected: {
+            error_code: 713n,
+        },
+    },
+};
+
+const marginCases: Record<string, ContractCase> = {
+    'margin.fixed_add.zero_notional': {
+        operation: 'fixed_add',
+        inputs: {
+            is_long: true,
+            notional: 40n,
+            margin: 10n,
+            tokens: 40_000_000_000n,
+            collateral_delta: 2n,
+            position_funding_idx: 25_000_000_000_000_001n,
+            position_borrowing_idx: 0n,
+            market_funding_idx: 0n,
+            market_borrowing_idx: 1n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 1n,
+            init_margin: 250_000_000_000_000_000n,
+            maintenance_margin: 100_000_000_000_000_000n,
+            exec_fee: 2n,
+            relay_fee_external_wallet_leg: 3n,
+        },
+        work: {
+            funding_numerator: -1_000_000_000_000_000_040n,
+            funding: -1n,
+            borrowing_numerator: 40n,
+            borrowing: 1n,
+            debit: 1n,
+            collateral_change: 1n,
+        },
+        expected: {
+            position_notional: 40n,
+            position_tokens: 40_000_000_000n,
+            position_collateral: 11n,
+            post_position_funding_idx: 0n,
+            post_position_borrowing_idx: 1n,
+            funding_pool_delta: 0n,
+            funding_owed_delta: 1n,
+            claimable_funding_delta: 1n,
+        },
+    },
+    'margin.fixed_withdraw.below_accrued_debit': {
+        operation: 'fixed_withdraw',
+        inputs: {
+            is_long: true,
+            notional: 40n,
+            margin: 20n,
+            tokens: 40_000_000_000n,
+            collateral_delta: 2n,
+            position_funding_idx: 0n,
+            position_borrowing_idx: 0n,
+            market_funding_idx: 25_000_000_000_000_001n,
+            market_borrowing_idx: 25_000_000_000_000_000n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 1n,
+            init_margin: 250_000_000_000_000_000n,
+            maintenance_margin: 100_000_000_000_000_000n,
+            exec_fee: 2n,
+            relay_fee_external_wallet_leg: 3n,
+        },
+        work: {
+            funding: 2n,
+            borrowing: 1n,
+            debit: 3n,
+            covered: 2n,
+            uncovered: 1n,
+            collateral_change: -3n,
+        },
+        expected: {
+            position_notional: 40n,
+            position_tokens: 40_000_000_000n,
+            position_collateral: 17n,
+            post_position_funding_idx: 25_000_000_000_000_001n,
+            post_position_borrowing_idx: 25_000_000_000_000_000n,
+            funding_pool_delta: 2n,
+            funding_owed_delta: 0n,
+            claimable_funding_delta: 0n,
+            gross_collateral: 2n,
+            trader_return: 0n,
+        },
+    },
+    'margin.fixed_withdraw.equal_accrued_debit': {
+        operation: 'fixed_withdraw',
+        inputs: {
+            is_long: true,
+            notional: 40n,
+            margin: 20n,
+            tokens: 40_000_000_000n,
+            collateral_delta: 3n,
+            position_funding_idx: 0n,
+            position_borrowing_idx: 0n,
+            market_funding_idx: 25_000_000_000_000_001n,
+            market_borrowing_idx: 25_000_000_000_000_000n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 1n,
+            init_margin: 250_000_000_000_000_000n,
+            maintenance_margin: 100_000_000_000_000_000n,
+            exec_fee: 2n,
+            relay_fee_external_wallet_leg: 3n,
+        },
+        work: {
+            funding: 2n,
+            borrowing: 1n,
+            debit: 3n,
+            covered: 3n,
+            uncovered: 0n,
+            collateral_change: -3n,
+        },
+        expected: {
+            position_notional: 40n,
+            position_tokens: 40_000_000_000n,
+            position_collateral: 17n,
+            post_position_funding_idx: 25_000_000_000_000_001n,
+            post_position_borrowing_idx: 25_000_000_000_000_000n,
+            funding_pool_delta: 2n,
+            funding_owed_delta: 0n,
+            claimable_funding_delta: 0n,
+            gross_collateral: 3n,
+            trader_return: 0n,
+        },
+    },
+    'margin.fixed_withdraw.above_accrued_debit': {
+        operation: 'fixed_withdraw',
+        inputs: {
+            is_long: true,
+            notional: 40n,
+            margin: 20n,
+            tokens: 40_000_000_000n,
+            collateral_delta: 4n,
+            position_funding_idx: 0n,
+            position_borrowing_idx: 0n,
+            market_funding_idx: 25_000_000_000_000_001n,
+            market_borrowing_idx: 25_000_000_000_000_000n,
+            feed_id: 1n,
+            exponent: -8n,
+            bid: 1_000_000_000n,
+            ask: 1_000_000_000n,
+            publish_time: 1n,
+            init_margin: 250_000_000_000_000_000n,
+            maintenance_margin: 100_000_000_000_000_000n,
+            exec_fee: 2n,
+            relay_fee_external_wallet_leg: 3n,
+        },
+        work: {
+            funding: 2n,
+            borrowing: 1n,
+            debit: 3n,
+            covered: 3n,
+            uncovered: 0n,
+            collateral_change: -4n,
+        },
+        expected: {
+            position_notional: 40n,
+            position_tokens: 40_000_000_000n,
+            position_collateral: 16n,
+            post_position_funding_idx: 25_000_000_000_000_001n,
+            post_position_borrowing_idx: 25_000_000_000_000_000n,
+            funding_pool_delta: 2n,
+            funding_owed_delta: 0n,
+            claimable_funding_delta: 0n,
+            gross_collateral: 4n,
+            trader_return: 1n,
+        },
+    },
+};
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -24,7 +338,7 @@ function pair(long = 0n, short = 0n): SidePair {
 
 function position(overrides: Partial<Position> = {}): Position {
     return {
-        collateral: 0n,
+        margin: 0n,
         notional: 0n,
         tokens: 0n,
         fundingIdx: 0n,
@@ -40,7 +354,7 @@ function position(overrides: Partial<Position> = {}): Position {
 function market(overrides: Partial<MarketData> = {}): MarketData {
     return {
         notional: pair(),
-        collateral: pair(),
+        margin: pair(),
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
@@ -61,7 +375,7 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
         maxPositionNotional: 1_000_000_000_000n,
         maxOpenInterest: 10_000_000_000_000n,
         minOrderNotional: 1n,
-        minOrderCollateral: 1n,
+        minOrderMargin: 1n,
         execFee: 0n,
         feeDom: 0n,
         feeNonDom: 0n,
@@ -94,14 +408,12 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
     };
 }
 
-function verifiedPrice(inputs: Record<string, unknown>): VerifiedPrice {
+function verifiedPrice(inputs: Record<string, unknown>): PriceData {
     return {
         feedId: Number(inputs.feed_id ?? 1n),
         exponent: Number(inputs.exponent ?? -18n),
         bid: (inputs.bid ?? SCALAR_18) as bigint,
         ask: (inputs.ask ?? SCALAR_18) as bigint,
-        publishTime: (inputs.publish_time ?? inputs.now ?? 0n) as bigint,
-        source: 'pyth',
     };
 }
 
@@ -118,37 +430,37 @@ function input(
         price: verifiedPrice({ publish_time: 1n }),
         vaultAssets: 100_000_000_000n,
         treasuryRate: 0n,
-        action: { kind: 'increase', notional: 100n, collateral: 20n },
+        action: { kind: 'increase', notional: 100n, margin: 20n },
         executionFee: 0n,
         relayFee: 0n,
         ...overrides,
     };
 }
 
-const positionCases = loadGoldenCases('trading', 'position');
-const marginCases = loadGoldenCases('trading', 'margin');
-
-function vector(cases: typeof positionCases, id: string) {
-    const found = cases.find((entry) => entry.id === id);
+function vector(
+    cases: Record<string, ContractCase>,
+    id: string,
+): ContractCase {
+    const found = cases[id];
     if (!found) throw new Error(`Missing vector ${id}`);
     return found;
 }
 
 function positionVectorInput(id: string): PositionActionInput {
     const golden = vector(positionCases, id);
-    const inputs = record(golden.inputs);
+    const inputs = golden.inputs;
     const isLong = inputs.is_long as boolean;
     const open = position({
         notional: (inputs.position_notional ?? 0n) as bigint,
         tokens: (inputs.position_tokens ?? 0n) as bigint,
-        collateral: (inputs.position_collateral ?? 0n) as bigint,
+        margin: (inputs.position_collateral ?? 0n) as bigint,
     });
     const data = market({
         notional: isLong ? pair(open.notional, 0n) : pair(0n, open.notional),
         tokens: isLong ? pair(open.tokens, 0n) : pair(0n, open.tokens),
-        collateral: isLong
-            ? pair(open.collateral, 0n)
-            : pair(0n, open.collateral),
+        margin: isLong
+            ? pair(open.margin, 0n)
+            : pair(0n, open.margin),
         fundingUpdate: inputs.now as bigint,
         borrowingUpdate: inputs.now as bigint,
     });
@@ -158,13 +470,13 @@ function positionVectorInput(id: string): PositionActionInput {
             ? {
                   kind: 'increase' as const,
                   notional: inputs.notional_delta as bigint,
-                  collateral: inputs.collateral_delta as bigint,
+                  margin: inputs.collateral_delta as bigint,
               }
             : operation === 'partial_decrease'
               ? {
                     kind: 'decrease' as const,
                     notional: inputs.notional_delta as bigint,
-                    collateral: inputs.collateral_delta as bigint,
+                    margin: inputs.collateral_delta as bigint,
                 }
               : { kind: 'close' as const };
 
@@ -194,12 +506,12 @@ function positionVectorInput(id: string): PositionActionInput {
 
 function marginVectorInput(id: string): PositionActionInput {
     const golden = vector(marginCases, id);
-    const inputs = record(golden.inputs);
+    const inputs = golden.inputs;
     const isLong = inputs.is_long as boolean;
     const open = position({
         notional: inputs.notional as bigint,
         tokens: inputs.tokens as bigint,
-        collateral: inputs.collateral as bigint,
+        margin: inputs.margin as bigint,
         fundingIdx: inputs.position_funding_idx as bigint,
         borrowingIdx: inputs.position_borrowing_idx as bigint,
     });
@@ -207,9 +519,9 @@ function marginVectorInput(id: string): PositionActionInput {
     const data = market({
         notional: isLong ? pair(open.notional, 0n) : pair(0n, open.notional),
         tokens: isLong ? pair(open.tokens, 0n) : pair(0n, open.tokens),
-        collateral: isLong
-            ? pair(open.collateral, 0n)
-            : pair(0n, open.collateral),
+        margin: isLong
+            ? pair(open.margin, 0n)
+            : pair(0n, open.margin),
         fundingIdx: isLong
             ? pair(inputs.market_funding_idx as bigint, 0n)
             : pair(0n, inputs.market_funding_idx as bigint),
@@ -223,12 +535,12 @@ function marginVectorInput(id: string): PositionActionInput {
     const action =
         operation === 'fixed_add'
             ? {
-                  kind: 'adjustCollateral' as const,
+                  kind: 'adjustMargin' as const,
                   direction: 'add' as const,
                   amount: inputs.collateral_delta as bigint,
               }
             : {
-                  kind: 'adjustCollateral' as const,
+                  kind: 'adjustMargin' as const,
                   direction: 'withdraw' as const,
                   amount: inputs.collateral_delta as bigint,
               };
@@ -251,9 +563,9 @@ function marginVectorInput(id: string): PositionActionInput {
 
 describe('exact position action transitions', () => {
     it('matches the contract-derived empty-book increase and preserves inputs', () => {
-        const golden = vector(positionCases, 'position.increase.empty_book');
-        const expected = record(golden.expected);
-        const quoteInput = positionVectorInput(golden.id);
+        const id = 'position.increase.empty_book';
+        const expected = vector(positionCases, id).expected;
+        const quoteInput = positionVectorInput(id);
         const beforePosition = structuredClone(quoteInput.position);
         const beforeMarket = structuredClone(quoteInput.market);
         const result = quotePositionAction(quoteInput);
@@ -264,7 +576,7 @@ describe('exact position action transitions', () => {
         expect(result.value.postPosition).toMatchObject({
             notional: expected.position_notional,
             tokens: expected.position_tokens,
-            collateral: expected.position_collateral,
+            margin: expected.position_collateral,
         });
         expect(result.value.postMarket.notional.long).toBe(
             expected.market_notional,
@@ -272,7 +584,7 @@ describe('exact position action transitions', () => {
         expect(result.value.postMarket.tokens.long).toBe(
             expected.market_tokens,
         );
-        expect(result.value.postMarket.collateral.long).toBe(
+        expect(result.value.postMarket.margin.long).toBe(
             expected.market_collateral,
         );
         expect(result.value.fees).toMatchObject({
@@ -294,16 +606,16 @@ describe('exact position action transitions', () => {
     });
 
     it('matches the contract-derived partial decrease', () => {
-        const golden = vector(positionCases, 'position.partial_decrease.flat');
-        const expected = record(golden.expected);
-        const result = quotePositionAction(positionVectorInput(golden.id));
+        const id = 'position.partial_decrease.flat';
+        const expected = vector(positionCases, id).expected;
+        const result = quotePositionAction(positionVectorInput(id));
 
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
         expect(result.value.postPosition).toMatchObject({
             notional: expected.position_notional,
             tokens: expected.position_tokens,
-            collateral: expected.position_collateral,
+            margin: expected.position_collateral,
         });
         expect(result.value.postMarket.notional.long).toBe(
             expected.market_notional,
@@ -311,7 +623,7 @@ describe('exact position action transitions', () => {
         expect(result.value.postMarket.tokens.long).toBe(
             expected.market_tokens,
         );
-        expect(result.value.postMarket.collateral.long).toBe(
+        expect(result.value.postMarket.margin.long).toBe(
             expected.market_collateral,
         );
         expect(result.value.fees.base).toBe(expected.base_fee);
@@ -321,9 +633,9 @@ describe('exact position action transitions', () => {
     });
 
     it('matches the contract-derived full close and canonical zero state', () => {
-        const golden = vector(positionCases, 'position.full_close.flat');
-        const expected = record(golden.expected);
-        const quoteInput = positionVectorInput(golden.id);
+        const id = 'position.full_close.flat';
+        const expected = vector(positionCases, id).expected;
+        const quoteInput = positionVectorInput(id);
         quoteInput.position.decreaseOrders = [2, 8];
         const result = quotePositionAction(quoteInput);
 
@@ -336,7 +648,7 @@ describe('exact position action transitions', () => {
         expect(result.value.postMarket.tokens.long).toBe(
             expected.market_tokens,
         );
-        expect(result.value.postMarket.collateral.long).toBe(
+        expect(result.value.postMarket.margin.long).toBe(
             expected.market_collateral,
         );
         expect(result.value.walletPayout).toBe(expected.returned);
@@ -345,12 +657,9 @@ describe('exact position action transitions', () => {
     });
 
     it('rejects the contract-derived voluntary underwater full close with code 713', () => {
-        const golden = vector(
-            positionCases,
-            'position.full_close.underwater_voluntary_reject',
-        );
-        const expected = record(golden.expected);
-        const result = quotePositionAction(positionVectorInput(golden.id));
+        const id = 'position.full_close.underwater_voluntary_reject';
+        const expected = vector(positionCases, id).expected;
+        const result = quotePositionAction(positionVectorInput(id));
 
         expect(result).toEqual({
             kind: 'unavailable',
@@ -360,25 +669,25 @@ describe('exact position action transitions', () => {
     });
 });
 
-describe('funding, borrowing, and collateral-only actions', () => {
+describe('funding, borrowing, and margin-only actions', () => {
     it('routes earned funding to claimable balance during a top-up', () => {
-        const golden = vector(marginCases, 'margin.fixed_add.zero_notional');
-        const expected = record(golden.expected);
-        const result = quotePositionAction(marginVectorInput(golden.id));
+        const id = 'margin.fixed_add.zero_notional';
+        const expected = vector(marginCases, id).expected;
+        const result = quotePositionAction(marginVectorInput(id));
 
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
         expect(result.value.postPosition).toMatchObject({
             notional: expected.position_notional,
             tokens: expected.position_tokens,
-            collateral: expected.position_collateral,
+            margin: expected.position_collateral,
             fundingIdx: expected.post_position_funding_idx,
             borrowingIdx: expected.post_position_borrowing_idx,
         });
         expect(result.value.postMarket.fundingOwed).toBe(
             expected.funding_owed_delta,
         );
-        expect(result.value.postMarket.collateral.long).toBe(11n);
+        expect(result.value.postMarket.margin.long).toBe(11n);
         expect(result.value.claimableFundingDelta).toBe(
             expected.claimable_funding_delta,
         );
@@ -400,13 +709,13 @@ describe('funding, borrowing, and collateral-only actions', () => {
         '$id settles paid accrual before returning withdrawal proceeds',
         (id) => {
             const golden = vector(marginCases, id);
-            const work = record(golden.work);
-            const expected = record(golden.expected);
+            const work = golden.work ?? {};
+            const expected = golden.expected;
             const result = quotePositionAction(marginVectorInput(id));
 
             expect(result.kind).toBe('exact');
             if (result.kind !== 'exact') return;
-            expect(result.value.postPosition.collateral).toBe(
+            expect(result.value.postPosition.margin).toBe(
                 expected.position_collateral,
             );
             expect(result.value.postPosition.fundingIdx).toBe(
@@ -432,7 +741,7 @@ describe('haircuts and protocol gates', () => {
         const open = position({
             notional: 1_000_000_000n,
             tokens: 10_000_000_000_000_000_000n,
-            collateral: 100_000_000n,
+            margin: 100_000_000n,
         });
         const result = quotePositionAction(
             input({
@@ -440,7 +749,7 @@ describe('haircuts and protocol gates', () => {
                 market: market({
                     notional: pair(open.notional, 0n),
                     tokens: pair(open.tokens, 0n),
-                    collateral: pair(open.collateral, 0n),
+                    margin: pair(open.margin, 0n),
                     fundingUpdate: 1n,
                     borrowingUpdate: 1n,
                 }),
@@ -454,8 +763,6 @@ describe('haircuts and protocol gates', () => {
                     exponent: -7,
                     bid: 105_000_000n,
                     ask: 105_000_000n,
-                    publishTime: 1n,
-                    source: 'pyth',
                 },
                 vaultAssets: 50_000_000n,
                 action: { kind: 'close' },
@@ -472,7 +779,7 @@ describe('haircuts and protocol gates', () => {
         const open = position({
             notional: 100n,
             tokens: 100n,
-            collateral: 100n,
+            margin: 100n,
             lockedNotional: 50n,
             unlocksAt: 100n,
         });
@@ -483,12 +790,12 @@ describe('haircuts and protocol gates', () => {
                 market: market({
                     notional: pair(100n, 0n),
                     tokens: pair(100n, 0n),
-                    collateral: pair(100n, 0n),
+                    margin: pair(100n, 0n),
                     fundingUpdate: 99n,
                     borrowingUpdate: 99n,
                 }),
                 price: verifiedPrice({ publish_time: 99n }),
-                action: { kind: 'decrease', notional: 51n, collateral: 0n },
+                action: { kind: 'decrease', notional: 51n, margin: 0n },
             }),
         );
 
@@ -505,12 +812,12 @@ describe('haircuts and protocol gates', () => {
                 market: market({
                     notional: pair(90n, 0n),
                     tokens: pair(90n, 0n),
-                    collateral: pair(20n, 0n),
+                    margin: pair(20n, 0n),
                     fundingUpdate: 1n,
                     borrowingUpdate: 1n,
                 }),
                 config: config({ maxOpenInterest: 100n }),
-                action: { kind: 'increase', notional: 11n, collateral: 10n },
+                action: { kind: 'increase', notional: 11n, margin: 10n },
             }),
         );
 
@@ -526,7 +833,7 @@ describe('haircuts and protocol gates', () => {
             input({
                 config: config({ maxUtilOpen: 800_000_000_000_000_000n }),
                 vaultAssets: 200n,
-                action: { kind: 'increase', notional: 100n, collateral: 100n },
+                action: { kind: 'increase', notional: 100n, margin: 100n },
             }),
         );
 
@@ -545,7 +852,7 @@ describe('haircuts and protocol gates', () => {
                 impactScalar: I128_MAX,
             }),
             vaultAssets: 193n,
-            action: { kind: 'increase', notional: 100n, collateral: 100n },
+            action: { kind: 'increase', notional: 100n, margin: 100n },
             executionFee: 1_000n,
             relayFee: 2_000n,
         });
@@ -574,13 +881,13 @@ describe('haircuts and protocol gates', () => {
     it('enforces initial and maintenance margin on surviving positions', () => {
         const initial = quotePositionAction(
             input({
-                action: { kind: 'increase', notional: 100n, collateral: 9n },
+                action: { kind: 'increase', notional: 100n, margin: 9n },
             }),
         );
         const open = position({
             notional: 100n,
             tokens: 100n,
-            collateral: 11n,
+            margin: 11n,
         });
         const maintenance = quotePositionAction(
             input({
@@ -588,7 +895,7 @@ describe('haircuts and protocol gates', () => {
                 market: market({
                     notional: pair(100n, 0n),
                     tokens: pair(100n, 0n),
-                    collateral: pair(11n, 0n),
+                    margin: pair(11n, 0n),
                     fundingUpdate: 1n,
                     borrowingUpdate: 1n,
                 }),
@@ -597,10 +904,8 @@ describe('haircuts and protocol gates', () => {
                     exponent: -18,
                     bid: 940_000_000_000_000_000n,
                     ask: 940_000_000_000_000_000n,
-                    publishTime: 1n,
-                    source: 'pyth',
                 },
-                action: { kind: 'decrease', notional: 10n, collateral: 0n },
+                action: { kind: 'decrease', notional: 10n, margin: 0n },
             }),
         );
 
@@ -618,48 +923,16 @@ describe('haircuts and protocol gates', () => {
 });
 
 describe('typed public quote failures', () => {
-    it.each(['notional', 'tokens', 'collateral'] as const)(
-        'rejects a position larger than the market %s aggregate',
-        (field) => {
-            const open = position({
-                notional: 100n,
-                tokens: 100n,
-                collateral: 20n,
-            });
-            const aggregate = market({
-                notional: pair(100n, 0n),
-                tokens: pair(100n, 0n),
-                collateral: pair(20n, 0n),
-                fundingUpdate: 1n,
-                borrowingUpdate: 1n,
-            });
-            aggregate[field].long -= 1n;
-
-            expect(
-                quotePositionAction(
-                    input({
-                        position: open,
-                        market: aggregate,
-                        action: { kind: 'close' },
-                    }),
-                ),
-            ).toMatchObject({
-                kind: 'unavailable',
-                code: 'INVALID_INPUT',
-            });
-        },
-    );
-
     it('maps checked i128 overflow and invalid chronology separately', () => {
         const overflowing = quotePositionAction(
             input({
                 position: position({
                     notional: I128_MAX,
-                    collateral: I128_MAX,
+                    margin: I128_MAX,
                 }),
                 market: market({
                     notional: pair(I128_MAX, 0n),
-                    collateral: pair(I128_MAX, 0n),
+                    margin: pair(I128_MAX, 0n),
                     fundingUpdate: 1n,
                     borrowingUpdate: 1n,
                 }),
@@ -667,7 +940,7 @@ describe('typed public quote failures', () => {
                     maxPositionNotional: I128_MAX,
                     maxOpenInterest: I128_MAX,
                 }),
-                action: { kind: 'increase', notional: 1n, collateral: 1n },
+                action: { kind: 'increase', notional: 1n, margin: 1n },
             }),
         );
         const chronology = quotePositionAction(

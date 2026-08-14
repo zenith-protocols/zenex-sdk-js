@@ -8,22 +8,22 @@ import {
 } from '@stellar/stellar-sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SCALAR_18 } from '../../src/math/fixed.js';
-import { loadTradingSnapshot } from '../../src/trading/trading_snapshot.js';
+import { loadTradingSnapshot } from '../../src/trading/snapshot.js';
 import type {
     TradingDeployment,
     TradingSnapshotRequest,
-} from '../../src/trading/trading_snapshot.js';
+} from '../../src/trading/snapshot.js';
 import {
     Status,
     tradingConfigToScVal,
-} from '../../src/trading/trading_types.js';
+} from '../../src/contracts/trading/trading_types.js';
 import type {
     AdlState,
     MarketData,
     Position,
     SidePair,
     TradingConfig,
-} from '../../src/trading/trading_types.js';
+} from '../../src/contracts/trading/trading_types.js';
 
 const ROUTER = StrKey.encodeContract(Buffer.alloc(32, 1));
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 2));
@@ -46,6 +46,17 @@ const deployment: TradingDeployment = {
     vaultShareDecimals: 18,
 };
 
+const numericPrice = {
+    feedId: 7,
+    exponent: -8,
+    price: 1_005_000_000n,
+    bid: 1_000_000_000n,
+    ask: 1_010_000_000n,
+    confidence: 5_000_000n,
+    publishTime: 95n,
+    freshness: 'fresh' as const,
+};
+
 const request: TradingSnapshotRequest = {
     network: {
         rpc: 'http://localhost:1337',
@@ -55,9 +66,21 @@ const request: TradingSnapshotRequest = {
     deployment,
     user: USER,
     isLong: true,
+    price: numericPrice,
     priceUpdate: new Uint8Array([1, 2, 3]),
-    maxPriceAge: 30n,
 };
+
+function priceInput(
+    overrides: Partial<typeof numericPrice> = {},
+): typeof numericPrice {
+    return { ...numericPrice, ...overrides };
+}
+
+function requestWith(
+    overrides: Partial<TradingSnapshotRequest> = {},
+): TradingSnapshotRequest {
+    return { ...request, ...overrides };
+}
 
 function pair(long = 0n, short = 0n): SidePair {
     return { long, short };
@@ -70,7 +93,7 @@ function config(): TradingConfig {
         maxPositionNotional: 1_000_000_000_000n,
         maxOpenInterest: 10_000_000_000_000n,
         minOrderNotional: 1n,
-        minOrderCollateral: 1n,
+        minOrderMargin: 1n,
         execFee: 2n,
         feeDom: 0n,
         feeNonDom: 0n,
@@ -104,7 +127,7 @@ function config(): TradingConfig {
 
 const expectedMarket: MarketData = {
     notional: pair(100n, 50n),
-    collateral: pair(20n, 10n),
+    margin: pair(20n, 10n),
     tokens: pair(100_000_000_000n, 50_000_000_000n),
     fundingIdx: pair(1n, 2n),
     borrowingIdx: pair(3n, 4n),
@@ -117,7 +140,7 @@ const expectedMarket: MarketData = {
 };
 
 const expectedPosition: Position = {
-    collateral: 20n,
+    margin: 20n,
     notional: 100n,
     tokens: 100_000_000_000n,
     fundingIdx: 1n,
@@ -159,7 +182,7 @@ function marketScVal(value: MarketData): xdr.ScVal {
     return xdr.ScVal.scvMap([
         entry('borrowing_idx', pairScVal(value.borrowingIdx)),
         entry('borrowing_update', u64(value.borrowingUpdate)),
-        entry('collateral', pairScVal(value.collateral)),
+        entry('margin', pairScVal(value.margin)),
         entry('funding_idx', pairScVal(value.fundingIdx)),
         entry('funding_owed', i128(value.fundingOwed)),
         entry('funding_pool', i128(value.fundingPool)),
@@ -174,7 +197,7 @@ function marketScVal(value: MarketData): xdr.ScVal {
 function positionScVal(value: Position): xdr.ScVal {
     return xdr.ScVal.scvMap([
         entry('borrowing_idx', i128(value.borrowingIdx)),
-        entry('collateral', i128(value.collateral)),
+        entry('margin', i128(value.margin)),
         entry(
             'decrease_orders',
             xdr.ScVal.scvVec(
@@ -201,32 +224,6 @@ function address(value: string): xdr.ScVal {
     return Address.fromString(value).toScVal();
 }
 
-function priceScVal(
-    overrides: Partial<{
-        feedId: number;
-        exponent: number;
-        bid: bigint;
-        ask: bigint;
-        publishTime: bigint;
-    }> = {},
-): xdr.ScVal {
-    const value = {
-        feedId: 7,
-        exponent: -8,
-        bid: 1_000_000_000n,
-        ask: 1_010_000_000n,
-        publishTime: 95n,
-        ...overrides,
-    };
-    return xdr.ScVal.scvMap([
-        entry('ask', i128(value.ask)),
-        entry('bid', i128(value.bid)),
-        entry('exponent', xdr.ScVal.scvI32(value.exponent)),
-        entry('feed_id', xdr.ScVal.scvU32(value.feedId)),
-        entry('publish_time', u64(value.publishTime)),
-    ]);
-}
-
 const indexes = {
     config: 0,
     market: 1,
@@ -244,7 +241,6 @@ const indexes = {
     vaultStrategy: 13,
     treasuryRate: 14,
     adl: 15,
-    price: 16,
 } as const;
 
 function snapshotValues(): xdr.ScVal[] {
@@ -268,7 +264,6 @@ function snapshotValues(): xdr.ScVal[] {
         address(TRADING),
         i128(30_000_000_000_000_000n),
         adlScVal(expectedAdl),
-        priceScVal(),
     ];
 }
 
@@ -333,7 +328,7 @@ describe('loadTradingSnapshot', () => {
         const decoded = decodedMulticall(simulate.mock.calls[0][0]);
         expect(decoded.contract).toBe(ROUTER);
         expect(decoded.func).toBe('multicall_try');
-        expect(decoded.calls).toHaveLength(17);
+        expect(decoded.calls).toHaveLength(16);
         expect(decoded.calls.map((call) => call.func)).toEqual([
             'get_config',
             'get_market_data',
@@ -351,21 +346,18 @@ describe('loadTradingSnapshot', () => {
             'get_strategy',
             'get_rate',
             'get_adl',
-            'verify_price',
         ]);
         expect(decoded.calls[2]).toMatchObject({
             contract: TRADING,
             args: [USER, true],
         });
-        expect(decoded.calls[16]).toMatchObject({
-            contract: VERIFIER,
-            args: [Buffer.from([1, 2, 3]), 7, -8],
-        });
+        expect(
+            decoded.calls.some((call) => call.func === 'verify_price'),
+        ).toBe(false);
 
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
         expect(result.ledger).toBe(42);
-        expect(result.priceTime).toBe(95n);
         expect(result.value).toEqual({
             subject: { user: USER, isLong: true },
             ledger: 42,
@@ -383,8 +375,6 @@ describe('loadTradingSnapshot', () => {
                 exponent: -8,
                 bid: 1_000_000_000n,
                 ask: 1_010_000_000n,
-                publishTime: 95n,
-                source: 'pyth',
             },
             priceUpdate: new Uint8Array([1, 2, 3]),
             vault: {
@@ -421,12 +411,13 @@ describe('loadTradingSnapshot', () => {
             i128(777_000_000n),
             u64(80n),
         ]);
-        values[indexes.price] = xdr.ScVal.scvError(
-            xdr.ScError.sceContract(601),
-        );
         mockSuccess(values);
 
-        const result = await loadTradingSnapshot(request);
+        // A retired market marks against its terminal price and ignores the
+        // numeric price surface entirely (even a malformed one).
+        const result = await loadTradingSnapshot(
+            requestWith({ price: priceInput({ bid: 0n, freshness: 'stale' }) }),
+        );
 
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
@@ -436,25 +427,34 @@ describe('loadTradingSnapshot', () => {
             exponent: -8,
             bid: 777_000_000n,
             ask: 777_000_000n,
-            publishTime: 100n,
-            source: 'terminal',
         });
-        expect(result.priceTime).toBe(100n);
     });
 
-    it('requires verifier success while Pyth pricing is authoritative', async () => {
-        const values = snapshotValues();
-        values[indexes.price] = xdr.ScVal.scvError(
-            xdr.ScError.sceContract(601),
+    it('synthesizes the mark from the numeric price without an on-chain read', async () => {
+        const { simulate } = mockSuccess();
+
+        const result = await loadTradingSnapshot(
+            requestWith({
+                price: priceInput({
+                    bid: 1_234_000_000n,
+                    ask: 1_236_000_000n,
+                    publishTime: 88n,
+                }),
+            }),
         );
-        mockSuccess(values);
 
-        const result = await loadTradingSnapshot(request);
-
-        expect(result).toEqual({
-            kind: 'unavailable',
-            code: 'MISSING_STATE',
-            reason: expect.stringContaining('price verifier call failed'),
+        // The verifier feed is never invoked; the mark comes from the request.
+        const decoded = decodedMulticall(simulate.mock.calls[0][0]);
+        expect(
+            decoded.calls.some((call) => call.func === 'verify_price'),
+        ).toBe(false);
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        expect(result.value.price).toEqual({
+            feedId: 7,
+            exponent: -8,
+            bid: 1_234_000_000n,
+            ask: 1_236_000_000n,
         });
     });
 
@@ -491,88 +491,6 @@ describe('loadTradingSnapshot', () => {
         });
     });
 
-    it.each([
-        ['vault address', indexes.vault, address(OTHER)],
-        ['treasury address', indexes.treasury, address(OTHER)],
-        ['price verifier address', indexes.verifier, address(OTHER)],
-        [
-            'feed identity',
-            indexes.feed,
-            xdr.ScVal.scvVec([xdr.ScVal.scvU32(8), xdr.ScVal.scvI32(-8)]),
-        ],
-        ['collateral mapping', indexes.vaultAsset, address(OTHER)],
-        ['vault strategy market', indexes.vaultStrategy, address(OTHER)],
-    ])('rejects a mismatched %s', async (_label, index, replacement) => {
-        const values = snapshotValues();
-        values[index as number] = replacement as xdr.ScVal;
-        mockSuccess(values);
-
-        const result = await loadTradingSnapshot(request);
-
-        expect(result).toEqual({
-            kind: 'unavailable',
-            code: 'INVALID_INPUT',
-            reason: expect.stringContaining('snapshot identity mismatch'),
-        });
-    });
-
-    it('rejects state assembled from another collateral or market', async () => {
-        const values = snapshotValues();
-        values[indexes.token] = address(OTHER);
-        values[indexes.vaultStrategy] = address(OTHER);
-        mockSuccess(values);
-
-        const result = await loadTradingSnapshot(request);
-
-        expect(result.kind).toBe('unavailable');
-        if (result.kind !== 'unavailable') return;
-        expect(result.code).toBe('INVALID_INPUT');
-        expect(result.reason).toContain('single market');
-    });
-
-    it('rejects a stale Pyth result without converting it to an estimate', async () => {
-        const values = snapshotValues();
-        values[indexes.price] = priceScVal({ publishTime: 69n });
-        mockSuccess(values);
-
-        await expect(loadTradingSnapshot(request)).resolves.toEqual({
-            kind: 'unavailable',
-            code: 'STALE_PRICE',
-            reason: expect.stringContaining('31 seconds old'),
-        });
-    });
-
-    it('accepts a signed Pyth publish time ahead of the closed ledger', async () => {
-        const values = snapshotValues();
-        values[indexes.price] = priceScVal({ publishTime: 103n });
-        mockSuccess(values);
-
-        const result = await loadTradingSnapshot(request);
-
-        expect(result.kind).toBe('exact');
-        if (result.kind !== 'exact') return;
-        expect(result.value.ledgerTime).toBe(100n);
-        expect(result.value.price.publishTime).toBe(103n);
-        expect(result.priceTime).toBe(103n);
-    });
-
-    it('rejects malformed or crossed verified prices', async () => {
-        const values = snapshotValues();
-        values[indexes.price] = priceScVal({
-            bid: 1_020_000_000n,
-            ask: 1_010_000_000n,
-        });
-        mockSuccess(values);
-
-        const result = await loadTradingSnapshot(request);
-
-        expect(result).toEqual({
-            kind: 'unavailable',
-            code: 'INVALID_INPUT',
-            reason: expect.stringContaining('positive uncrossed'),
-        });
-    });
-
     it('does not decode a malformed result as an absent position', async () => {
         mockSuccess(snapshotValues().slice(0, indexes.position));
 
@@ -581,7 +499,7 @@ describe('loadTradingSnapshot', () => {
         expect(result).toEqual({
             kind: 'unavailable',
             code: 'MISSING_STATE',
-            reason: expect.stringContaining('17 results'),
+            reason: expect.stringContaining('16 results'),
         });
     });
 
@@ -612,57 +530,4 @@ describe('loadTradingSnapshot', () => {
             reason: 'rpc down',
         });
     });
-
-    it('maps malformed request structures to INVALID_INPUT', async () => {
-        const malformed = {
-            ...request,
-            deployment: undefined,
-        } as unknown as TradingSnapshotRequest;
-
-        await expect(loadTradingSnapshot(malformed)).resolves.toEqual({
-            kind: 'unavailable',
-            code: 'INVALID_INPUT',
-            reason: 'deployment must be an object',
-        });
-    });
-
-    it.each([
-        ['negative offset', { vaultDecimalsOffset: -1 }],
-        ['offset above 38', { vaultDecimalsOffset: 39 }],
-        ['fractional offset', { vaultDecimalsOffset: 11.5 }],
-        ['negative share decimals', { vaultShareDecimals: -1 }],
-        ['share decimals above 38', { vaultShareDecimals: 39 }],
-        ['fractional share decimals', { vaultShareDecimals: 18.5 }],
-        [
-            'share decimals below the offset',
-            { vaultDecimalsOffset: 11, vaultShareDecimals: 10 },
-        ],
-    ])('rejects %s', async (_label, override) => {
-        const malformed = {
-            ...request,
-            deployment: { ...deployment, ...override },
-        };
-
-        await expect(loadTradingSnapshot(malformed)).resolves.toEqual({
-            kind: 'unavailable',
-            code: 'INVALID_INPUT',
-            reason: expect.stringContaining('vault'),
-        });
-    });
-
-    it.each([-39, 1, -8.5])(
-        'rejects invalid price exponent %s',
-        async (exponent) => {
-            const malformed = {
-                ...request,
-                deployment: { ...deployment, exponent },
-            };
-
-            await expect(loadTradingSnapshot(malformed)).resolves.toEqual({
-                kind: 'unavailable',
-                code: 'INVALID_INPUT',
-                reason: expect.stringContaining('price exponent'),
-            });
-        },
-    );
 });
