@@ -203,7 +203,7 @@ export interface TradingConfig {
     initMargin: i128;
     /** Hard liquidation floor, < initMargin (SCALAR_18). */
     maintenanceMargin: i128;
-    /** Liquidation fee (SCALAR_18). */
+    /** Liquidation fee rate, charged on every liquidation as min(equity, ceil(liqFee * notional)); < maintenanceMargin (SCALAR_18). */
     liqFee: i128;
     /** Decrease lock on newly added notional, seconds. */
     notionalLock: u64;

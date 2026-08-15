@@ -45,14 +45,14 @@ describe('trading event surface', () => {
         expect(event.refund).toBe(500n);
     });
 
-    it('liquidation has no liqFee field; tier is keyed on returned vs forfeit', () => {
+    it('liquidation itemizes liqFee; forfeit is gone', () => {
         type LiquidationKeys = keyof TradingLiquidationEvent;
-        // Compile-time: 'liqFee' is not a member of the payload.
-        const notAKey: Exclude<'liqFee', LiquidationKeys> = 'liqFee';
-        expect(notAKey).toBe('liqFee');
-        // Runtime: the tier discriminators stay on the type.
-        const tierKeys: LiquidationKeys[] = ['returned', 'forfeit', 'badDebt'];
-        expect(tierKeys).toHaveLength(3);
+        // Compile-time: 'forfeit' is not a member of the payload.
+        const notAKey: Exclude<'forfeit', LiquidationKeys> = 'forfeit';
+        expect(notAKey).toBe('forfeit');
+        // Runtime: the settlement amounts stay on the type.
+        const settlementKeys: LiquidationKeys[] = ['returned', 'liqFee', 'badDebt'];
+        expect(settlementKeys).toHaveLength(3);
     });
 });
 

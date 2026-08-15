@@ -37,8 +37,8 @@ const contracts = [
         fixture: tradingFixture,
         contract: TradingContract,
         source: 'src/contracts/trading/trading_contract.ts',
-        sha256: 'cc1961b42c1758854b135004e2943b7797a29db80c5ba777795f0f478b2288f7',
-        bytes: 65_556,
+        sha256: '65f687139a88b839a10c8ff3cb72ca72eccb2f4eaf4f2c5b0bd33a1fef94d561',
+        bytes: 65_619,
     },
     {
         package: 'trading-router',
@@ -106,8 +106,8 @@ describe('approved v2 contract spec consistency', () => {
     it('pins source commit, source tree, Cargo.lock, and toolchain evidence', () => {
         expect(manifest).toMatchObject({
             schemaVersion: 1,
-            contractsCommit: '08cfd217dd14fc2fee84f184519ad46f57e261cb',
-            productionSourceTree: 'd3c38b1bd9306c0819f39ef8c67f174eee1e6ecb',
+            contractsCommit: 'e31ef5f13c8702ba866dd416ba44bd906db818da',
+            productionSourceTree: '214c4656dabcc1230dce9f8ce877365eb634401f',
             cargoLock: {
                 path: 'Cargo.lock',
                 sha256: 'eb5429fcee41a363d0d288f92bccde575add7a22130de7b359fd979746408ca6',

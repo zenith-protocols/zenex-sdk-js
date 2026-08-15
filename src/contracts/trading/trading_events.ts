@@ -330,12 +330,12 @@ export interface TradingCloseFillEvent extends BaseTradingEvent {
 /**
  * A keeper liquidation receipt (the full size is force-closed).
  *
- * `margin` and `pnl` are gross of the itemized fees; the post-fee
- * remainder (equity, floored at zero) lands on `returned` (trader) on the
- * soft tier and `forfeit` (vault) on the hard tier; any shortfall past the
- * freed margin is emitted as `badDebt` and absorbed by the vault. The
- * soft-tier transfer adds the swept decrease-order escrows announced by the
- * same-tx `cancel_order` receipts.
+ * `margin` and `pnl` are gross of the itemized fees; every liquidation
+ * charges `liqFee = min(equity, ceil(config.liqFee * notional))` (split
+ * keeper/treasury/vault like a trade fee) and pays the trader the rest on
+ * `returned` — zero exactly where the fee saturates on the whole remainder;
+ * any shortfall past the freed margin is emitted as `badDebt` and absorbed
+ * by the vault.
  */
 export interface TradingLiquidationEvent extends BaseTradingEvent {
     eventType: TradingEventType.Liquidation;
@@ -363,10 +363,14 @@ export interface TradingLiquidationEvent extends BaseTradingEvent {
     borrowing: i128;
     /** Fees and losses past the freed margin, absorbed by the vault, token-dec. */
     badDebt: i128;
-    /** Post-fee remainder transferred to the trader (soft tier), token-dec. */
+    /**
+     * Remainder paid to the trader net of the liquidation fee, token-dec; the
+     * transfer adds the swept decrease-order escrows announced by the same-tx
+     * `cancel_order` receipts.
+     */
     returned: i128;
-    /** Post-fee remainder forfeited to the vault (hard tier), token-dec. */
-    forfeit: i128;
+    /** Liquidation fee charged: min(equity, ceil(config.liqFee * notional)), token-dec. */
+    liqFee: i128;
 }
 
 export type TradingEvent =

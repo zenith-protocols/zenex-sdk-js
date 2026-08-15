@@ -295,15 +295,14 @@ describe('liquidationPrice (inverts the maintenance-margin equity line)', () => 
         expect(liquidationPrice(earnedFundingPosition, baselineConfig(), market, true)).toBe(9_500_000_000_000n);
     });
 
-    // The threshold is the maintenance line alone. The liquidation fee only
-    // tiers the payout on-chain (soft tier liq_fee = 0 returns the remainder
-    // to the trader, hard tier forfeits it to the vault); it never moves the
-    // eligibility price.
-    it('the soft/hard liquidation-fee tier does not move the threshold', () => {
-        const softTierConfig = { ...baselineConfig(), liqFee: 0n };
-        const hardTierConfig = { ...baselineConfig(), liqFee: (4n * SCALAR_18) / 100n }; // 4%, still < 5% maintenance
-        expect(liquidationPrice(tenXPosition, softTierConfig, makeMarket(), true)).toBe(9_500_000_000_000n);
-        expect(liquidationPrice(tenXPosition, hardTierConfig, makeMarket(), true)).toBe(9_500_000_000_000n);
+    // The threshold is the maintenance line alone. The liquidation fee rate
+    // only sizes the fee charged out of the settled equity on-chain; it never
+    // moves the eligibility price.
+    it('the liquidation-fee rate does not move the threshold', () => {
+        const noFeeConfig = { ...baselineConfig(), liqFee: 0n };
+        const highFeeConfig = { ...baselineConfig(), liqFee: (4n * SCALAR_18) / 100n }; // 4%, still < 5% maintenance
+        expect(liquidationPrice(tenXPosition, noFeeConfig, makeMarket(), true)).toBe(9_500_000_000_000n);
+        expect(liquidationPrice(tenXPosition, highFeeConfig, makeMarket(), true)).toBe(9_500_000_000_000n);
     });
 
     // Over-collateralized long: target = 2.5e10 + 5e11 - 6e11 = -7.5e10 < 0,
