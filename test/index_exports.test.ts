@@ -20,7 +20,6 @@ describe('package root exports', () => {
         expect(SDK.OracleContract).toBeTypeOf('function');
         expect(SDK.TreasuryContract).toBeTypeOf('function');
         expect(SDK.GovernanceContract).toBeTypeOf('function');
-        expect(SDK.SmartAccountContract).toBeTypeOf('function');
     });
 
     it('exports the trading enums, sentinels, converters, and parsers', () => {
@@ -201,9 +200,6 @@ describe('package root exports', () => {
         expect(SDK.formatAtomic).toBeTypeOf('function');
         expect(SDK.toFloat).toBeTypeOf('function');
         expect(SDK.simulateAndParse).toBeTypeOf('function');
-        expect(SDK.signerToScVal).toBeTypeOf('function');
-        expect(SDK.contextRuleTypeToScVal).toBeTypeOf('function');
-        expect(SDK.sessionConfigToScVal).toBeTypeOf('function');
         // Not part of the public surface:
         expect(SDK.getAssetKey).toBeUndefined();
         expect(SDK.assetFromKey).toBeUndefined();
@@ -234,7 +230,6 @@ describe('package root exports', () => {
         expect(SDK.isTriggerOrderKind).toBeTypeOf('function');
         expect(SDK.orderKindCrossing).toBeTypeOf('function');
         expect(SDK.orderKindFiresAbove).toBeTypeOf('function');
-        expect(SDK.buildSingleMarketSessionRule).toBeTypeOf('function');
         expect(SDK.MAX_SIGNED_PRICE_UPDATE_BYTES).toBeUndefined();
     });
 

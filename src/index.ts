@@ -191,38 +191,6 @@ export { TreasuryContract, parseTreasuryRate } from './contracts/treasury/index.
 export type { TreasuryConstructorArgs } from './contracts/treasury/index.js';
 
 // =============================================================================
-// Smart Account Module
-// =============================================================================
-
-export {
-    SmartAccountContract,
-    signerToScVal,
-    contextRuleTypeToScVal,
-    sessionConfigToScVal,
-    addContextRuleCall,
-    buildSingleMarketSessionRule,
-    ED25519_VERIFIER_SPEC_SHA256,
-    ED25519_VERIFIER_WASM_SHA256,
-    SESSION_POLICY_SPEC_SHA256,
-    SESSION_POLICY_WASM_SHA256,
-    SMART_ACCOUNT_DEPLOYER,
-    SMART_ACCOUNT_DEPLOYMENT_MAX_TIMEOUT_SECONDS,
-    SMART_ACCOUNT_SPEC_SHA256,
-    SMART_ACCOUNT_WASM_SHA256,
-    WEBAUTHN_VERIFIER_SPEC_SHA256,
-    WEBAUTHN_VERIFIER_WASM_SHA256,
-} from './contracts/smart-account/index.js';
-
-export type {
-    Signer as SmartAccountSigner,
-    ContextRuleType,
-    SessionConfig,
-    AddContextRuleArgs,
-    PolicyBuildResult,
-    SingleMarketSessionInput,
-} from './contracts/smart-account/index.js';
-
-// =============================================================================
 // Vault Module
 // =============================================================================
 

@@ -16,19 +16,12 @@ import {
 import { toFixed, toFloat, mulDivFloor, mulDivCeil, SCALAR_18 } from '../src/math/index.js';
 import { simulateAndParse } from '../src/simulate.js';
 import { ContractError } from '../src/errors.js';
-import {
-    SmartAccountContract,
-    signerToScVal,
-    contextRuleTypeToScVal,
-    sessionConfigToScVal,
-} from '../src/contracts/smart-account/smart_account_contract.js';
 import { TreasuryContract } from '../src/contracts/treasury/treasury_contract.js';
 import { Network } from '../src/index.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const TOKEN = StrKey.encodeContract(Buffer.alloc(32, 2));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
-const VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 4));
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -141,106 +134,5 @@ describe('simulateAndParse', () => {
         await expect(
             simulateAndParse(network, op, TreasuryContract.parsers.getRate),
         ).rejects.toThrow(/Simulation failed/);
-    });
-});
-
-describe('SmartAccountContract surface', () => {
-    const account = new SmartAccountContract(CONTRACT_ID);
-
-    function decodeInvoke(op: string) {
-        const body = xdr.Operation.fromXDR(op, 'base64')
-            .body()
-            .invokeHostFunctionOp();
-        const invoke = body.hostFunction().invokeContract();
-        return { fn: invoke.functionName().toString(), args: invoke.args() };
-    }
-
-    const delegated = { tag: 'Delegated' as const, address: USER };
-    const external = {
-        tag: 'External' as const,
-        verifier: VERIFIER,
-        keyData: new Uint8Array([1, 2]),
-    };
-
-    it('encodes signers, context rule types, and session configs', () => {
-        expect(signerToScVal(delegated).vec()![0].sym().toString()).toBe(
-            'Delegated',
-        );
-        expect(signerToScVal(external).vec()![0].sym().toString()).toBe(
-            'External',
-        );
-        expect(
-            signerToScVal({ ...external, keyData: Buffer.from([1, 2]) }).vec()!
-                .length,
-        ).toBe(3);
-
-        expect(contextRuleTypeToScVal({ tag: 'Default' }).vec()!.length).toBe(
-            1,
-        );
-        expect(
-            contextRuleTypeToScVal({
-                tag: 'CallContract',
-                contract: CONTRACT_ID,
-            }).vec()!.length,
-        ).toBe(2);
-        expect(
-            contextRuleTypeToScVal({
-                tag: 'CreateContract',
-                wasmHash: new Uint8Array(32),
-            }).vec()!.length,
-        ).toBe(2);
-        expect(
-            contextRuleTypeToScVal({
-                tag: 'CreateContract',
-                wasmHash: Buffer.alloc(32),
-            }).vec()!.length,
-        ).toBe(2);
-
-        const session = sessionConfigToScVal({
-            allowedContracts: [CONTRACT_ID],
-            allowedTransferTo: USER,
-        });
-        expect(session.map()!.length).toBe(2);
-    });
-
-    it('builds context rule, signer, and policy ops', () => {
-        const add = decodeInvoke(
-            account.addContextRule({
-                contextType: { tag: 'Default' },
-                name: 'session',
-                signers: [delegated, external],
-                policies: new Map([[CONTRACT_ID, xdr.ScVal.scvVoid()]]),
-            }),
-        );
-        expect(add.fn).toBe('add_context_rule');
-        expect(add.args.length).toBe(5);
-
-        const addWithExpiry = decodeInvoke(
-            account.addContextRule({
-                contextType: { tag: 'CallContract', contract: CONTRACT_ID },
-                name: 'scoped',
-                validUntil: 999,
-                signers: [],
-                policies: new Map(),
-            }),
-        );
-        expect(addWithExpiry.args[2].u32()).toBe(999);
-
-        expect(decodeInvoke(account.removeContextRule(1)).fn).toBe(
-            'remove_context_rule',
-        );
-        expect(decodeInvoke(account.addSigner(1, delegated)).fn).toBe(
-            'add_signer',
-        );
-        expect(decodeInvoke(account.removeSigner(1, 2)).fn).toBe(
-            'remove_signer',
-        );
-        expect(
-            decodeInvoke(account.addPolicy(1, CONTRACT_ID, xdr.ScVal.scvVoid()))
-                .fn,
-        ).toBe('add_policy');
-        expect(decodeInvoke(account.removePolicy(1, CONTRACT_ID)).fn).toBe(
-            'remove_policy',
-        );
     });
 });
