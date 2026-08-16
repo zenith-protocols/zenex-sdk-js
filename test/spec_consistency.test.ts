@@ -37,8 +37,8 @@ const contracts = [
         fixture: tradingFixture,
         contract: TradingContract,
         source: 'src/contracts/trading/trading_contract.ts',
-        sha256: '65f687139a88b839a10c8ff3cb72ca72eccb2f4eaf4f2c5b0bd33a1fef94d561',
-        bytes: 65_619,
+        sha256: 'd99e75ef5c042f87fbc0cd2c7cc87ba1ebbb81da99c5bb0195b6c1930563801a',
+        bytes: 65_644,
     },
     {
         package: 'trading-router',
@@ -77,8 +77,8 @@ const contracts = [
         fixture: oracleFixture,
         contract: OracleContract,
         source: 'src/contracts/oracle/oracle_contract.ts',
-        sha256: '795ab53defab9982319e62bb855e434068fac5ed74c84258c34ac85327385bf9',
-        bytes: 15_592,
+        sha256: 'b125f57f9a91595e8569b0cd49050667533a8373ae905b35985d653820d9a5d1',
+        bytes: 16_537,
     },
     {
         package: 'treasury',
@@ -106,8 +106,8 @@ describe('approved v2 contract spec consistency', () => {
     it('pins source commit, source tree, Cargo.lock, and toolchain evidence', () => {
         expect(manifest).toMatchObject({
             schemaVersion: 1,
-            contractsCommit: 'e31ef5f13c8702ba866dd416ba44bd906db818da',
-            productionSourceTree: '214c4656dabcc1230dce9f8ce877365eb634401f',
+            contractsCommit: '9d71b15c08e578b146351112ee41a945206ce1c3',
+            productionSourceTree: 'be6491028cc68e6eee3001f7c82cdcc3ece591c1',
             cargoLock: {
                 path: 'Cargo.lock',
                 sha256: 'eb5429fcee41a363d0d288f92bccde575add7a22130de7b359fd979746408ca6',

@@ -83,6 +83,22 @@ export type SubjectBoundTradingSnapshot = TradingSnapshot & {
     readonly collateralToken: string;
 };
 
+/**
+ * The price provider's liveness verdict on a feed.
+ *
+ * This is a provider label, not an oracle gate: the SDK never computes it and
+ * the chain never reads it. Since contracts #169 the oracle runs two staleness
+ * windows — the strict `trade_staleness` (<=15s, order fills) and the wider
+ * `close_staleness` (<=120s, gap-closing calls: liquidation, ADL, accrual) —
+ * so `'stale'` is only meaningful against a chosen class.
+ *
+ * Read `'stale'` as *stale for a fill*. It does NOT imply the chain would
+ * reject a protective call at that price: between the two windows a report is
+ * simultaneously too old to trade on and perfectly valid to liquidate,
+ * deleverage, or accrue on. Gating keeper submission on this label alone will
+ * suppress exactly the calls that protect vault solvency during a feed gap,
+ * which is the failure mode the two-tier split exists to prevent.
+ */
 export type PriceFreshness = (typeof PRICE_FRESHNESS)[number];
 
 /**
@@ -101,6 +117,7 @@ export interface TradingSnapshotPrice {
     readonly ask: bigint;
     /** Feed observation time in whole seconds. */
     readonly publishTime: bigint;
+    /** Provider liveness verdict; `'stale'` means stale *for a fill*. See {@link PriceFreshness}. */
     readonly freshness: PriceFreshness;
 }
 

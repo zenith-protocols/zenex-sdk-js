@@ -15,13 +15,20 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const sdkRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const contractsRoot = '/home/robin/Zenith/Zenex-V2/zenex-contracts';
+// The approved contracts worktree. A bare absolute path here silently rotted
+// once already: the checkout moved, every run died on ENOENT before reaching a
+// single pin assertion, and the spec drift it exists to catch went unnoticed
+// for two contract releases. The sibling default tracks the standard workspace
+// layout; `ZENEX_CONTRACTS_ROOT` covers everything else.
+const contractsRoot = resolve(
+    process.env.ZENEX_CONTRACTS_ROOT ?? resolve(sdkRoot, '../zenex-contracts'),
+);
 const manifestPath = resolve(contractsRoot, 'artifacts/v2/manifest.json');
 
 const EXPECTED_SOURCE = Object.freeze({
     schemaVersion: 1,
-    contractsCommit: 'e31ef5f13c8702ba866dd416ba44bd906db818da',
-    productionSourceTree: '214c4656dabcc1230dce9f8ce877365eb634401f',
+    contractsCommit: '9d71b15c08e578b146351112ee41a945206ce1c3',
+    productionSourceTree: 'be6491028cc68e6eee3001f7c82cdcc3ece591c1',
     cargoLockSha256: 'eb5429fcee41a363d0d288f92bccde575add7a22130de7b359fd979746408ca6',
     rustc: 'rustc 1.97.1 (8bab26f4f 2026-07-14)',
     cargo: 'cargo 1.97.1 (c980f4866 2026-06-30)',
@@ -92,8 +99,8 @@ const EXPECTED_CONTRACTS = Object.freeze({
     },
     oracle: {
         path: 'artifacts/v2/wasm/oracle.wasm',
-        sha256: '795ab53defab9982319e62bb855e434068fac5ed74c84258c34ac85327385bf9',
-        bytes: 15_592,
+        sha256: 'b125f57f9a91595e8569b0cd49050667533a8373ae905b35985d653820d9a5d1',
+        bytes: 16_537,
     },
     'strategy-vault': {
         path: 'artifacts/v2/wasm/strategy_vault.wasm',
@@ -102,8 +109,8 @@ const EXPECTED_CONTRACTS = Object.freeze({
     },
     trading: {
         path: 'artifacts/v2/wasm/trading.wasm',
-        sha256: '65f687139a88b839a10c8ff3cb72ca72eccb2f4eaf4f2c5b0bd33a1fef94d561',
-        bytes: 65_619,
+        sha256: 'd99e75ef5c042f87fbc0cd2c7cc87ba1ebbb81da99c5bb0195b6c1930563801a',
+        bytes: 65_644,
     },
     'trading-router': {
         path: 'artifacts/v2/wasm/trading_router.wasm',
@@ -167,6 +174,13 @@ function assertExactObject(actual, expected, label) {
 export function verifyCoreArtifactSource() {
     if (resolve(dirname(manifestPath), '../..') !== resolve(contractsRoot)) {
         fail('manifest resolved outside the approved v2 worktree');
+    }
+    if (!existsSync(manifestPath)) {
+        fail(
+            `no artifact manifest at ${manifestPath}. Build it with \`make build\` in the `
+            + 'contracts worktree and regenerate artifacts/v2/, or point ZENEX_CONTRACTS_ROOT '
+            + 'at the approved checkout.',
+        );
     }
 
     const manifestBytes = readFileSync(manifestPath);

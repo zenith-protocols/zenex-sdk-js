@@ -19,12 +19,19 @@ function decodeInvoke(op: string) {
 describe('OracleContract', () => {
     const oracle = new OracleContract(CONTRACT_ID);
 
-    it('verifyPrice sends report bytes and a 32-byte feed_id (matches verify_price(report, feed_id))', () => {
+    it('verifyPrice sends report bytes, a 32-byte feed_id, and the class flag (matches verify_price(report, feed_id, protective))', () => {
         const report = Buffer.alloc(4, 9);
-        const op = oracle.verifyPrice(report, FEED_ID);
-        const { fn, args } = decodeInvoke(op);
+        const { fn, args } = decodeInvoke(oracle.verifyPrice(report, FEED_ID));
         expect(fn).toBe('verify_price');
-        expect(args).toEqual([report, FEED_ID]);
+        // Strict trade window by default: a fill must never silently borrow
+        // the wider gap-closing allowance.
+        expect(args).toEqual([report, FEED_ID, false]);
+    });
+
+    it('verifyPrice sets protective for the wider gap-closing staleness window', () => {
+        const report = Buffer.alloc(4, 9);
+        const { args } = decodeInvoke(oracle.verifyPrice(report, FEED_ID, true));
+        expect(args).toEqual([report, FEED_ID, true]);
     });
 
     it('verifyPrice rejects a feed_id that is not exactly 32 bytes', () => {
@@ -32,11 +39,12 @@ describe('OracleContract', () => {
         expect(() => oracle.verifyPrice(Buffer.alloc(4), Buffer.alloc(33))).toThrow(/32 bytes/);
     });
 
-    it('static deploy encodes (owner, verifier, max_staleness, spread_reduction_factor)', () => {
+    it('static deploy encodes (owner, verifier, trade_staleness, close_staleness, spread_reduction_factor)', () => {
         const args: OracleConstructorArgs = {
             owner: OWNER,
             verifier: VERIFIER,
-            max_staleness: 15n,
+            trade_staleness: 10n,
+            close_staleness: 120n,
             spread_reduction_factor: 500_000_000_000_000_000n,
         };
         const op = OracleContract.deploy(OWNER, Buffer.alloc(32, 9), args, undefined, 'hex');
@@ -44,7 +52,10 @@ describe('OracleContract', () => {
         const createContract = decoded.body().invokeHostFunctionOp().hostFunction().createContractV2();
         const ctorArgs = createContract.constructorArgs();
         const native = ctorArgs.map((a) => scValToNative(a));
-        expect(native).toEqual([OWNER, VERIFIER, 15n, 500_000_000_000_000_000n]);
+        // Order matters: the two u64 windows are adjacent and indistinguishable
+        // on the wire, so a swapped pair would deploy an oracle whose fills
+        // accept 120s-old reports.
+        expect(native).toEqual([OWNER, VERIFIER, 10n, 120n, 500_000_000_000_000_000n]);
     });
 
     it('has no Pyth Lazer surface (verify_prices/update_lazer/max_confidence_bps removed)', () => {
@@ -95,8 +106,12 @@ describe('OracleContract', () => {
         expect(names).toContain('verifier');
         expect(names).toContain('spread_reduction_factor');
         expect(names).toContain('update_spread_reduction_factor');
-        expect(names).toContain('update_max_staleness');
-        expect(names).toContain('max_staleness');
+        expect(names).toContain('update_staleness');
+        expect(names).toContain('trade_staleness');
+        expect(names).toContain('close_staleness');
+        // The single-window surface is gone, not aliased.
+        expect(names).not.toContain('update_max_staleness');
+        expect(names).not.toContain('max_staleness');
         expect(names).not.toContain('verify_prices');
         expect(names).not.toContain('lazer');
         expect(names).not.toContain('update_lazer');

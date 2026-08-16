@@ -17,7 +17,10 @@ export interface OraclePriceData {
 export interface OracleConstructorArgs {
     owner: string;
     verifier: string;
-    max_staleness: u64;
+    /** Max report age for strict (fill) verifications, seconds; in [3, 15]. */
+    trade_staleness: u64;
+    /** Max report age for protective (gap-closing) verifications, seconds; in [trade_staleness, 120]. */
+    close_staleness: u64;
     spread_reduction_factor: i128;
 }
 
@@ -44,6 +47,14 @@ function feedIdToScVal(feedId: Buffer | Uint8Array): xdr.ScVal {
  * Used by the trading contract to determine entry/exit prices and
  * compute PnL.
  *
+ * Staleness is two-tier: each `verify_price` call selects between the strict
+ * `trade_staleness` window (order fills) and the wider `close_staleness`
+ * window (gap-closing calls — liquidation, ADL, accrual), so a report gap
+ * that outlasts the fill window never freezes the calls that protect vault
+ * solvency. Only the past side widens; the forward allowance stays pinned to
+ * `trade_staleness` for both classes. The trading contract hardcodes the
+ * class per route, so SDK callers never choose it for a trading call.
+ *
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class OracleContract extends Contract {
@@ -54,12 +65,14 @@ export class OracleContract extends Contract {
         verifyPrice: (result: string): OraclePriceData =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // Admin (void returns)
-        updateMaxStaleness: () => {},
+        updateStaleness: () => {},
         updateSpreadReductionFactor: () => {},
         // Getters
         verifier: (result: string): string =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        maxStaleness: (result: string): u64 =>
+        tradeStaleness: (result: string): u64 =>
+            scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        closeStaleness: (result: string): u64 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         spreadReductionFactor: (result: string): i128 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
@@ -73,12 +86,15 @@ export class OracleContract extends Contract {
 
     /**
      * Deploy a new instance of the Oracle contract
-     * Constructor: __constructor(owner, verifier, max_staleness, spread_reduction_factor)
+     * Constructor: __constructor(owner, verifier, trade_staleness, close_staleness, spread_reduction_factor)
      *
      * `verifier` is the address of Chainlink's deployed Data Streams verifier
-     * contract and is immutable after deployment. `max_staleness` must lie in
-     * [3, 15] seconds; `spread_reduction_factor` is SCALAR_18-scaled in
-     * [0, SCALAR_18] (0 = off, SCALAR_18 = collapse to the mid).
+     * contract and is immutable after deployment. The staleness pair must
+     * satisfy `3 <= trade_staleness <= 15` and
+     * `trade_staleness <= close_staleness <= 120` (seconds), else the
+     * constructor traps with `InvalidStaleness` (783).
+     * `spread_reduction_factor` is SCALAR_18-scaled in [0, SCALAR_18]
+     * (0 = off, SCALAR_18 = collapse to the mid).
      */
     static deploy(
         deployer: string,
@@ -96,7 +112,8 @@ export class OracleContract extends Contract {
             constructorArgs: [
                 Address.fromString(args.owner).toScVal(),
                 Address.fromString(args.verifier).toScVal(),
-                nativeToScVal(args.max_staleness, { type: 'u64' }),
+                nativeToScVal(args.trade_staleness, { type: 'u64' }),
+                nativeToScVal(args.close_staleness, { type: 'u64' }),
                 nativeToScVal(args.spread_reduction_factor, { type: 'i128' }),
             ],
         }).toXDR('base64');
@@ -110,13 +127,23 @@ export class OracleContract extends Contract {
      * Verify a signed Data Streams report and return the price for a stream
      * @param report - The signed report blob, exactly as fetched from the API
      * @param feedId - The caller's immutable 32-byte stream anchor; must equal the report's `feedId`
+     * @param protective - Which staleness window gates the report's age:
+     *   `false` (default) applies the strict `trade_staleness` used by order
+     *   fills, `true` the wider `close_staleness` used by gap-closing calls
+     *   (liquidation, ADL, accrual). Only the past side widens — the forward
+     *   allowance is `trade_staleness` for both classes.
      * @returns base64 XDR operation; parse result with `parsers.verifyPrice`
      */
-    verifyPrice(report: Buffer | Uint8Array, feedId: Buffer | Uint8Array): string {
+    verifyPrice(
+        report: Buffer | Uint8Array,
+        feedId: Buffer | Uint8Array,
+        protective = false,
+    ): string {
         return this.call(
             'verify_price',
             xdr.ScVal.scvBytes(toBuffer(report)),
             feedIdToScVal(feedId),
+            xdr.ScVal.scvBool(protective),
         ).toXDR('base64');
     }
 
@@ -125,14 +152,21 @@ export class OracleContract extends Contract {
     // ============================================================
 
     /**
-     * Update the max staleness threshold in seconds (owner only)
-     * Must lie in [MIN_STALENESS_SECONDS=3, MAX_STALENESS_SECONDS=15].
-     * @param maxStaleness - Maximum age of a price observation in seconds
+     * Update both staleness windows in seconds (owner only)
+     *
+     * One call sets the pair atomically, so the `trade <= close` ordering is
+     * always checked against the values that will actually be stored. Must
+     * satisfy `MIN_STALENESS_SECONDS=3 <= tradeStaleness <=
+     * MAX_TRADE_STALENESS_SECONDS=15` and `tradeStaleness <= closeStaleness
+     * <= MAX_CLOSE_STALENESS_SECONDS=120`.
+     * @param tradeStaleness - Max report age for strict (fill) verifications
+     * @param closeStaleness - Max report age for protective (gap-closing) verifications
      */
-    updateMaxStaleness(maxStaleness: u64): string {
+    updateStaleness(tradeStaleness: u64, closeStaleness: u64): string {
         return this.call(
-            'update_max_staleness',
-            nativeToScVal(maxStaleness, { type: 'u64' }),
+            'update_staleness',
+            nativeToScVal(tradeStaleness, { type: 'u64' }),
+            nativeToScVal(closeStaleness, { type: 'u64' }),
         ).toXDR('base64');
     }
 
@@ -186,10 +220,17 @@ export class OracleContract extends Contract {
     }
 
     /**
-     * Get the current max staleness threshold in seconds
+     * Get the strict (fill) staleness window in seconds
      */
-    maxStaleness(): string {
-        return this.call('max_staleness').toXDR('base64');
+    tradeStaleness(): string {
+        return this.call('trade_staleness').toXDR('base64');
+    }
+
+    /**
+     * Get the protective (gap-closing) staleness window in seconds
+     */
+    closeStaleness(): string {
+        return this.call('close_staleness').toXDR('base64');
     }
 
     /**

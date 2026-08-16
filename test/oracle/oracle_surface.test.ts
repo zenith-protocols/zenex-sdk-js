@@ -28,29 +28,34 @@ describe('OracleContract surface', () => {
 
     it('deploy builds the constructor op', () => {
         const op = OracleContract.deploy(OWNER, Buffer.alloc(32, 9), {
-            owner: OWNER, verifier: VERIFIER, max_staleness: 15n, spread_reduction_factor: 0n,
+            owner: OWNER,
+            verifier: VERIFIER,
+            trade_staleness: 15n,
+            close_staleness: 120n,
+            spread_reduction_factor: 0n,
         });
         const create = xdr.Operation.fromXDR(op, 'base64').body()
             .invokeHostFunctionOp().hostFunction().createContractV2();
-        expect(scValToNative(create.constructorArgs()[0])).toBe(OWNER);
-        expect(scValToNative(create.constructorArgs()[1])).toBe(VERIFIER);
-        expect(scValToNative(create.constructorArgs()[2])).toBe(15n);
-        expect(scValToNative(create.constructorArgs()[3])).toBe(0n);
+        expect(create.constructorArgs().map((a) => scValToNative(a)))
+            .toEqual([OWNER, VERIFIER, 15n, 120n, 0n]);
     });
 
     it('builds verification ops from Buffer and Uint8Array payloads', () => {
         const report = Buffer.from('cafebabe', 'hex');
         const vp = decodeInvoke(oracle.verifyPrice(report, FEED_ID));
         expect(vp.fn).toBe('verify_price');
-        expect(vp.args).toEqual([report, FEED_ID]);
+        expect(vp.args).toEqual([report, FEED_ID, false]);
 
-        const vpU8 = decodeInvoke(oracle.verifyPrice(new Uint8Array([1, 2]), new Uint8Array(FEED_ID)));
+        const vpU8 = decodeInvoke(oracle.verifyPrice(new Uint8Array([1, 2]), new Uint8Array(FEED_ID), true));
         expect(vpU8.args[0]).toEqual(Buffer.from([1, 2]));
         expect(vpU8.args[1]).toEqual(FEED_ID);
+        expect(vpU8.args[2]).toBe(true);
     });
 
     it('builds admin, ownable, and view ops', () => {
-        expect(decodeInvoke(oracle.updateMaxStaleness(10n)).args).toEqual([10n]);
+        const staleness = decodeInvoke(oracle.updateStaleness(10n, 120n));
+        expect(staleness.fn).toBe('update_staleness');
+        expect(staleness.args).toEqual([10n, 120n]);
         expect(decodeInvoke(oracle.updateSpreadReductionFactor(1_000_000_000_000_000_000n)).args)
             .toEqual([1_000_000_000_000_000_000n]);
         expect(decodeInvoke(oracle.getOwner()).fn).toBe('get_owner');
@@ -59,7 +64,8 @@ describe('OracleContract surface', () => {
         expect(decodeInvoke(oracle.acceptOwnership()).fn).toBe('accept_ownership');
         expect(decodeInvoke(oracle.renounceOwnership()).fn).toBe('renounce_ownership');
         expect(decodeInvoke(oracle.verifier()).fn).toBe('verifier');
-        expect(decodeInvoke(oracle.maxStaleness()).fn).toBe('max_staleness');
+        expect(decodeInvoke(oracle.tradeStaleness()).fn).toBe('trade_staleness');
+        expect(decodeInvoke(oracle.closeStaleness()).fn).toBe('close_staleness');
         expect(decodeInvoke(oracle.spreadReductionFactor()).fn).toBe('spread_reduction_factor');
     });
 
@@ -71,10 +77,11 @@ describe('OracleContract surface', () => {
         expect(pd.ask).toBe(101n);
         expect(pd.publish_time).toBe(1234n);
 
-        expect(p.updateMaxStaleness()).toBeUndefined();
+        expect(p.updateStaleness()).toBeUndefined();
         expect(p.updateSpreadReductionFactor()).toBeUndefined();
         expect(p.verifier(Address.fromString(VERIFIER).toScVal().toXDR('base64'))).toBe(VERIFIER);
-        expect(p.maxStaleness(nativeToScVal(15n, { type: 'u64' }).toXDR('base64'))).toBe(15n);
+        expect(p.tradeStaleness(nativeToScVal(10n, { type: 'u64' }).toXDR('base64'))).toBe(10n);
+        expect(p.closeStaleness(nativeToScVal(120n, { type: 'u64' }).toXDR('base64'))).toBe(120n);
         expect(p.spreadReductionFactor(nativeToScVal(0n, { type: 'i128' }).toXDR('base64'))).toBe(0n);
         expect(p.getOwner(Address.fromString(OWNER).toScVal().toXDR('base64'))).toBe(OWNER);
         expect(p.transferOwnership()).toBeUndefined();

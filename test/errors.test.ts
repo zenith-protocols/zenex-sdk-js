@@ -207,6 +207,26 @@ describe('contractErrorFromCode (hint-free resolution)', () => {
         expect(contractErrorFromCode(793).type).toBe(ContractErrorType.OraclePriceAhead);
     });
 
+    it('describes 782/783/793 in two-tier staleness terms (contracts #169)', () => {
+        // 782 fires against whichever window the call selected, so the message
+        // must not imply a single global threshold.
+        const stale = contractErrorFromCode(782).message;
+        expect(stale).toMatch(/trade_staleness/);
+        expect(stale).toMatch(/close_staleness/);
+
+        // 783 pins both halves of the validity rule: the trade window's own
+        // bounds and the ordering against the close window.
+        const bounds = contractErrorFromCode(783).message;
+        expect(bounds).toMatch(/3 <= trade_staleness <= 15/);
+        expect(bounds).toMatch(/trade_staleness <= close_staleness <= 120/);
+
+        // The forward allowance never widens with the call class — quoting the
+        // close window here would misdescribe the gate.
+        const ahead = contractErrorFromCode(793).message;
+        expect(ahead).toMatch(/trade_staleness ahead/);
+        expect(ahead).not.toMatch(/close_staleness ahead/);
+    });
+
     it('resolves the Chainlink report rejects 784/785 with their new meanings', () => {
         expect(contractErrorFromCode(784).type).toBe(ContractErrorType.OracleReportExpired);
         expect(contractErrorFromCode(784).message).toBe(

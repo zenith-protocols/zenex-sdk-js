@@ -189,12 +189,12 @@ const errorMessages: Record<number, string> = {
     // Oracle
     [780]: 'Verified report body failed decoding',
     [781]: 'Non-positive price side, crossed book (bid > ask), or int192 overflow',
-    [782]: 'Price observation is older than max_staleness',
-    [783]: 'max_staleness outside the [3, 15] second bounds',
+    [782]: 'Price observation is older than the selected staleness window (trade_staleness for fills, close_staleness for gap-closing calls)',
+    [783]: 'Staleness pair violates 3 <= trade_staleness <= 15 or trade_staleness <= close_staleness <= 120 seconds',
     [784]: 'Ledger clock has passed the report expiresAt',
     [785]: 'spread_reduction_factor outside [0, SCALAR_18]',
     [790]: 'Report prices a different stream than the feed anchor',
-    [793]: 'Report validity window not open, or observation ahead of the ledger clock',
+    [793]: 'Report validity window not open, or observation more than trade_staleness ahead of the ledger clock (the forward allowance never widens with the call class)',
 
     // Strategy Vault
     [800]: 'Invalid amount for strategy operation',
