@@ -53,7 +53,18 @@ function set(pair: SidePair, isLong: boolean, value: bigint): void {
     else pair.short = value;
 }
 
-function borrowingRate(config: TradingConfig, utilization: bigint): bigint {
+/**
+ * Borrowing rate per second at `utilization` (kink model; SCALAR_18).
+ *
+ * Ports `borrowing::borrowing_rate`. Below the kink the rate climbs linearly
+ * (`borrowRate * utilization`); above `targetUtil` an additional slope blends
+ * in so the rate reaches exactly `increasedBorrowRate` at full utilization.
+ * Both legs round up, as a charge.
+ *
+ * Exported so display surfaces can annualize the exact rate rather than
+ * re-derive the kink curve in floats.
+ */
+export function borrowingRate(config: TradingConfig, utilization: bigint): bigint {
     const base = mulDivCeil(config.borrowRate, utilization, SCALAR_18);
     if (utilization <= config.targetUtil) return base;
 

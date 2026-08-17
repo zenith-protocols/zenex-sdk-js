@@ -274,6 +274,17 @@ export * from './trading/market/index.js';
 export * from './trading/position/index.js';
 export * from './trading/order/index.js';
 
+// =============================================================================
+// Display layer (approximate floats, for rendering only)
+//
+// Never feed these back into a transaction: quote with the exact surfaces above
+// and parse user input with `parseAtomic`. Also available namespaced as
+// `Display` for call sites that want the distinction visible.
+// =============================================================================
+
+export * from './display/index.js';
+export * as Display from './display/index.js';
+
 export {
     convertVaultAssetsToShares,
     convertVaultSharesToAssets,
