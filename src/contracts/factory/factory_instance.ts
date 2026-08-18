@@ -2,11 +2,6 @@ import { xdr, scValToNative } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 import type { FactoryInitMeta } from './factory_contract.js';
 
-/**
- * The factory contract's decoded instance storage. Deployed markets live in
- * PERSISTENT storage under `FactoryDataKey::Pools(address)`, one entry each,
- * and are not part of this read.
- */
 export interface FactoryInstanceState {
     /** WASM hashes and wiring every market this factory deploys is given. */
     initMeta: FactoryInitMeta;
@@ -14,11 +9,6 @@ export interface FactoryInstanceState {
     owner?: string;
 }
 
-/**
- * Walk a factory contract-instance value into its decoded state.
- *
- * @throws If the value is not a contract instance, or `InitMeta` is absent.
- */
 export function parseFactoryInstance(
     instanceVal: xdr.ScVal,
 ): FactoryInstanceState {

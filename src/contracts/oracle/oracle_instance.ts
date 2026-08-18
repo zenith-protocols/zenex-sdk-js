@@ -1,7 +1,6 @@
 import { xdr, scValToBigInt, scValToNative } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
-/** The oracle contract's decoded instance storage. */
 export interface OracleInstanceState {
     /** Chainlink Data Streams verifier the reports are checked against. */
     verifier: string;
@@ -15,11 +14,6 @@ export interface OracleInstanceState {
     owner?: string;
 }
 
-/**
- * Walk an oracle contract-instance value into its decoded state.
- *
- * @throws If the value is not a contract instance, or a required key is absent.
- */
 export function parseOracleInstance(
     instanceVal: xdr.ScVal,
 ): OracleInstanceState {

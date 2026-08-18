@@ -5,7 +5,6 @@ import type { AdlState, TradingConfig } from './trading_types.js';
 import { parseAdlState, parseTradingConfig } from './trading_types.js';
 
 
-/** The trading contract's decoded instance storage. */
 export interface TradingInstanceState {
     /** Global trading parameters. */
     config: TradingConfig;
@@ -34,16 +33,6 @@ export interface TradingInstanceState {
     owner?: string;
 }
 
-/**
- * Walk a trading contract-instance value (`ScVal::ContractInstance`) into its
- * decoded [`TradingInstanceState`].
- *
- * @param instanceVal - The `.val()` of the trading instance `ContractDataEntry`
- *   (an `scvContractInstance`).
- * @throws If the value is not a contract instance, or any required key
- *   (`Config`, `FeedId`, `Status`, `Vault`, `Token`, `Oracle`, `Treasury`)
- *   is absent.
- */
 export function parseTradingInstance(
     instanceVal: xdr.ScVal,
 ): TradingInstanceState {

@@ -1,7 +1,6 @@
 import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
-/** Decoded strategy-vault instance storage. */
 export interface VaultInstanceState {
     /** Underlying asset token contract (`AssetAddress`). */
     asset: string;
@@ -17,10 +16,7 @@ export interface VaultInstanceState {
     strategy?: string;
 }
 
-/**
- * Extract the `decimals` field from the OZ `Meta` (`Metadata { decimals, name,
- * symbol }`) instance-storage map value.
- */
+/** `Meta` is the OZ `Metadata { decimals, name, symbol }` map. */
 function extractMetaDecimals(val: xdr.ScVal): number | undefined {
     if (val.switch() !== xdr.ScValType.scvMap()) return undefined;
     const map = val.map();
@@ -37,15 +33,6 @@ function extractMetaDecimals(val: xdr.ScVal): number | undefined {
     return undefined;
 }
 
-/**
- * Walk a vault contract-instance value (`ScVal::ContractInstance`) into its
- * decoded [`VaultInstanceState`].
- *
- * @param instanceVal - The `.val()` of the vault instance `ContractDataEntry`
- *   (an `scvContractInstance`).
- * @throws If the value is not a contract instance, or the asset address or
- *   share metadata is missing (both are constructor-set invariants).
- */
 export function parseVaultInstance(instanceVal: xdr.ScVal): VaultInstanceState {
     const storage = instanceStorage(instanceVal, 'vault');
     // Asset first: it is the most informative thing to be missing, so it should
