@@ -7,7 +7,8 @@ import {
     mulDivFloor,
     subI128,
 } from '../../math/fixed.js';
-import { marketSidePnl, sideCapacity } from '../market/capacity.js';
+import { sideCapacity } from '../market/capacity.js';
+import { marketSidePnl } from '../market/pnl.js';
 import { advanceMarketAccruals } from '../market/rates.js';
 import type { PriceData } from '../market/types.js';
 import {

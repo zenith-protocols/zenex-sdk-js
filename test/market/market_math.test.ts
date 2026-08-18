@@ -2,16 +2,10 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { SCALAR_18 } from '../../src/math/fixed.js';
-import {
-    entryPrice,
-    exactPositionPnl,
-    exitPrice,
-    marketNetPnl,
-    marketSidePnl,
-    quoteTradeFees,
-    reserveUtilization,
-    sideReserved,
-} from '../../src/trading/market/capacity.js';
+import { reserveUtilization, sideReserved } from '../../src/trading/market/capacity.js';
+import { quoteTradeFees } from '../../src/trading/market/fees.js';
+import { exactPositionPnl, marketNetPnl, marketSidePnl } from '../../src/trading/market/pnl.js';
+import { entryPrice, exitPrice } from '../../src/trading/market/pricing.js';
 import type { PriceData } from '../../src/trading/market/types.js';
 import type {
     MarketData,
@@ -96,7 +90,7 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
     };
 }
 
-describe('exact market marks and capacity', () => {
+describe('exact market marks, PnL and capacity', () => {
     it('selects the contract entry and exit sides', () => {
         const price: PriceData = {
             feedId: Buffer.alloc(32, 1),

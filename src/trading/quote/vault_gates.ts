@@ -1,8 +1,5 @@
-import {
-    marketSidePnl,
-    sideCapacity,
-    sideReserved,
-} from '../market/capacity.js';
+import { sideCapacity, sideReserved } from '../market/capacity.js';
+import { marketSidePnl } from '../market/pnl.js';
 import { advanceMarketAccruals } from '../market/rates.js';
 import type { PriceData } from '../market/types.js';
 import { decodeLedgerSequence, exact, unavailable } from './result.js';

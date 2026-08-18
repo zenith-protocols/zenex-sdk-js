@@ -1,6 +1,7 @@
 import type { MarketData, TradingConfig } from '../contracts/trading/trading_types.js';
 import type { PriceData, TradeFees } from '../trading/market/types.js';
-import { entryPrice, exitPrice, quoteTradeFees } from '../trading/market/capacity.js';
+import { quoteTradeFees } from '../trading/market/fees.js';
+import { entryPrice, exitPrice } from '../trading/market/pricing.js';
 import { SCALAR_18, mulDivFloor } from '../math/fixed.js';
 import { formatPrice, formatToken } from './format.js';
 

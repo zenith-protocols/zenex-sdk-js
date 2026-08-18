@@ -6,12 +6,9 @@ import {
     mulDivFloor,
     subI128,
 } from '../../math/fixed.js';
-import {
-    exactPositionPnl,
-    marketSidePnl,
-    quoteTradeFees,
-    sideCapacity,
-} from '../market/capacity.js';
+import { sideCapacity } from '../market/capacity.js';
+import { quoteTradeFees } from '../market/fees.js';
+import { exactPositionPnl, marketSidePnl } from '../market/pnl.js';
 import { advanceMarketAccruals } from '../market/rates.js';
 import type { PriceData } from '../market/types.js';
 import {

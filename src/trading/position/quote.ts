@@ -6,15 +6,10 @@ import {
     mulDivFloor,
     subI128,
 } from '../../math/fixed.js';
-import {
-    entryPrice,
-    exactPositionPnl,
-    exitPrice,
-    marketSidePnl,
-    quoteTradeFees,
-    sideCapacity,
-    sideReserved,
-} from '../market/capacity.js';
+import { sideCapacity, sideReserved } from '../market/capacity.js';
+import { quoteTradeFees } from '../market/fees.js';
+import { exactPositionPnl, marketSidePnl } from '../market/pnl.js';
+import { entryPrice, exitPrice } from '../market/pricing.js';
 import { advanceMarketAccruals } from '../market/rates.js';
 import type { PriceData } from '../market/types.js';
 import { decodeLedgerSequence, exact, unavailable } from '../quote/result.js';

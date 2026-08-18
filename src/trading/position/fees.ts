@@ -4,7 +4,7 @@ import {
     mulDivCeil,
     subI128,
 } from '../../math/fixed.js';
-import { quoteTradeFees } from '../market/capacity.js';
+import { quoteTradeFees } from '../market/fees.js';
 import type {
     MarketData,
     Position,

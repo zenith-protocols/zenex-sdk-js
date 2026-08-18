@@ -1,10 +1,6 @@
 import type { MarketData, TradingConfig } from '../contracts/trading/trading_types.js';
 import type { PriceData } from '../trading/market/types.js';
-import {
-    reserveUtilization,
-    sideCapacity,
-    sideReserved,
-} from '../trading/market/capacity.js';
+import { reserveUtilization, sideCapacity, sideReserved } from '../trading/market/capacity.js';
 import { borrowingRate } from '../trading/market/rates.js';
 import { SCALAR_18 } from '../math/fixed.js';
 import { formatAnnualPercent, formatPercent } from './format.js';

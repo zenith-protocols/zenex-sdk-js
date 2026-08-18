@@ -7,7 +7,8 @@ import type {
     SidePair,
 } from '../../src/contracts/trading/trading_types.js';
 import type { PriceData } from '../../src/trading/market/types.js';
-import { entryPrice, quoteTradeFees } from '../../src/trading/market/capacity.js';
+import { quoteTradeFees } from '../../src/trading/market/fees.js';
+import { entryPrice } from '../../src/trading/market/pricing.js';
 import {
     SECONDS_PER_YEAR,
     closeCostPreview,

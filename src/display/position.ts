@@ -4,7 +4,7 @@ import type {
     TradingConfig,
 } from '../contracts/trading/trading_types.js';
 import type { PriceData } from '../trading/market/types.js';
-import { exitPrice } from '../trading/market/capacity.js';
+import { exitPrice } from '../trading/market/pricing.js';
 import {
     liquidationPrice,
     pendingBorrowing,
