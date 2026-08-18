@@ -19,12 +19,10 @@ function magnitude(value: bigint): bigint {
 }
 
 /**
- * Signed PnL of `position` marked at the exit price, token-dec.
+ * Signed PnL of `position` if it closed now, token-dec. Positive is profit.
  *
- * Ports `math::pnl`. A long is `floor(tokens * bid / SCALAR_18) - notional`;
- * a short is `notional - ceil(tokens * ask / SCALAR_18)`. Both round against
- * the trader, the same conservative direction the contract uses for the
- * vault's accounting.
+ * A long is `floor(tokens * bid / SCALAR_18) - notional`. A short is
+ * `notional - ceil(tokens * ask / SCALAR_18)`. Both round against the trader.
  */
 export function exactPositionPnl(
     position: Position,
@@ -40,14 +38,14 @@ export function exactPositionPnl(
 }
 
 /**
- * Signed pending PnL of `isLong`'s side, token-dec.
+ * Signed unrealized PnL of every position on `isLong`'s side, token-dec.
  *
- * Ports `MarketData::side_pnl`, the measure behind every PnL-factor gate.
- * With `maximize` true the side marks to maximize trader PnL: long at the
- * ask rounded up, short at the bid rounded down. With `maximize` false it
- * marks to minimize trader PnL: long at the bid rounded down, short at the
- * ask rounded up. A loss floors at the negative of the side's posted
- * `margin`; a paper loss beyond margin cannot realize.
+ * A loss floors at the side's posted margin, because no more than that can
+ * be realized.
+ *
+ * @param maximize `true` marks in the traders' favour: long at the ask
+ *   rounded up, short at the bid rounded down. `false` marks against them:
+ *   long at the bid rounded down, short at the ask rounded up.
  */
 export function marketSidePnl(
     data: MarketData,
@@ -77,10 +75,8 @@ export function marketSidePnl(
 }
 
 /**
- * Signed net pending trader PnL across both sides, token-dec.
- *
- * Ports `MarketData::net_pnl`: the sum of `marketSidePnl` for the long and
- * short side at the same `maximize` marking.
+ * Signed unrealized PnL across both sides, token-dec. Both sides use the same
+ * `maximize` marking. See {@link marketSidePnl}.
  */
 export function marketNetPnl(data: MarketData, price: PriceData, maximize: boolean): bigint {
     return addI128(

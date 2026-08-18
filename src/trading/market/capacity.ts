@@ -12,12 +12,11 @@ import type { PriceData } from './types.js';
 import { marketNetPnl } from './pnl.js';
 
 /**
- * Reserved value backing `isLong`'s open interest, token-dec.
+ * Value the vault has reserved against `isLong`'s open interest, token-dec.
  *
- * Ports `MarketData::side_reserved`. A long side marks its base `tokens` at
- * the ask, rounded up; a short side reads its entry `notional` directly,
- * since its payout is bounded by it. Both readings overstate the reserve,
- * which keeps the utilization gates conservative.
+ * A long marks its base size at the ask and rounds up. A short reads its
+ * entry notional. Both round in the vault's favour, so this reads at or above
+ * the true reserve.
  */
 export function sideReserved(data: MarketData, price: PriceData, isLong: boolean): bigint {
     return isLong
@@ -26,25 +25,22 @@ export function sideReserved(data: MarketData, price: PriceData, isLong: boolean
 }
 
 /**
- * An 18-dec `factor` of half of `vaultAssets`, rounded down, token-dec.
+ * How much of the vault one side of the book may draw on, token-dec. Each
+ * side gets half the vault, scaled by `factor` and rounded down.
  *
- * Ports `math::half_factor`. Each side of the book is measured against its
- * own half of the vault, so this is the shared denominator behind both the
- * reserve cap, pass `config.maxUtilOpen`, and the PnL haircut allowance,
- * pass `config.maxPnlTrader`.
+ * @param factor SCALAR_18 fraction. Pass `config.maxUtilOpen` for the reserve
+ *   cap, or `config.maxPnlTrader` for the PnL haircut allowance.
  */
 export function sideCapacity(vaultAssets: bigint, factor: bigint): bigint {
     return mulDivFloor(vaultAssets / 2n, factor, SCALAR_18);
 }
 
 /**
- * Reserve utilization: the share of `capacity` backing `reserve`, clamped to
- * `[0, 1]` (SCALAR_18).
+ * Share of `capacity` that `reserve` consumes, as a SCALAR_18 fraction
+ * clamped to `[0, 1]`. Rounds up.
  *
- * Ports `side_utilization`. An empty `reserve` reads 0; a non-empty
- * `reserve` against zero `capacity` reads full utilization. Otherwise the
- * ratio rounds up, so both the utilization gate and the borrowing rate it
- * feeds err high.
+ * A zero `reserve` reads 0. A non-zero `reserve` against zero `capacity`
+ * reads fully utilized.
  */
 export function reserveUtilization(reserve: bigint, capacity: bigint): bigint {
     if (reserve <= 0n) return 0n;

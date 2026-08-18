@@ -12,7 +12,7 @@ import type {
 } from '../../contracts/trading/trading_types.js';
 import type { TradeFees } from './types.js';
 
-/** 10% cap on the impact fee rate (SCALAR_18), matching the contract's `MAX_IMPACT_RATE`. */
+/** 10% ceiling on the impact fee rate, SCALAR_18. */
 const MAX_IMPACT_RATE = SCALAR_18 / 10n;
 
 function magnitude(value: bigint): bigint {
@@ -21,22 +21,21 @@ function magnitude(value: bigint): bigint {
 }
 
 /**
- * Trade fee quote for a signed change on `isLong`'s side, token-dec.
+ * Fees a fill would pay on `isLong`'s side, token-dec. Every leg rounds up.
  *
- * Ports `Market::trade_fees`. It judges the change with
- * `MarketData::skew_split` by its effect on the book's long and short token
- * imbalance, not by notional, then maps that split onto `signedNotional`
- * pro-rata. The leg that widens the imbalance becomes `worsening` and pays
- * `config.feeDom`. The leg that narrows it becomes `improving` and pays
- * `config.feeNonDom`. Because the split follows tokens, which side pays the
- * dominant rate can depend on the book's skew, not only on the trade's own
- * direction. The impact fee is quadratic on the fill's full notional,
- * capped at 10% of it, and does not depend on skew. Every fee leg rounds
- * up, against the trader.
+ * The base fee splits by how the fill moves the book's long-versus-short
+ * token imbalance. The part that widens the imbalance pays `config.feeDom`,
+ * the part that narrows it pays `config.feeNonDom`. The split follows tokens
+ * rather than notional, so which rate a trade mostly pays depends on the
+ * book's current skew, not only on its own direction. Quote before you show a
+ * cost: the same trade is priced differently on a different book.
  *
- * `signedNotional` and `signedTokens` are the fill's signed deltas on
- * `isLong`'s side, positive for an increase and negative for a decrease
- * (token-dec and base-dec). Only their magnitudes affect the fee.
+ * The impact fee is quadratic on the full notional and capped at 10% of it,
+ * regardless of skew.
+ *
+ * @param signedNotional Fill's notional delta, token-dec. Positive to
+ *   increase, negative to decrease. Only the magnitude affects the fee.
+ * @param signedTokens Fill's base-size delta, base-dec, signed the same way.
  */
 export function quoteTradeFees(
     data: MarketData,
