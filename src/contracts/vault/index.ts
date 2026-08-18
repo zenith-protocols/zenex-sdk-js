@@ -7,7 +7,6 @@ export type { VaultConstructorArgs } from './vault_contract.js';
 // Ledger-entry walkers (getLedgerEntries reads)
 export { parseVaultInstance } from './vault_instance.js';
 export type { VaultInstanceState } from './vault_instance.js';
-export { parseTokenBalanceValue } from './vault_balance.js';
 
 // Events
 export { VaultEventType } from './vault_events.js';

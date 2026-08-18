@@ -21,10 +21,12 @@ import { scValToNative, type xdr } from '@stellar/stellar-sdk';
 import type { Network } from '../index.js';
 import {
     contractInstanceLedgerKey,
-    tokenBalanceLedgerKey,
     tradingMarketDataLedgerKey,
 } from '../ledger-keys.js';
-import { parseTokenBalanceValue } from '../contracts/vault/vault_balance.js';
+import {
+    tokenBalanceLedgerKey,
+    tokenBalanceOrZero,
+} from '../contracts/token/index.js';
 import { parseVaultInstance } from '../contracts/vault/vault_instance.js';
 import type { VaultInstanceState } from '../contracts/vault/vault_instance.js';
 import type { VaultAtomicState } from '../trading/quote/vault.js';
@@ -125,11 +127,11 @@ function decodeMarket(
         batch.require(keys.vaultInstance, `vault instance ${contracts.vault}`),
     );
 
-    // An absent Balance is a holder that has never been credited, which the
-    // token contract reports as 0 — not an error.
-    const balanceVal = batch.at(
-        keys.vaultBalance,
-        `vault balance for ${contracts.vault}`,
+    // The vault's margin balance is an ordinary token Balance slot — the same
+    // read `loadTokenBalance` does for a wallet, through the same decode.
+    // Absent means a holder never credited, which the token reports as 0.
+    const vaultAssetsAtomic = tokenBalanceOrZero(
+        batch.at(keys.vaultBalance, `vault balance for ${contracts.vault}`),
     );
 
     return {
@@ -138,7 +140,7 @@ function decodeMarket(
         instance,
         data,
         vault,
-        vaultAssetsAtomic: balanceVal ? parseTokenBalanceValue(balanceVal) : 0n,
+        vaultAssetsAtomic,
     };
 }
 
@@ -234,6 +236,17 @@ export class Market {
 
     get treasury(): string {
         return this.state.instance.treasury;
+    }
+
+    /**
+     * Current owner, or `undefined` once ownership has been renounced.
+     *
+     * Read from the same instance entry as everything else, so a client can
+     * verify the market is governed by the governance contract without a
+     * separate `get_owner` simulation.
+     */
+    get owner(): string | undefined {
+        return this.state.instance.owner;
     }
 
     /** Coherent atomic vault state for the exact vault quote helpers. */

@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { StrKey, xdr, nativeToScVal } from '@stellar/stellar-sdk';
 import { parseVaultInstance } from '../../src/contracts/vault/vault_instance.js';
-import { parseTokenBalanceValue } from '../../src/contracts/vault/vault_balance.js';
 import {
     vaultInstanceScVal,
     balanceMapScVal,
@@ -49,24 +48,5 @@ describe('parseVaultInstance', () => {
         expect(() => parseVaultInstance(xdr.ScVal.scvU32(1))).toThrow(
             /contract-instance/,
         );
-    });
-});
-
-describe('parseTokenBalanceValue', () => {
-    it('reads the SAC map amount', () => {
-        expect(parseTokenBalanceValue(balanceMapScVal(500_000n))).toBe(500_000n);
-    });
-
-    it('reads a direct i128 balance', () => {
-        expect(
-            parseTokenBalanceValue(nativeToScVal(3_000_000_000n, { type: 'i128' })),
-        ).toBe(3_000_000_000n);
-    });
-
-    it('reads a SAC map without an amount field as 0', () => {
-        const noAmount = xdr.ScVal.scvMap([
-            new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol('authorized'), val: xdr.ScVal.scvBool(true) }),
-        ]);
-        expect(parseTokenBalanceValue(noAmount)).toBe(0n);
     });
 });

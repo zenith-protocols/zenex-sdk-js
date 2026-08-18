@@ -35,6 +35,7 @@ describe('parseTradingInstance', () => {
         expect(instance.token).toBe(TOKEN);
         expect(instance.oracle).toBe(ORACLE);
         expect(instance.treasury).toBe(TREASURY);
+        expect(instance.owner).toBe(OWNER);
     });
 
     it('lazy keys default when absent (DelistedAt/TerminalPrice undefined, Adl zeroed)', () => {
@@ -58,11 +59,26 @@ describe('parseTradingInstance', () => {
         expect(instance.adl).toEqual({ long: true, short: false });
     });
 
-    it('skips a foreign (OZ Owner) instance key', () => {
-        // Present in the fixture via withOwner; a clean parse proves it is skipped.
-        expect(() =>
-            parseTradingInstance(tradingInstanceScVal({ ...wiring, withOwner: OWNER })),
-        ).not.toThrow();
+    it('reads the OZ Owner slot rather than discarding it', () => {
+        // Instance storage is ONE entry: Owner is already fetched and paid for,
+        // and a client needs it to verify the market is governance-owned.
+        expect(
+            parseTradingInstance(tradingInstanceScVal({ ...wiring, withOwner: OWNER })).owner,
+        ).toBe(OWNER);
+    });
+
+    it('reports no owner once ownership has been renounced', () => {
+        expect(parseTradingInstance(tradingInstanceScVal(wiring)).owner).toBeUndefined();
+    });
+
+    it('still ignores a key it has no field for, rather than failing the read', () => {
+        // Forward compatibility: a contract upgrade that adds a storage key must
+        // not break every client reading the instance.
+        const extended = contractInstance([
+            ...(tradingInstanceScVal(wiring).instance().storage() ?? []),
+            new xdr.ScMapEntry({ key: unitKey('SomeFutureKey'), val: xdr.ScVal.scvU32(1) }),
+        ]);
+        expect(() => parseTradingInstance(extended)).not.toThrow();
     });
 
     it('throws when a required key is missing', () => {

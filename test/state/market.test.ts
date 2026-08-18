@@ -4,9 +4,9 @@ import { Market, type MarketContracts } from '../../src/state/market.js';
 import { MarketStateError } from '../../src/state/entries.js';
 import {
     contractInstanceLedgerKey,
-    tokenBalanceLedgerKey,
     tradingMarketDataLedgerKey,
 } from '../../src/ledger-keys.js';
+import { tokenBalanceLedgerKey } from '../../src/contracts/token/index.js';
 import { Status } from '../../src/contracts/trading/trading_types.js';
 import type { Network } from '../../src/index.js';
 import {
@@ -131,6 +131,15 @@ describe('Market.load', () => {
         expect(market.vaultAtomic.totalAssets).toBe(0n);
     });
 
+    it('reads the vault balance through the same key a wallet balance uses', async () => {
+        const spy = mockEntries(marketEntries(contracts));
+        await Market.load(network, contracts);
+        const sent = spy.mock.calls[0].map((k) => (k as xdr.LedgerKey).toXDR('base64'));
+        expect(sent).toContain(
+            tokenBalanceLedgerKey(TOKEN, VAULT).toXDR('base64'),
+        );
+    });
+
     it('fails closed on a required entry the RPC omitted', async () => {
         mockEntries(marketEntries(contracts, { omitData: true }));
         await expect(Market.load(network, contracts)).rejects.toMatchObject({
@@ -239,6 +248,26 @@ describe('Market.crossCheckTotalAssets', () => {
 });
 
 describe('Market accessors', () => {
+    it('surfaces the owner from the same entry, with no extra call', async () => {
+        const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 12));
+        const instance = tradingInstanceScVal({
+            vault: VAULT,
+            token: TOKEN,
+            oracle: ORACLE,
+            treasury: TREASURY,
+            withOwner: OWNER,
+        });
+        const spy = mockEntries(marketEntries(contracts, { instance }));
+        const market = await Market.load(network, contracts);
+        expect(market.owner).toBe(OWNER);
+        expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports no owner once ownership has been renounced', async () => {
+        mockEntries(marketEntries(contracts));
+        expect((await Market.load(network, contracts)).owner).toBeUndefined();
+    });
+
     it('reports no retirement while the market is live', async () => {
         mockEntries(marketEntries(contracts));
         const market = await Market.load(network, contracts);

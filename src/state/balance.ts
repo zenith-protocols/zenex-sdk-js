@@ -8,8 +8,10 @@
 // =============================================================================
 
 import type { Network } from '../index.js';
-import { tokenBalanceLedgerKey } from '../ledger-keys.js';
-import { parseTokenBalanceValue } from '../contracts/vault/vault_balance.js';
+import {
+    tokenBalanceLedgerKey,
+    tokenBalanceOrZero,
+} from '../contracts/token/index.js';
 import { readEntries } from './entries.js';
 
 /**
@@ -25,8 +27,7 @@ export async function loadTokenBalance(
 ): Promise<bigint> {
     const key = tokenBalanceLedgerKey(token, holder);
     const batch = await readEntries(network, [key]);
-    const value = batch.at(key, `balance of ${holder} in ${token}`);
-    return value ? parseTokenBalanceValue(value) : 0n;
+    return tokenBalanceOrZero(batch.at(key, `balance of ${holder} in ${token}`));
 }
 
 /**
@@ -41,8 +42,7 @@ export async function loadTokenBalances(
     if (tokens.length === 0) return [];
     const keys = tokens.map((token) => tokenBalanceLedgerKey(token, holder));
     const batch = await readEntries(network, keys);
-    return keys.map((key, i) => {
-        const value = batch.at(key, `balance of ${holder} in ${tokens[i]}`);
-        return value ? parseTokenBalanceValue(value) : 0n;
-    });
+    return keys.map((key, i) =>
+        tokenBalanceOrZero(batch.at(key, `balance of ${holder} in ${tokens[i]}`)),
+    );
 }

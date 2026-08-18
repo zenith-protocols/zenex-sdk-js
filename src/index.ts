@@ -175,8 +175,13 @@ export {
     VaultContract,
     VaultEventType,
     parseVaultInstance,
-    parseTokenBalanceValue,
 } from './contracts/vault/index.js';
+
+// Token ledger-entry reads (any holder, any token)
+export {
+    parseTokenBalance,
+    tokenBalanceOrZero,
+} from './contracts/token/index.js';
 
 export type {
     VaultConstructorArgs,

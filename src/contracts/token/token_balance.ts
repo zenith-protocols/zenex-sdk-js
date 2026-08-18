@@ -1,10 +1,16 @@
 import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { tokenBalanceLedgerKey } from '../../ledger-keys.js';
 
 // =============================================================================
-// Token `Balance` ledger-entry value decode.
+// Token `Balance(holder)` ledger entries — key and decode.
 //
-// A holder's balance slot
-// on a token contract is either the SAC `BalanceValue` map
+// Nothing here is vault-specific. A `Balance` slot has the same shape for any
+// holder of any token, so the same pair serves the vault's margin balance
+// (`Balance(vault)`, which is exactly `Vault::total_assets`) and a wallet
+// balance for the connected user. `Market.load` and `loadTokenBalance` both go
+// through it rather than each rolling their own.
+//
+// The slot is either the SAC `BalanceValue` map
 // (`{ amount: i128, authorized: bool, clawback: bool }`) or a pure-Soroban
 // fungible token's plain `i128`. Both collapse to the integer balance in the
 // token's own decimals (token-dec).
@@ -17,7 +23,7 @@ import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
  * @param val - The `ScVal` from the token's `Balance(holder)` ledger entry.
  * @returns The balance as a bigint.
  */
-export function parseTokenBalanceValue(val: xdr.ScVal): bigint {
+export function parseTokenBalance(val: xdr.ScVal): bigint {
     if (val.switch() === xdr.ScValType.scvMap()) {
         const map = val.map();
         if (map) {
@@ -34,4 +40,23 @@ export function parseTokenBalanceValue(val: xdr.ScVal): bigint {
         return 0n;
     }
     return scValToBigInt(val);
+}
+
+/**
+ * The ledger key of a holder's balance on a token contract.
+ *
+ * Re-exported here so a caller building a batch reaches for the key and the
+ * decode in one place; it is the same builder `src/ledger-keys.ts` defines
+ * alongside the rest of the storage mirror.
+ */
+export { tokenBalanceLedgerKey };
+
+/**
+ * Decode a `Balance(holder)` entry that may be absent.
+ *
+ * Absent is `0n`, matching the token contract: a holder that has never been
+ * credited has no slot at all.
+ */
+export function tokenBalanceOrZero(val: xdr.ScVal | undefined): bigint {
+    return val ? parseTokenBalance(val) : 0n;
 }
