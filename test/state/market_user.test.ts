@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { rpc, xdr, StrKey, nativeToScVal } from '@stellar/stellar-sdk';
+import { rpc, xdr, StrKey, nativeToScVal, Asset } from '@stellar/stellar-sdk';
 import { MarketUser } from '../../src/state/market_user.js';
 import { Market } from '../../src/state/market.js';
 import { marketContext } from '../../src/state/context.js';
-import { loadTokenBalance, loadTokenBalances } from '../../src/state/balance.js';
-import { loadTreasuryRate } from '../../src/state/treasury.js';
+import {
+    loadAssetBalance,
+    loadTokenBalance,
+    loadTokenBalances,
+} from '../../src/state/balance.js';
+import { loadTreasuryInstance, loadTreasuryRate } from '../../src/state/treasury.js';
 import {
     contractInstanceLedgerKey,
     tokenBalanceLedgerKey,
@@ -34,6 +38,7 @@ const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 5));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7));
 const USER_B = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 8));
 const RATE = 5n * 10n ** 16n;
+const ISSUER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 30));
 
 const network: Network = {
     rpc: 'http://localhost:1337',
@@ -273,9 +278,30 @@ describe('standalone token balance', () => {
         expect(spy.mock.calls[0]).toHaveLength(1);
     });
 
-    it('reads an uncredited holder as zero', async () => {
+    it('reads an uncredited CONTRACT holder as zero', async () => {
         mockEntries([]);
-        expect(await loadTokenBalance(network, TOKEN, USER)).toBe(0n);
+        const someContract = StrKey.encodeContract(Buffer.alloc(32, 21));
+        expect(await loadTokenBalance(network, TOKEN, someContract)).toBe(0n);
+    });
+
+    it('refuses to report zero for a classic account with no contract-data slot', async () => {
+        // For a SAC, a G-address holds its balance in a TRUSTLINE, so an absent
+        // Balance key is indistinguishable from a real zero. Verified live: an
+        // account holding 522235922427 read as 0 through this path.
+        mockEntries([]);
+        await expect(loadTokenBalance(network, TOKEN, USER)).rejects.toMatchObject({
+            code: 'MISSING_STATE',
+            message: expect.stringContaining('loadAssetBalance'),
+        });
+    });
+
+    it('still returns a present balance for a classic holder of a Soroban token', async () => {
+        // A pure-Soroban fungible (e.g. the vault's share token) really does
+        // keep a G-address balance in contract data.
+        mockEntries([
+            ledgerEntryFor(tokenBalanceLedgerKey(TOKEN, USER), balanceMapScVal(11n)),
+        ]);
+        expect(await loadTokenBalance(network, TOKEN, USER)).toBe(11n);
     });
 
     it('returns nothing without a round trip for no tokens', async () => {
@@ -295,6 +321,24 @@ describe('standalone token balance', () => {
     });
 });
 
+describe('loadAssetBalance', () => {
+    it('delegates to the SDK helper, which routes classic holders to a trustline', async () => {
+        const spy = vi
+            .spyOn(rpc.Server.prototype, 'getAssetBalance')
+            .mockResolvedValue({ latestLedger: 1, balanceEntry: { amount: '522235922427', authorized: true, clawback: false } } as never);
+        expect(await loadAssetBalance(network, USER, new Asset('ZUSD', ISSUER))).toBe(
+            522_235_922_427n,
+        );
+        expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads a holder with no trustline or balance entry as zero', async () => {
+        vi.spyOn(rpc.Server.prototype, 'getAssetBalance')
+            .mockResolvedValue({ latestLedger: 1 } as never);
+        expect(await loadAssetBalance(network, USER, new Asset('ZUSD', ISSUER))).toBe(0n);
+    });
+});
+
 describe('loadTreasuryRate', () => {
     it('reads the rate from the treasury instance', async () => {
         const spy = mockEntries([
@@ -309,6 +353,19 @@ describe('loadTreasuryRate', () => {
             ledgerEntryFor(contractInstanceLedgerKey(TREASURY), treasuryInstanceScVal()),
         ]);
         expect(await loadTreasuryRate(network, TREASURY)).toBe(0n);
+    });
+
+    it('reads the owner from the same key, with no extra call', async () => {
+        const owner = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 4));
+        const spy = mockEntries([
+            ledgerEntryFor(
+                contractInstanceLedgerKey(TREASURY),
+                treasuryInstanceScVal(RATE, owner),
+            ),
+        ]);
+        const state = await loadTreasuryInstance(network, TREASURY);
+        expect(state).toEqual({ rate: RATE, owner });
+        expect(spy.mock.calls[0]).toHaveLength(1);
     });
 
     it('fails closed when the treasury instance is absent', async () => {

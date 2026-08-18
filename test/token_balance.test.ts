@@ -4,8 +4,8 @@ import {
     parseTokenBalance,
     tokenBalanceOrZero,
     tokenBalanceLedgerKey,
-} from '../../src/contracts/token/index.js';
-import { balanceMapScVal } from '../helpers/trading_state.js';
+} from '../src/token.js';
+import { balanceMapScVal } from './helpers/trading_state.js';
 
 describe('parseTokenBalance', () => {
     it('reads the SAC map amount', () => {

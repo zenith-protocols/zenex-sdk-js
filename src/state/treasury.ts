@@ -16,7 +16,11 @@
 
 import type { Network } from '../index.js';
 import { contractInstanceLedgerKey } from '../ledger-keys.js';
-import { parseTreasuryRate } from '../contracts/treasury/treasury_rate.js';
+import {
+    parseTreasuryInstance,
+    parseTreasuryRate,
+} from '../contracts/treasury/treasury_instance.js';
+import type { TreasuryInstanceState } from '../contracts/treasury/treasury_instance.js';
 import { readEntries } from './entries.js';
 
 /**
@@ -35,4 +39,22 @@ export async function loadTreasuryRate(
     const key = contractInstanceLedgerKey(treasury);
     const batch = await readEntries(network, [key]);
     return parseTreasuryRate(batch.require(key, `treasury instance ${treasury}`));
+}
+
+/**
+ * Read the whole treasury instance: fee rate plus owner.
+ *
+ * Same single key as {@link loadTreasuryRate} — the owner is already in the
+ * entry, so a client verifying the treasury is governance-owned pays nothing
+ * extra for it.
+ */
+export async function loadTreasuryInstance(
+    network: Network,
+    treasury: string,
+): Promise<TreasuryInstanceState> {
+    const key = contractInstanceLedgerKey(treasury);
+    const batch = await readEntries(network, [key]);
+    return parseTreasuryInstance(
+        batch.require(key, `treasury instance ${treasury}`),
+    );
 }

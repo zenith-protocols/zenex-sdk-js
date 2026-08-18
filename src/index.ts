@@ -87,6 +87,26 @@ export type {
 
 export { parseTradingInstance } from './contracts/trading/index.js';
 
+// Instance-storage walkers — one per contract that keeps instance state.
+// Each is a single ledger key holding every value below, including `Owner`.
+export { instanceOwner, instanceStorage } from './contracts/instance.js';
+export {
+    parseOracleInstance,
+    type OracleInstanceState,
+} from './contracts/oracle/index.js';
+export {
+    parseFactoryInstance,
+    type FactoryInstanceState,
+} from './contracts/factory/index.js';
+export {
+    parseGovernanceInstance,
+    type GovernanceInstanceState,
+} from './contracts/governance/index.js';
+export {
+    parseTreasuryInstance,
+    type TreasuryInstanceState,
+} from './contracts/treasury/index.js';
+
 // =============================================================================
 // State layer (getLedgerEntries reads, one round trip each)
 // =============================================================================
@@ -177,11 +197,7 @@ export {
     parseVaultInstance,
 } from './contracts/vault/index.js';
 
-// Token ledger-entry reads (any holder, any token)
-export {
-    parseTokenBalance,
-    tokenBalanceOrZero,
-} from './contracts/token/index.js';
+
 
 export type {
     VaultConstructorArgs,
@@ -239,6 +255,9 @@ export {
     tradingClaimableFundingLedgerKey,
     tradingOrderLedgerKey,
 } from './ledger-keys.js';
+
+// Token reads (any holder, any token — not a Zenex contract binding)
+export * from './token.js';
 
 // Fixed-Point Math
 export * as FixedMath from './math/index.js';

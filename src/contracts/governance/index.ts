@@ -19,3 +19,7 @@ export type {
     GovernanceDelaySetEvent,
     GovernanceEvent,
 } from './governance_events.js';
+
+// Instance-storage walker (getLedgerEntries reads)
+export { parseGovernanceInstance } from './governance_instance.js';
+export type { GovernanceInstanceState } from './governance_instance.js';

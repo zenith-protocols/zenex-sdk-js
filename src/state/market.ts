@@ -26,7 +26,7 @@ import {
 import {
     tokenBalanceLedgerKey,
     tokenBalanceOrZero,
-} from '../contracts/token/index.js';
+} from '../token.js';
 import { parseVaultInstance } from '../contracts/vault/vault_instance.js';
 import type { VaultInstanceState } from '../contracts/vault/vault_instance.js';
 import type { VaultAtomicState } from '../trading/quote/vault.js';

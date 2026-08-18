@@ -1,8 +1,10 @@
 import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
-import { tokenBalanceLedgerKey } from '../../ledger-keys.js';
+import { tokenBalanceLedgerKey } from './ledger-keys.js';
 
 // =============================================================================
-// Token `Balance(holder)` ledger entries — key and decode.
+// Token reads. Not a contract binding — there is no Zenex token contract, only
+// whatever SAC or fungible token a deployment settles in — so this sits beside
+// `ledger-keys.ts` rather than under `contracts/`.
 //
 // Nothing here is vault-specific. A `Balance` slot has the same shape for any
 // holder of any token, so the same pair serves the vault's margin balance
@@ -14,6 +16,18 @@ import { tokenBalanceLedgerKey } from '../../ledger-keys.js';
 // (`{ amount: i128, authorized: bool, clawback: bool }`) or a pure-Soroban
 // fungible token's plain `i128`. Both collapse to the integer balance in the
 // token's own decimals (token-dec).
+//
+// WHERE A BALANCE ACTUALLY LIVES — the trap this module exists to document:
+//
+//   holder     SAC token                      pure-Soroban token
+//   -------    ---------------------------    -----------------------------
+//   C-address  contract data `Balance(C)`     contract data `Balance(C)`
+//   G-address  the account's TRUSTLINE        contract data `Balance(G)`
+//
+// So a classic account's balance of a SAC is NOT a contract-data entry, and
+// reading the `Balance` key for it returns nothing — indistinguishable from a
+// real zero. Our settlement token is a SAC and the vault's share token is a
+// pure-Soroban OZ fungible, so both rows are live for us.
 // =============================================================================
 
 /**

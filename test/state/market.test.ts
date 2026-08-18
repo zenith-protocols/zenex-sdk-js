@@ -6,7 +6,7 @@ import {
     contractInstanceLedgerKey,
     tradingMarketDataLedgerKey,
 } from '../../src/ledger-keys.js';
-import { tokenBalanceLedgerKey } from '../../src/contracts/token/index.js';
+import { tokenBalanceLedgerKey } from '../../src/token.js';
 import { Status } from '../../src/contracts/trading/trading_types.js';
 import type { Network } from '../../src/index.js';
 import {

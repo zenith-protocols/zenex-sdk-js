@@ -185,10 +185,18 @@ export function vaultInstanceScVal(options: VaultInstanceOptions): xdr.ScVal {
 }
 
 /** Treasury instance carrying a BARE `Symbol("Rate")` key (or none). */
-export function treasuryInstanceScVal(rate?: bigint): xdr.ScVal {
+export function treasuryInstanceScVal(rate?: bigint, owner?: string): xdr.ScVal {
     const storage: xdr.ScMapEntry[] = [];
     if (rate !== undefined) {
         storage.push(new xdr.ScMapEntry({ key: sym('Rate'), val: i128(rate) }));
+    }
+    if (owner !== undefined) {
+        storage.push(
+            new xdr.ScMapEntry({
+                key: unitKey('Owner'),
+                val: Address.fromString(owner).toScVal(),
+            }),
+        );
     }
     return contractInstance(storage);
 }
