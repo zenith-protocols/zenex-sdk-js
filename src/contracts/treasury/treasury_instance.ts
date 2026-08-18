@@ -8,6 +8,7 @@ export interface TreasuryInstanceState {
     owner?: string;
 }
 
+/** Never throws on a treasury instance: both slots have defaults. */
 export function parseTreasuryInstance(
     instanceVal: xdr.ScVal,
 ): TreasuryInstanceState {
@@ -19,6 +20,7 @@ export function parseTreasuryInstance(
     };
 }
 
+/** The `rate` field alone, for callers that only feed the quote math. */
 export function parseTreasuryRate(instanceVal: xdr.ScVal): bigint {
     return parseTreasuryInstance(instanceVal).rate;
 }

@@ -14,6 +14,7 @@ export interface OracleInstanceState {
     owner?: string;
 }
 
+/** Throws unless `Verifier`, both staleness windows and the spread factor are set. */
 export function parseOracleInstance(
     instanceVal: xdr.ScVal,
 ): OracleInstanceState {

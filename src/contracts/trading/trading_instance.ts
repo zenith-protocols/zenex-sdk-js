@@ -33,6 +33,11 @@ export interface TradingInstanceState {
     owner?: string;
 }
 
+/**
+ * Throws unless `Config`, `FeedId`, `Status`, `Vault`, `Token`, `Oracle` and
+ * `Treasury` are all set; the lazy keys fall back to `undefined` or a zeroed
+ * `AdlState`.
+ */
 export function parseTradingInstance(
     instanceVal: xdr.ScVal,
 ): TradingInstanceState {

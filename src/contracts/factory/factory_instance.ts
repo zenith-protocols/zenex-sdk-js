@@ -9,6 +9,7 @@ export interface FactoryInstanceState {
     owner?: string;
 }
 
+/** Throws when `InitMeta` is absent — the constructor always sets it. */
 export function parseFactoryInstance(
     instanceVal: xdr.ScVal,
 ): FactoryInstanceState {

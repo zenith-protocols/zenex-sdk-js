@@ -33,6 +33,7 @@ function extractMetaDecimals(val: xdr.ScVal): number | undefined {
     return undefined;
 }
 
+/** Throws unless `AssetAddress` and `Meta` are set — both constructor invariants. */
 export function parseVaultInstance(instanceVal: xdr.ScVal): VaultInstanceState {
     const storage = instanceStorage(instanceVal, 'vault');
     // Asset first: it is the most informative thing to be missing, so it should

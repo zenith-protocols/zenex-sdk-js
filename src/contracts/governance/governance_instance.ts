@@ -10,6 +10,7 @@ export interface GovernanceInstanceState {
     owner?: string;
 }
 
+/** Throws when `Delay` is absent — the constructor always sets it. */
 export function parseGovernanceInstance(
     instanceVal: xdr.ScVal,
 ): GovernanceInstanceState {
