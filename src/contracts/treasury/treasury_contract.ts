@@ -2,7 +2,6 @@ import { treasurySpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { i128, u32 } from '../../index.js';
 
-// Constructor arguments
 export interface TreasuryConstructorArgs {
     owner: string;
     rate: i128;

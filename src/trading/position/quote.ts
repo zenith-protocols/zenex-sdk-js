@@ -247,7 +247,7 @@ function haircutPnl(
  * Settled equity of a position whose accrual indices are already synced to
  * the market (the repeat settle banks nothing): margin less the full-size
  * close-grade trade fees, plus the haircut PnL. Ports the equity leg of
- * `Position::settle` (position.rs).
+ * `Position::settle`.
  */
 function settledEquity(
     position: Position,

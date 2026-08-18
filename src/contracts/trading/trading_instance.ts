@@ -10,7 +10,7 @@ import { parseAdlState, parseTradingConfig } from './trading_types.js';
 // The trading contract keeps
 // its config, oracle anchors, wired addresses, status, and the lazy
 // delist/ADL state in instance storage, each under a `DataKey` variant
-// (trading/src/storage.rs), plus `Owner` from `stellar_access::ownable`. This
+// under a `DataKey` variant, plus `Owner` from `stellar_access::ownable`. This
 // walks the instance map, matching each key by variant name; the lazy keys
 // (`DelistedAt`, `TerminalPrice`, `Adl`, `Owner`) yield `undefined` / the
 // zeroed default when absent, and any other absent required key is an error.

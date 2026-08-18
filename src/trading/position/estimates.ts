@@ -8,8 +8,8 @@ import type {
 // =============================================================================
 // Display estimates over a stored (unsettled) position.
 //
-// Every formula is ported from `zenex-contracts/trading/src/trading/position.rs`
-// and `.../math.rs`. These mark a RAW stored position at a single price without
+// Every formula is ported from the contract's `Position` and math modules.
+// These mark a RAW stored position at a single price without
 // settling accruals into margin, so they are estimates for display surfaces.
 // Transaction code must use `quotePositionAction` / `applyOrder` with one
 // coherent `TradingSnapshot`.

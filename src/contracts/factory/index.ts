@@ -5,7 +5,6 @@ export type {
     FactoryConstructorArgs,
 } from './factory_contract.js';
 
-// Events
 export { FactoryEventType } from './factory_events.js';
 
 export type {

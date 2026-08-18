@@ -12,7 +12,6 @@ export enum GovernanceEventType {
     DelaySet = 'delay_set',
 }
 
-// Governance Events
 export interface BaseGovernanceEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Governance;
     eventType: GovernanceEventType;

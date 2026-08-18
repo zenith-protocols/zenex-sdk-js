@@ -4,15 +4,14 @@ import { ZenexContractType, BaseZenexEvent } from '../../base_event.js';
 // Vault event types. Values are the on-chain name topics: bare
 // `#[contractevent]` defaults to snake_case of the struct name. `deposit`
 // and `withdraw` are the OpenZeppelin stellar-tokens ERC-4626 vault events
-// (vault/mod.rs `emit_deposit`/`emit_withdraw`); `strategy_withdraw` is the
-// Zenex strategy gate's own receipt (strategy-vault/src/strategy.rs).
+// (`emit_deposit`/`emit_withdraw`); `strategy_withdraw` is the
+// Zenex strategy gate's own receipt.
 export enum VaultEventType {
     Deposit = 'deposit',
     Withdraw = 'withdraw',
     StrategyWithdraw = 'strategy_withdraw',
 }
 
-// Vault Events
 export interface BaseVaultEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Vault;
     eventType: VaultEventType;

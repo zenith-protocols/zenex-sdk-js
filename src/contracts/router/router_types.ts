@@ -5,7 +5,7 @@ import { OrderKind } from '../trading/trading_types.js';
 // =============================================================================
 // Type mirrors and ScVal converters for the TradingRouter contract's types.
 //
-// Mirrors `zenex-contracts/trading-router/src/types.rs`. Field order in the
+// Mirrors the router contract's `Call` and outcome types. Field order in the
 // ScVal maps below matches `#[contracttype]`'s alphabetical snake_case
 // serialization.
 // =============================================================================

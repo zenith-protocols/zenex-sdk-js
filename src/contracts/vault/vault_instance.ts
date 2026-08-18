@@ -6,7 +6,7 @@ import { instanceStorage } from '../instance.js';
 //
 // The vault's instance storage carries the OZ stellar-tokens keys
 // (`Meta`, `TotalSupply`, `AssetAddress`, `VirtualDecimalsOffset`) plus the
-// vault's own `StrategyStorageKey::Strategy` (strategy-vault/src/storage.rs).
+// vault's own `StrategyStorageKey::Strategy`.
 // Every key is matched by variant name against the entry map, mirroring the
 // contract's own `#[contracttype]` encodings; unknown keys are skipped.
 // =============================================================================

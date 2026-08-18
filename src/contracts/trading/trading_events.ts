@@ -6,7 +6,7 @@ import {
 } from './trading_types.js';
 
 // =============================================================================
-// Trading event types, mirroring `trading/src/events.rs`.
+// Trading event types, mirroring the contract's `#[contractevent]` structs.
 //
 // Each `#[contractevent]` struct's topics are `[<snake_case event name>,
 // ...#[topic] fields in declaration order]`; remaining fields land in the
@@ -41,7 +41,6 @@ export enum TradingEventType {
     Liquidation = 'liquidation',
 }
 
-// Trading Events
 export interface BaseTradingEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Trading;
     eventType: TradingEventType;

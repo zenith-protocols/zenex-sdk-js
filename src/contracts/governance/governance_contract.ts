@@ -2,7 +2,6 @@ import { governanceSpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { u32, u64 } from '../../index.js';
 
-// Queued call returned by get_queued
 export interface QueuedCall {
     target: string;
     fn_name: string;
@@ -10,7 +9,6 @@ export interface QueuedCall {
     unlock_time: bigint;
 }
 
-// Constructor arguments
 export interface GovernanceConstructorArgs {
     owner: string;
     delay: bigint;

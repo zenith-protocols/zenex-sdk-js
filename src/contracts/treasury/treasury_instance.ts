@@ -5,7 +5,7 @@ import { instanceStorage } from '../instance.js';
 // Treasury contract-instance storage.
 //
 // Two slots with different key shapes: the fee rate under a BARE
-// `Symbol("Rate")` (treasury/src/storage.rs: `set::<Symbol, i128>`), not a
+// `Symbol("Rate")` (`set::<Symbol, i128>`), not a
 // `#[contracttype]` enum variant, and `Owner` from `stellar_access::ownable`.
 // The contract reads the rate with `.unwrap_or(0)`, so an absent key is the
 // SCALAR_18 rate `0`.

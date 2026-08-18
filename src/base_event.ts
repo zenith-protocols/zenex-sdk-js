@@ -13,7 +13,6 @@ import type { FactoryEvent } from './contracts/factory/factory_events.js';
 // shapes. The SDK ships no event decoders.
 // =============================================================================
 
-// Contract type enum
 export enum ZenexContractType {
     Vault = 'vault',
     Trading = 'trading',
@@ -21,7 +20,6 @@ export enum ZenexContractType {
     Governance = 'governance',
 }
 
-// Base event interface (typed event base)
 export interface BaseZenexEvent {
     id: string;
     contractId: string;

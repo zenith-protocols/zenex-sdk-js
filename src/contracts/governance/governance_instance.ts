@@ -4,7 +4,7 @@ import { instanceStorage } from '../instance.js';
 // =============================================================================
 // Governance contract-instance storage.
 //
-// `Delay` and `Nonce` (governance/src/storage.rs) plus `Owner`. Queued calls
+// `Delay` and `Nonce` (`GovKey`) plus `Owner`. Queued calls
 // are TEMPORARY entries under `GovKey::Queued(nonce)`, one per nonce, read
 // separately — this is the timelock's standing config.
 // =============================================================================

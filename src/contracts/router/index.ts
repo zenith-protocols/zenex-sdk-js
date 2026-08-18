@@ -2,7 +2,6 @@
 // Trading-router module public surface.
 // =============================================================================
 
-// Contract binding
 export { TradingRouterContract } from './router_contract.js';
 export type { CreateAndFillWithFeeArgs, MulticallWithFeeArgs } from './router_contract.js';
 

@@ -5,7 +5,7 @@ import { i128, u32, u64 } from '../../index.js';
 // Type mirrors and ScVal converters for the Trading contract's core types.
 //
 // Mirrors `zenex-contracts/trading/src/trading/{order,vault_order,position,
-// config,market_data,adl,status}.rs`. Field order in the ScVal maps below
+// `Config`, `MarketData`, `AdlState` and `Status`. Field order in the ScVal maps below
 // matches `#[contracttype]`'s alphabetical snake_case serialization. The
 // `OrderKind` and `VaultOrderKind` enums are `#[repr(u32)]` in the contract
 // and cross the ABI as plain `u32` discriminants.
@@ -64,7 +64,7 @@ export const FULL_CLOSE: i128 = 2n ** 127n - 1n;
 
 /**
  * Maximum pending decrease orders per position side
- * (trading/src/trading/constants.rs::MAX_ORDERS_PER_SIDE); the 9th decrease
+ * (`MAX_ORDERS_PER_SIDE`); the 9th decrease
  * on a side traps `TooManyOrders` (733). Sized so the closure sweep's
  * cancel+refund receipts stay inside per-tx limits.
  */

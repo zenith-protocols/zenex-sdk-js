@@ -82,7 +82,7 @@ export interface CreateAndFillWithFeeArgs {
  * router (generic batching plus the dependent Zenex flows: atomic
  * create-and-fill, with or without a relayer fee).
  *
- * Mirrors `zenex-contracts/trading-router/src/lib.rs`. All methods return
+ * Mirrors the router contract's entrypoints. All methods return
  * base64-encoded XDR operations for transaction building.
  */
 export class TradingRouterContract extends Contract {

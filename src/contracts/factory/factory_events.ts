@@ -6,7 +6,6 @@ export enum FactoryEventType {
     Deploy = 'deploy',
 }
 
-// Factory Events
 export interface BaseFactoryEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Factory;
     eventType: FactoryEventType;

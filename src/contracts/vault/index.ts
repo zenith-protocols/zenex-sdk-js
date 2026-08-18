@@ -8,7 +8,6 @@ export type { VaultConstructorArgs } from './vault_contract.js';
 export { parseVaultInstance } from './vault_instance.js';
 export type { VaultInstanceState } from './vault_instance.js';
 
-// Events
 export { VaultEventType } from './vault_events.js';
 
 export type {

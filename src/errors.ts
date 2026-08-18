@@ -73,7 +73,7 @@ export enum ContractErrorType {
 
     // Trading Errors (700-772): kept out of this flat enum. Decode trading
     // errors with the dedicated `TradingError` enum instead (it mirrors
-    // trading/src/errors.rs exactly; see below). `contractErrorFromCode` falls
+    // the contract's `TradingError` exactly; see below). `contractErrorFromCode` falls
     // through to it automatically.
 
     // Oracle Errors (780-793): the oracle owns the 78x/79x domain inherited
@@ -260,10 +260,10 @@ export function parseContractErrorCode(rpcError: string): number | undefined {
 }
 
 /**
- * TradingError - exact `trading/src/errors.rs` `TradingError` enum.
+ * TradingError - exact mirror of the contract's `TradingError` enum.
  *
  * Kept as its own enum so the trading domain (the largest error surface)
- * mirrors `errors.rs` one-to-one; `contractErrorFromCode` resolves trading
+ * mirrors it one-to-one; `contractErrorFromCode` resolves trading
  * codes through it automatically.
  */
 export enum TradingError {

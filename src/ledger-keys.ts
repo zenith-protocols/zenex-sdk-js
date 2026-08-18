@@ -100,7 +100,7 @@ export function temporaryLedgerKey(contractId: string, keyVec: xdr.ScVal[]): xdr
 }
 
 // =============================================================================
-// Trading contract `DataKey` mirror (trading/src/storage.rs)
+// Trading contract `DataKey` mirror
 //
 // `DataKey` carries data on several variants (Position, VaultOrder, etc.), so
 // soroban-sdk encodes every variant - including the zero-field ones - as a Vec

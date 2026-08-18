@@ -34,7 +34,6 @@ export type {
     TradingConfig,
 } from './trading_types.js';
 
-// Events (matches trading/src/events.rs)
 export { TradingEventType } from './trading_events.js';
 
 // Instance-storage walker (getLedgerEntries reads)

@@ -13,7 +13,6 @@ export interface OraclePriceData {
     publish_time: u64;
 }
 
-// Constructor arguments
 export interface OracleConstructorArgs {
     owner: string;
     verifier: string;

@@ -10,7 +10,6 @@ export interface FactoryInitMeta {
     vault_hash: Buffer | Uint8Array;
 }
 
-// Constructor arguments
 export interface FactoryConstructorArgs {
     init_meta: FactoryInitMeta;
 }

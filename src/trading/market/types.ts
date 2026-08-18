@@ -1,6 +1,6 @@
 /**
  * Verified oracle price consumed by the math mirrors. Ports the oracle
- * contract's `PriceData` (oracle/src/lib.rs): prices are fixed 18-dec with no
+ * contract's `PriceData`: prices are fixed 18-dec with no
  * exponent, and `publishTime` anchors the position price floor, order
  * anti-replay, and the vault-order fill postdate gates.
  */
