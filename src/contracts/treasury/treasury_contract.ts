@@ -53,10 +53,6 @@ export class TreasuryContract extends Contract {
         }).toXDR('base64');
     }
 
-    // ============================================================
-    // Owner-only Admin Methods
-    // ============================================================
-
     /**
      * Set the protocol fee rate (owner only)
      * Rate must be in range [0, SCALAR_18/2]

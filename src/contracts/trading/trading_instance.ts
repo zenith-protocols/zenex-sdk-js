@@ -4,25 +4,6 @@ import { Status } from './trading_types.js';
 import type { AdlState, TradingConfig } from './trading_types.js';
 import { parseAdlState, parseTradingConfig } from './trading_types.js';
 
-// =============================================================================
-// Trading contract instance-storage walker for `getLedgerEntries` reads.
-//
-// The trading contract keeps
-// its config, oracle anchors, wired addresses, status, and the lazy
-// delist/ADL state in instance storage, each under a `DataKey` variant
-// under a `DataKey` variant, plus `Owner` from `stellar_access::ownable`. This
-// walks the instance map, matching each key by variant name; the lazy keys
-// (`DelistedAt`, `TerminalPrice`, `Adl`, `Owner`) yield `undefined` / the
-// zeroed default when absent, and any other absent required key is an error.
-//
-// The walk is exhaustive on purpose. Instance storage is ONE ledger entry, so
-// every key is already fetched and paid for by the time this runs — decoding
-// fewer of them saves nothing and discards what the caller has bought. `Owner`
-// in particular is what a client checks to confirm the market is governed by
-// the governance contract rather than a bare key, the same trust check
-// `Market.load` runs against the vault and token.
-// =============================================================================
-
 
 /** The trading contract's decoded instance storage. */
 export interface TradingInstanceState {

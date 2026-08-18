@@ -2,16 +2,11 @@ import { xdr, scValToNative } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 import type { FactoryInitMeta } from './factory_contract.js';
 
-// =============================================================================
-// Factory contract-instance storage.
-//
-// `InitMeta` under a bare `Symbol` plus `Owner`. The
-// deployed markets live in PERSISTENT storage under
-// `FactoryDataKey::Pools(address)`, one entry each, so they are not part of
-// this read.
-// =============================================================================
-
-/** The factory contract's decoded instance storage. */
+/**
+ * The factory contract's decoded instance storage. Deployed markets live in
+ * PERSISTENT storage under `FactoryDataKey::Pools(address)`, one entry each,
+ * and are not part of this read.
+ */
 export interface FactoryInstanceState {
     /** WASM hashes and wiring every market this factory deploys is given. */
     initMeta: FactoryInitMeta;

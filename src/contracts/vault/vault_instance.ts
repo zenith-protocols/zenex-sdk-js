@@ -1,16 +1,6 @@
 import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
-// =============================================================================
-// Strategy-vault instance-storage walker for `getLedgerEntries` reads.
-//
-// The vault's instance storage carries the OZ stellar-tokens keys
-// (`Meta`, `TotalSupply`, `AssetAddress`, `VirtualDecimalsOffset`) plus the
-// vault's own `StrategyStorageKey::Strategy`.
-// Every key is matched by variant name against the entry map, mirroring the
-// contract's own `#[contracttype]` encodings; unknown keys are skipped.
-// =============================================================================
-
 /** Decoded strategy-vault instance storage. */
 export interface VaultInstanceState {
     /** Underlying asset token contract (`AssetAddress`). */

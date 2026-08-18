@@ -1,15 +1,11 @@
 import { xdr, scValToNative } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
-// =============================================================================
-// Governance contract-instance storage.
-//
-// `Delay` and `Nonce` (`GovKey`) plus `Owner`. Queued calls
-// are TEMPORARY entries under `GovKey::Queued(nonce)`, one per nonce, read
-// separately — this is the timelock's standing config.
-// =============================================================================
-
-/** The governance contract's decoded instance storage. */
+/**
+ * The governance contract's decoded instance storage — the timelock's standing
+ * config. Queued calls are TEMPORARY entries under `GovKey::Queued(nonce)`, one
+ * per nonce, and are not part of this read.
+ */
 export interface GovernanceInstanceState {
     /** Current timelock delay, in seconds. */
     delay: bigint;

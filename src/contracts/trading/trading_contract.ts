@@ -9,10 +9,6 @@ import {
     parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState, parseTradingConfig,
 } from './trading_types.js';
 
-// =============================================================================
-// Argument interfaces
-// =============================================================================
-
 /** Deploy-time constructor arguments (`__constructor`). */
 export interface DeployArgs {
     owner: string;

@@ -3,11 +3,8 @@ import type { i128, u32 } from '../../index.js';
 import { OrderKind } from '../trading/trading_types.js';
 
 // =============================================================================
-// Type mirrors and ScVal converters for the TradingRouter contract's types.
-//
-// Mirrors the router contract's `Call` and outcome types. Field order in the
-// ScVal maps below matches `#[contracttype]`'s alphabetical snake_case
-// serialization.
+// Field order in the ScVal maps below matches `#[contracttype]`'s alphabetical
+// snake_case serialization.
 // =============================================================================
 
 /** One contract invocation in a batch. */

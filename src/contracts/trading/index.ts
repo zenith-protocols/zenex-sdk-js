@@ -1,7 +1,3 @@
-// =============================================================================
-// Trading module public surface.
-// =============================================================================
-
 // Contract binding + its constructor arguments. Named-order helpers live in
 // `src/trading/order/intents.ts`, not here -- this file is the entrypoint
 // binding surface and nothing else.

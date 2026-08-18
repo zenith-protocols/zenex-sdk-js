@@ -1,15 +1,6 @@
 import { xdr, scValToBigInt, scValToNative } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
-// =============================================================================
-// Oracle contract-instance storage.
-//
-// Four `DataKey` variants plus `Owner`, all in one ledger entry
-// Reading them as an entry replaces four separate
-// `get_verifier` / `trade_staleness` / `close_staleness` /
-// `spread_reduction_factor` simulations with a single key.
-// =============================================================================
-
 /** The oracle contract's decoded instance storage. */
 export interface OracleInstanceState {
     /** Chainlink Data Streams verifier the reports are checked against. */

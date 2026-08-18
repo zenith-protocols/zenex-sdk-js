@@ -4,11 +4,10 @@ import { i128, u32, u64 } from '../../index.js';
 // =============================================================================
 // Type mirrors and ScVal converters for the Trading contract's core types.
 //
-// Mirrors `zenex-contracts/trading/src/trading/{order,vault_order,position,
-// `Config`, `MarketData`, `AdlState` and `Status`. Field order in the ScVal maps below
-// matches `#[contracttype]`'s alphabetical snake_case serialization. The
-// `OrderKind` and `VaultOrderKind` enums are `#[repr(u32)]` in the contract
-// and cross the ABI as plain `u32` discriminants.
+// Two ABI facts the TypeScript cannot show: field order in the ScVal maps below
+// matches `#[contracttype]`'s alphabetical snake_case serialization, and the
+// `OrderKind` / `VaultOrderKind` enums are `#[repr(u32)]` in the contract, so
+// they cross as plain `u32` discriminants.
 // =============================================================================
 
 /**
