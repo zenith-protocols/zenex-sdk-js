@@ -22,7 +22,8 @@ import {
 } from './quote.js';
 
 /**
- * The result of applying one order to the snapshot's position at a price.
+ * The outcome when one order is applied to the snapshot's position at a
+ * price.
  *
  * `fills` carries the exact transition the chain would execute. `rests`
  * means the order creates but does not fill now (trigger orders, or a

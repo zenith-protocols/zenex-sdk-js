@@ -42,7 +42,7 @@ export interface MarketContext {
     /**
      * Opaque execution-price payload carried onto a built order and spliced at
      * fill time. In the relay path the relay supplies its own signed update, so
-     * this is a caller placeholder and is never verified for pricing here.
+     * this is a caller placeholder. This quote never inspects or checks it.
      */
     priceUpdate: Uint8Array;
     /** Atomic vault state backing PnL and withdrawal capacity. */

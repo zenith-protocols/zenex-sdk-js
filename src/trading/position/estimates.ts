@@ -139,7 +139,7 @@ export function unlockedNotional(position: Position, nowSecs: bigint): bigint {
  * `equity < ceil(maintenance_margin * notional)` directly
  * (`Position::is_liquidatable`, called from `require_valid` and `liquidate`).
  * This inverts that maintenance line against the same equity model as
- * `positionEquity` to solve for the marking price where equity meets the
+ * `positionEquity` to solve for the price at which equity meets the
  * maintenance margin. It excludes the incremental base and impact close fee,
  * which is second-order for the threshold estimate, and does not extrapolate
  * accrual rates past the market's last on-chain accrual. Use

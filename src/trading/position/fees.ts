@@ -16,8 +16,8 @@ import type {
  * Itemized costs one action settles against a stored position, token-dec.
  *
  * Mirrors the parts `Position::increase` and `Position::decrease` assemble
- * via `Market::trade_fees` and `Fees::debit`. `base` and `impact` price only the
- * fill, not the position's full size.
+ * via `Market::trade_fees` and `Fees::debit`. `base` and `impact` price only
+ * the fill, not the position's full size.
  */
 export interface PositionFeeBreakdown {
     /** Skew-split trade fee on the fill, rounded up (`Market::trade_fees`). */
@@ -44,8 +44,8 @@ export interface PositionFeeBreakdown {
 }
 
 /**
- * The exact fee debit and claimable-funding delta for one action, computed
- * without mutating position state, token-dec.
+ * The exact fee debit and claimable-funding delta for one action, token-dec.
+ * `quotePositionFees` returns this and leaves the position unchanged.
  */
 export interface QuotedPositionFees {
     /** Itemized costs the action settles. */
@@ -75,7 +75,8 @@ export interface QuotePositionFeesInput {
     isLong: boolean;
     /**
      * Signed notional of the fill: positive grows the side, negative shrinks
-     * it. Feeds the base/impact split, not the funding or borrowing accrual.
+     * it. Feeds the base and impact split, not the funding or borrowing
+     * accrual.
      */
     signedNotional: bigint;
     /** Signed base-size change of the fill, paired with `signedNotional`. */
@@ -101,9 +102,10 @@ function accruedAmount(
 /**
  * @internal
  *
- * Quote the exact fee debit for one fill against `input.position`, without
- * mutating it. Ports `Position::settle_accruals` (funding, borrowing) and
- * `Market::trade_fees` (base, impact); `marginDebit` mirrors `Fees::debit`.
+ * Quote the exact fee debit for one fill against `input.position`. This call
+ * does not change `input.position`. Ports `Position::settle_accruals`
+ * (funding, borrowing) and `Market::trade_fees` (base, impact);
+ * `marginDebit` mirrors `Fees::debit`.
  */
 export function quotePositionFees(
     input: QuotePositionFeesInput,
