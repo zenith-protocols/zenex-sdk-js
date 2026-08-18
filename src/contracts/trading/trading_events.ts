@@ -5,21 +5,10 @@ import {
     parseOrder, parseVaultOrder, parseSidePair, parseTradingConfig,
 } from './trading_types.js';
 
-// =============================================================================
-// Trading event types, mirroring the contract's `#[contractevent]` structs.
-//
-// Each `#[contractevent]` struct's topics are `[<snake_case event name>,
-// ...#[topic] fields in declaration order]`; remaining fields land in the
-// data map. Nested structs (`order`, `config`, the accrual `SidePair`s) are
-// routed through the trading_types parsers so they decode to the same
-// camelCase interfaces used elsewhere in the SDK.
-//
-// Fill receipts reuse the order-id topic as a provenance sentinel: id `0` on
-// `decrease_fill`/`close_fill` marks an ADL close, and on `redeem_fill` a
-// Retired-market instant redeem. The decoded shapes surface that as an
-// explicit `source` discriminator so consumers never match on the raw `0`.
-// =============================================================================
-
+/**
+ * Discriminates a decoded {@link TradingEvent}; each value is the contract's
+ * snake_case `#[contractevent]` name and its first emitted topic.
+ */
 export enum TradingEventType {
     CreateOrder = 'create_order',
     CancelOrder = 'cancel_order',
@@ -41,6 +30,13 @@ export enum TradingEventType {
     Liquidation = 'liquidation',
 }
 
+/**
+ * Common shape decoded from every market contract `#[contractevent]`. Topics
+ * are `[<snake_case event name>, ...#[topic] fields in declaration order]`;
+ * every other field lands in the data map. Nested structs (`order`,
+ * `config`, the accrual `SidePair`s) decode through the `trading_types`
+ * parsers into the same camelCase interfaces used elsewhere in the SDK.
+ */
 export interface BaseTradingEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Trading;
     eventType: TradingEventType;
@@ -372,6 +368,7 @@ export interface TradingLiquidationEvent extends BaseTradingEvent {
     liqFee: i128;
 }
 
+/** A decoded market contract event; narrow on `eventType` for the concrete shape. */
 export type TradingEvent =
     | TradingCreateOrderEvent
     | TradingCancelOrderEvent

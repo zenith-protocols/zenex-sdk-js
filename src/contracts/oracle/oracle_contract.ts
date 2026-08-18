@@ -2,24 +2,33 @@ import { oracleSpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { u32, u64, i128 } from '../../index.js';
 
-// Verified price data returned by the oracle. Carries the bid/ask pair
-// (18-dec, after spread reduction toward the mid); the trading contract
-// fills the adverse side. No exponent travels with the price — every
-// consumer converts notional to tokens and back at the same fixed scale.
+/**
+ * Verified price data returned by the oracle. Carries the bid/ask pair at
+ * feed-native precision (18-dec on most V3 crypto streams, 8-dec on some),
+ * after spread reduction toward the mid; the trading contract fills the
+ * adverse side. No exponent travels with the price — every consumer
+ * converts notional to tokens and back at the same scale.
+ */
 export interface OraclePriceData {
+    /** Data Streams stream id (32 bytes); equals the request's `feedId`. */
     feed_id: Buffer;
     bid: i128;
     ask: i128;
+    /** Observation time, Unix seconds — not the validity window's start. */
     publish_time: u64;
 }
 
+/** Constructor arguments for {@link OracleContract.deploy}. */
 export interface OracleConstructorArgs {
+    /** Admin address; may update the staleness pair and spread reduction factor (not the verifier). */
     owner: string;
+    /** Chainlink Data Streams verifier contract address; immutable after deployment. */
     verifier: string;
     /** Max report age for strict (fill) verifications, seconds; in [3, 15]. */
     trade_staleness: u64;
     /** Max report age for protective (gap-closing) verifications, seconds; in [trade_staleness, 120]. */
     close_staleness: u64;
+    /** SCALAR_18-scaled bid/ask narrowing toward the mid, in [0, SCALAR_18] (0 = off, SCALAR_18 = collapse to mid). */
     spread_reduction_factor: i128;
 }
 
@@ -59,6 +68,11 @@ function feedIdToScVal(feedId: Buffer | Uint8Array): xdr.ScVal {
 export class OracleContract extends Contract {
     static spec: contract.Spec = new contract.Spec(oracleSpec);
 
+    /**
+     * Result parsers for each contract method, keyed by JS method name —
+     * pass the base64 XDR returned by simulation through the matching
+     * parser to get the native value.
+     */
     static readonly parsers = {
         // Price verification
         verifyPrice: (result: string): OraclePriceData =>
@@ -126,12 +140,16 @@ export class OracleContract extends Contract {
      * Verify a signed Data Streams report and return the price for a stream
      * @param report - The signed report blob, exactly as fetched from the API
      * @param feedId - The caller's immutable 32-byte stream anchor; must equal the report's `feedId`
+     *   and must be a V3 stream (first two bytes `0x00 0x03`), else the call traps
      * @param protective - Which staleness window gates the report's age:
      *   `false` (default) applies the strict `trade_staleness` used by order
      *   fills, `true` the wider `close_staleness` used by gap-closing calls
      *   (liquidation, ADL, accrual). Only the past side widens — the forward
      *   allowance is `trade_staleness` for both classes.
-     * @returns base64 XDR operation; parse result with `parsers.verifyPrice`
+     * @returns base64 XDR operation; parse result with `parsers.verifyPrice`.
+     *   Traps on an unverifiable report (bad signatures, inactive DON config),
+     *   a feed mismatch, an observation older than the selected window, a
+     *   report past its own expiry, or a non-positive/crossed price
      */
     verifyPrice(
         report: Buffer | Uint8Array,
@@ -186,10 +204,16 @@ export class OracleContract extends Contract {
     // Ownable Methods
     // ============================================================
 
+    /** Get the current owner address, or `undefined` if ownership was renounced. */
     getOwner(): string {
         return this.call('get_owner').toXDR('base64');
     }
 
+    /**
+     * Begin a two-step transfer to `newOwner`, who must call `acceptOwnership`
+     * by `liveUntilLedger` (owner only). `liveUntilLedger = 0` cancels any
+     * pending transfer instead.
+     */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
         return this.call(
@@ -199,10 +223,16 @@ export class OracleContract extends Contract {
         ).toXDR('base64');
     }
 
+    /** Complete a pending ownership transfer; callable only by the proposed new owner. */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
 
+    /**
+     * Permanently remove the owner, disabling `updateStaleness` and
+     * `updateSpreadReductionFactor` for good (owner only). Fails if a
+     * transfer is pending.
+     */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');
     }

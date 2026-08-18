@@ -2,38 +2,43 @@ import { strategyVaultSpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, Operation } from '@stellar/stellar-sdk';
 import { i128, u32 } from '../../index.js';
 
-// Constructor arguments for deploying a new vault
 export interface VaultConstructorArgs {
     /** Name for the vault share token */
     name: string;
     /** Symbol for the vault share token */
     symbol: string;
-    /** Address of the underlying token contract */
+    /** Address of the underlying settlement token contract */
     asset: string;
-    /** Virtual offset for inflation attack protection (0-10) */
+    /** Extra share decimals on top of the asset's decimals; contributes
+     * `10^decimals_offset` virtual shares to the exchange rate as
+     * inflation-attack protection. Share amounts are therefore NOT the same
+     * scale as asset amounts. */
     decimals_offset: u32;
-    /** Trading contract address; the only address allowed to call the vault
-     * mutations (immutable) */
+    /** Market contract address; the only caller allowed to invoke the vault's
+     * strategy mutations. Immutable for the vault's lifetime. */
     strategy: string;
 }
 
 /**
- * VaultContract - Operation builder for the Zenex Strategy Vault contract
+ * Operation builder for the Zenex Strategy Vault contract.
  *
  * Collateral vault for a single trading market. Shares are an
- * OpenZeppelin fungible token. Share pricing marks the backing with the
- * strategy-supplied net pending trader PnL (`net_pnl`), so mints and
- * redemptions settle at the market's uPnL-inclusive value. All mutations
- * (`strategy_deposit` / `strategy_redeem` / `strategy_withdraw`) require the
- * registered strategy (trading contract) to authorize the call; LPs route
- * through trading vault orders.
+ * OpenZeppelin fungible token; asset amounts are in the settlement token's
+ * decimals while share amounts are in share decimals (asset decimals plus
+ * the constructor's `decimals_offset`) — the two are never the same scale.
+ * Share pricing marks the backing with the strategy-supplied net pending
+ * trader PnL (`net_pnl`), so mints and redemptions settle at the market's
+ * uPnL-inclusive value. All mutations (`strategyDeposit` / `strategyRedeem`
+ * / `strategyWithdraw`) require the registered strategy (trading contract)
+ * to authorize the call; LPs route through trading vault orders.
  *
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class VaultContract extends Contract {
+    /** Parsed contract spec, used to decode simulation/invocation results. */
     static spec: contract.Spec = new contract.Spec(strategyVaultSpec);
 
-    // Result parsers for functions that return values
+    /** Decoders from base64 XDR result to native TS values, one per entrypoint that returns something. */
     static readonly parsers = {
         // FungibleToken parsers
         totalSupply: (result: string): i128 =>
@@ -70,12 +75,10 @@ export class VaultContract extends Contract {
     };
 
     /**
-     * Deploy a new instance of the Vault contract
-     * @param deployer - Address of the deployer
-     * @param wasmHash - Hash of the Vault WASM contract code
-     * @param args - Constructor arguments
-     * @param salt - Optional salt for deterministic address
-     * @param format - Format of wasmHash if string ('hex' or 'base64')
+     * Builds a `CreateContractV2` operation deploying a new Vault instance
+     * with the given constructor args (share metadata, asset, decimals
+     * offset, strategy).
+     * @param format - Encoding of `wasmHash` when passed as a string
      * @returns Base64-encoded XDR operation
      */
     static deploy(
@@ -106,7 +109,7 @@ export class VaultContract extends Contract {
     // ============================================================
 
     /**
-     * Get total supply of shares
+     * Get total supply of vault shares (share-dec).
      * @returns XDR operation string
      */
     totalSupply(): string {
@@ -114,8 +117,7 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Get share balance of an account
-     * @param account - Address to query
+     * Get an account's share balance (share-dec).
      * @returns XDR operation string
      */
     balance(account: Address | string): string {
@@ -124,9 +126,7 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Get allowance between owner and spender
-     * @param owner - Token owner address
-     * @param spender - Spender address
+     * Get the remaining share allowance (share-dec) `spender` may transfer from `owner`.
      * @returns XDR operation string
      */
     allowance(owner: Address | string, spender: Address | string): string {
@@ -136,10 +136,8 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Transfer shares from caller to recipient
-     * @param from - Sender address (requires auth)
-     * @param to - Recipient address
-     * @param amount - Amount of shares to transfer
+     * Transfer shares from `from` to `to`. `from` must authorize the call.
+     * @param amount - Shares to transfer (share-dec)
      * @returns XDR operation string
      */
     transfer(from: Address | string, to: Address | string, amount: i128): string {
@@ -154,11 +152,9 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Transfer shares from one address to another using allowance
-     * @param spender - Spender address (requires auth)
-     * @param from - Token owner address
-     * @param to - Recipient address
-     * @param amount - Amount of shares to transfer
+     * Transfer shares from `from` to `to`, spending `spender`'s allowance.
+     * `spender` must authorize the call.
+     * @param amount - Shares to transfer (share-dec)
      * @returns XDR operation string
      */
     transferFrom(
@@ -180,11 +176,10 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Approve spender to transfer shares on behalf of owner
-     * @param owner - Token owner address (requires auth)
-     * @param spender - Spender address
-     * @param amount - Amount of shares to approve
-     * @param liveUntilLedger - Ledger number when approval expires
+     * Approve `spender` to transfer up to `amount` of `owner`'s shares.
+     * `owner` must authorize the call.
+     * @param amount - Shares approved (share-dec)
+     * @param liveUntilLedger - Ledger sequence at which the approval expires
      * @returns XDR operation string
      */
     approve(
@@ -205,7 +200,8 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Get token decimals
+     * Get the share token's decimals: the asset's decimals plus the
+     * constructor's `decimals_offset`.
      * @returns XDR operation string
      */
     decimals(): string {
@@ -213,7 +209,7 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Get token name
+     * Get the share token's name
      * @returns XDR operation string
      */
     name(): string {
@@ -221,7 +217,7 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Get token symbol
+     * Get the share token's symbol
      * @returns XDR operation string
      */
     symbol(): string {
@@ -233,7 +229,7 @@ export class VaultContract extends Contract {
     // ============================================================
 
     /**
-     * Get the underlying asset address
+     * Get the underlying settlement token's address
      * @returns XDR operation string
      */
     queryAsset(): string {
@@ -241,7 +237,8 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Get the registered strategy (trading contract) address
+     * Get the registered strategy (market contract) address; the only
+     * address authorized to call the strategy mutations.
      * @returns XDR operation string
      */
     getStrategy(): string {
@@ -249,8 +246,8 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Get the vault's raw balance of the underlying asset (token-dec),
-     * before any pending-PnL mark
+     * Get the vault's total assets (token-dec): exactly the vault contract's
+     * settlement-token `Balance`, before any pending-PnL mark.
      * @returns XDR operation string
      */
     totalAssets(): string {

@@ -2,11 +2,6 @@ import { Address, xdr, scValToNative, nativeToScVal } from '@stellar/stellar-sdk
 import type { i128, u32 } from '../../index.js';
 import { OrderKind } from '../trading/trading_types.js';
 
-// =============================================================================
-// Field order in the ScVal maps below matches `#[contracttype]`'s alphabetical
-// snake_case serialization.
-// =============================================================================
-
 /** One contract invocation in a batch. */
 export interface Call {
     /** Target contract. */
@@ -98,10 +93,6 @@ export interface CallOutcome {
     error: number;
 }
 
-// =============================================================================
-// Converters: TS -> ScVal
-// =============================================================================
-
 /** Encode a `Call` as an alphabetically key-ordered `ScMap` (args, contract, func). */
 export function callToScVal(call: Call): xdr.ScVal {
     const entry = (key: string, val: xdr.ScVal) =>
@@ -112,10 +103,6 @@ export function callToScVal(call: Call): xdr.ScVal {
         entry('func', xdr.ScVal.scvSymbol(call.func)),
     ]);
 }
-
-// =============================================================================
-// Parsers: scValToNative output (snake_case) -> camelCase interface
-// =============================================================================
 
 /** Parse one raw `multicall_try` outcome `ScVal` into a [`CallOutcome`]. */
 export function parseCallOutcome(raw: xdr.ScVal): CallOutcome {

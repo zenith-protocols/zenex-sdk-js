@@ -1,26 +1,32 @@
 import { i128 } from '../../index.js';
 import { ZenexContractType, BaseZenexEvent } from '../../base_event.js';
 
-// Vault event types. Values are the on-chain name topics: bare
-// `#[contractevent]` defaults to snake_case of the struct name. `deposit`
-// and `withdraw` are the OpenZeppelin stellar-tokens ERC-4626 vault events
-// (`emit_deposit`/`emit_withdraw`); `strategy_withdraw` is the
-// Zenex strategy gate's own receipt.
+/**
+ * Discriminates a decoded {@link VaultEvent}; each value is the contract's
+ * snake_case `#[contractevent]` name. `Deposit`/`Withdraw` are the
+ * OpenZeppelin stellar-tokens ERC-4626 vault events (`emit_deposit`/
+ * `emit_withdraw`); `StrategyWithdraw` is Zenex's own strategy-gate receipt.
+ */
 export enum VaultEventType {
     Deposit = 'deposit',
     Withdraw = 'withdraw',
     StrategyWithdraw = 'strategy_withdraw',
 }
 
+/**
+ * Common shape decoded from every vault contract `#[contractevent]`. Topics
+ * are `[<snake_case event name>, ...#[topic] fields in declaration order]`;
+ * every other field lands in the data map.
+ */
 export interface BaseVaultEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Vault;
     eventType: VaultEventType;
 }
 
 /**
- * Underlying assets deposited in exchange for shares (OZ ERC-4626 receipt),
- * emitted by the strategy-driven `strategy_deposit`. Topics: operator, from,
- * receiver.
+ * Underlying assets deposited in exchange for shares — OpenZeppelin's
+ * ERC-4626 `emit_deposit`, raised by the strategy-driven `strategy_deposit`.
+ * Topics: operator, from, receiver.
  */
 export interface VaultDepositEvent extends BaseVaultEvent {
     eventType: VaultEventType.Deposit;
@@ -32,14 +38,14 @@ export interface VaultDepositEvent extends BaseVaultEvent {
     receiver: string;
     /** Assets taken, token-dec. */
     assets: i128;
-    /** Shares minted. */
+    /** Shares minted, share-dec (asset decimals plus the vault's decimals offset). */
     shares: i128;
 }
 
 /**
- * Shares exchanged back for underlying assets (OZ ERC-4626 receipt),
- * emitted by the strategy-driven `strategy_redeem`. Topics: operator,
- * receiver, owner.
+ * Shares exchanged back for underlying assets — OpenZeppelin's ERC-4626
+ * `emit_withdraw`, raised by the strategy-driven `strategy_redeem`. Topics:
+ * operator, receiver, owner.
  */
 export interface VaultWithdrawEvent extends BaseVaultEvent {
     eventType: VaultEventType.Withdraw;
@@ -51,17 +57,24 @@ export interface VaultWithdrawEvent extends BaseVaultEvent {
     owner: string;
     /** Assets paid, token-dec. */
     assets: i128;
-    /** Shares burned. */
+    /** Shares burned, share-dec (asset decimals plus the vault's decimals offset). */
     shares: i128;
 }
 
-/** Underlying assets transferred out to the registered strategy via `strategy_withdraw`. */
+/**
+ * Underlying assets pulled out to the registered strategy — Zenex's own
+ * receipt (not an OZ vault event), raised by `strategy_withdraw` when the
+ * market pays winning positions. Topic: strategy.
+ */
 export interface VaultStrategyWithdrawEvent extends BaseVaultEvent {
     eventType: VaultEventType.StrategyWithdraw;
+    /** The registered strategy (market contract) that received the assets. */
     strategy: string;
+    /** Assets moved, token-dec. */
     amount: i128;
 }
 
+/** Discriminated union of all vault contract events; narrow on `eventType` for the concrete shape. */
 export type VaultEvent =
     | VaultDepositEvent
     | VaultWithdrawEvent

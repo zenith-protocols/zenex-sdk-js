@@ -86,16 +86,21 @@ export interface CreateAndFillWithFeeArgs {
  * base64-encoded XDR operations for transaction building.
  */
 export class TradingRouterContract extends Contract {
+    /** Parsed spec for the `market-router` contract; used to encode/decode invocations. */
     static spec: contract.Spec = new contract.Spec(tradingRouterSpec);
 
+    /** Result decoders for each entrypoint, keyed to the method of the same name. */
     static readonly parsers = {
         // --- generic batching ---
+        /** Decode `multicall`'s result: the raw return value of each call, in call order. */
         multicall: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        /** Decode `multicallTry`'s result into one `CallOutcome` per call, in call order. */
         multicallTry: (result: string): CallOutcome[] =>
             (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
                 parseCallOutcome,
             ),
+        /** Decode `multicallWithFee`'s result: the raw return value of each call (fee leg excluded), in call order. */
         multicallWithFee: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // --- create-and-fill flows ---
@@ -106,8 +111,10 @@ export class TradingRouterContract extends Contract {
         // Strict variants mirror `multicall` (raw passthrough): the batch
         // traps on any failure, so all elements decode cleanly and the last
         // element is the fill payout (i128, as a bigint).
+        /** Decode `createAndFill`'s result: raw passthrough, fill payout appended last. */
         createAndFill: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        /** Decode `createAndFillWithFee`'s result: raw passthrough, fill payout appended last. */
         createAndFillWithFee: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // Try variants mirror `multicallTry`: each element is a `CallOutcome`.
@@ -115,12 +122,20 @@ export class TradingRouterContract extends Contract {
         // `value`) when filled or `ok: false` (rested; `error` carries the
         // contract code) when the fill did not land. Every earlier element is
         // a strict success (`ok: true`).
-        /** @deprecated Low-level ABI compatibility only. */
+        /**
+         * Decode `createAndTryFill`'s result into `CallOutcome[]`; the last
+         * outcome is the isolated fill (`ok` tells filled from rested).
+         * @deprecated Low-level ABI compatibility only.
+         */
         createAndTryFill: (result: string): CallOutcome[] =>
             (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
                 parseCallOutcome,
             ),
-        /** @deprecated Low-level ABI compatibility only. */
+        /**
+         * Decode `createAndTryFillWithFee`'s result into `CallOutcome[]`; the
+         * last outcome is the isolated fill (`ok` tells filled from rested).
+         * @deprecated Low-level ABI compatibility only.
+         */
         createAndTryFillWithFee: (result: string): CallOutcome[] =>
             (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
                 parseCallOutcome,

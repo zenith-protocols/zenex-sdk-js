@@ -2,8 +2,11 @@ import { treasurySpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { i128, u32 } from '../../index.js';
 
+/** Constructor arguments for {@link TreasuryContract.deploy}. */
 export interface TreasuryConstructorArgs {
+    /** Admin address; may change the rate and withdraw accumulated fees. */
     owner: string;
+    /** Protocol fee rate (SCALAR_18 fraction, e.g. 1e17 = 10%); bounded to [0, SCALAR_18/2]. */
     rate: i128;
 }
 
@@ -15,6 +18,11 @@ export interface TreasuryConstructorArgs {
 export class TreasuryContract extends Contract {
     static spec: contract.Spec = new contract.Spec(treasurySpec);
 
+    /**
+     * Result parsers for each contract method, keyed by JS method name —
+     * pass the base64 XDR returned by simulation through the matching
+     * parser to get the native value.
+     */
     static readonly parsers = {
         // Treasury methods
         getRate: (result: string): i128 =>
@@ -32,6 +40,8 @@ export class TreasuryContract extends Contract {
     /**
      * Deploy a new instance of the Treasury contract
      * Constructor: __constructor(owner, rate)
+     *
+     * Traps with `InvalidRate` if `rate` is outside `[0, SCALAR_18 / 2]` (0% to 50%).
      */
     static deploy(
         deployer: string,
@@ -54,8 +64,9 @@ export class TreasuryContract extends Contract {
     }
 
     /**
-     * Set the protocol fee rate (owner only)
-     * Rate must be in range [0, SCALAR_18/2]
+     * Set the protocol fee rate that the market reads at every settlement (owner only)
+     * @param rate - SCALAR_18 fraction, e.g. 1e17 = 10%; traps with `InvalidRate`
+     *   outside `[0, SCALAR_18 / 2]` (0% to 50%)
      */
     setRate(rate: i128): string {
         return this.call(
@@ -65,10 +76,9 @@ export class TreasuryContract extends Contract {
     }
 
     /**
-     * Withdraw accumulated fees to the specified address (owner only)
-     * @param token - Token contract address
-     * @param to - Recipient address
-     * @param amount - Amount to withdraw
+     * Withdraw accumulated protocol fees to `to` (owner only). No balance
+     * check of its own — over-withdrawing traps in the token transfer.
+     * @param amount - Token-dec amount, not SCALAR_18
      */
     withdraw(token: string, to: string, amount: i128): string {
         return this.call(
@@ -83,10 +93,16 @@ export class TreasuryContract extends Contract {
     // Ownable Methods
     // ============================================================
 
+    /** Get the current owner address, or `undefined` if ownership was renounced. */
     getOwner(): string {
         return this.call('get_owner').toXDR('base64');
     }
 
+    /**
+     * Begin a two-step transfer to `newOwner`, who must call `acceptOwnership`
+     * by `liveUntilLedger` (owner only). `liveUntilLedger = 0` cancels any
+     * pending transfer instead.
+     */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
         return this.call(
@@ -96,10 +112,15 @@ export class TreasuryContract extends Contract {
         ).toXDR('base64');
     }
 
+    /** Complete a pending ownership transfer; callable only by the proposed new owner. */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
 
+    /**
+     * Permanently remove the owner, disabling `setRate` and `withdraw` for
+     * good (owner only). Fails if a transfer is pending.
+     */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');
     }
@@ -109,7 +130,10 @@ export class TreasuryContract extends Contract {
     // ============================================================
 
     /**
-     * Get the current protocol fee rate (SCALAR_18 fraction)
+     * Get the current protocol fee rate (SCALAR_18 fraction, e.g. 1e17 = 10%);
+     * this is the rate the market pays at every settlement. Reads back 0 if
+     * never set, which is unreachable once deployed since the constructor
+     * always sets it.
      */
     getRate(): string {
         return this.call('get_rate').toXDR('base64');

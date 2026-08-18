@@ -101,7 +101,7 @@ export interface Order {
 export interface VaultOrder {
     /** VaultOrderKind discriminant (0 = Deposit, 1 = Redeem). */
     kind: VaultOrderKind;
-    /** Escrowed assets (deposit, token-dec) or shares (redeem, share decimals). */
+    /** Escrowed assets (deposit, token-dec) or shares (redeem, vault share decimals = asset decimals + decimalsOffset). */
     amount: i128;
     /** Minimum received at fill net of the vault fee: shares (deposit) or assets (redeem); 0 = unset. */
     minOut: i128;
@@ -117,7 +117,7 @@ export interface Position {
     margin: i128;
     /** Size in quote, token-dec. */
     notional: i128;
-    /** Size in base, base-dec; entry implied = notional/tokens. */
+    /** Size in base, base-dec (NOT SCALAR_18 — `to_tokens` floors a token-dec notional divided by a price_scalar price); entry implied = notional/tokens. */
     tokens: i128;
     /** Funding index snapshot at last change (SCALAR_18). */
     fundingIdx: i128;
@@ -135,7 +135,9 @@ export interface Position {
 
 /** A long/short pair of `i128` values, used for per-side open interest, posted margin, and base size. */
 export interface SidePair {
+    /** Long-side value; unit and scale match the containing field (e.g. token-dec, SCALAR_18). */
     long: i128;
+    /** Short-side value; unit and scale match the containing field (e.g. token-dec, SCALAR_18). */
     short: i128;
 }
 
@@ -230,7 +232,7 @@ export interface TradingConfig {
     adlClearTarget: i128;
     /** Realized-profit haircut threshold: while side pending PnL exceeds this fraction of half the vault, close payouts scale by allowance / side PnL, < 1 (SCALAR_18). */
     maxPnlTrader: i128;
-    /** Redeem gate: redeems blocked while a side's pending PnL exceeds this fraction of half the post-redeem balance; in (0, maxPnlTrader] (SCALAR_18). */
+    /** Redeem gate: redeems blocked while a side's pending PnL exceeds this fraction of half the post-redeem balance; in (0, adlMaxPnl] (SCALAR_18). */
     maxPnlWithdraw: i128;
     /** Redeem cooldown from a vault order's createdAt, seconds; 0 = fill as soon as a post-creation price exists. */
     redeemLock: u64;

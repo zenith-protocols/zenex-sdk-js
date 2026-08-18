@@ -159,9 +159,9 @@ export class TradingContract extends Contract {
     /**
      * Replace the global trading configuration.
      *
-     * A borrowing-param change requires a same-ledger `accrue`, waived while
-     * `Status::Frozen`: the first accrual at unfreeze then prices the entire
-     * frozen window at the new rates. Owner only.
+     * A borrowing- or funding-param change requires a same-ledger `accrue`,
+     * waived while `Status::Frozen`: the first accrual at unfreeze then
+     * prices the entire frozen window at the new rates. Owner only.
      *
      * # Errors
      * - InvalidConfig (700) if a bound or range check fails.
@@ -223,6 +223,14 @@ export class TradingContract extends Contract {
      * keeper on execution and refunds on cancel or on the position closing.
      * A decrease's `notional` above the position size clamps to a full close
      * at fill (`FULL_CLOSE` signals a full close).
+     *
+     * @param kind - A market kind fills immediately; a limit/stop kind waits
+     *   on `triggerPrice`, unread by a market kind.
+     * @param notional - Size-change magnitude (token-dec).
+     * @param margin - Margin-change magnitude (token-dec).
+     * @param triggerPrice - Crossing level for a limit/stop kind (price_scalar, 18-dec).
+     * @param priceBound - Fill slippage limit (price_scalar, 18-dec); `0` = unbounded.
+     * @param expiration - Last ledger sequence the order is fillable at.
      *
      * # Returns
      * - The allocated order id.
@@ -297,6 +305,7 @@ export class TradingContract extends Contract {
      *   decrease's `execFee` (token-dec).
      *
      * # Errors
+     * - MarketFrozen (704) if the market status is `Frozen`.
      * - OrderNotFound (730) if no order `(user, id)` exists.
      */
     cancelOrder(user: string, id: u32): string {
@@ -436,11 +445,13 @@ export class TradingContract extends Contract {
      * - IncreaseHalted (705) if a size-growing increase runs while the status
      *   does not accept opens or the target side has ADL enabled.
      * - OrderExpired (731) if the order expired before the fill.
-     * - StalePrice (740) if the verified price predates the order.
+     * - StalePrice (740) if the verified price predates the order, or the
+     *   price the position was last marked against.
      * - TriggerNotMet (742) if the order's trigger has not been crossed.
      * - PriceBoundExceeded (741) if the fill price is worse than `priceBound`.
      * - PositionNotFound (720) if a decrease targets an absent position.
      * - NotionalBelowMinimum (711) if the resulting position falls under the size floor.
+     * - VaultInsolvent (755) if a decrease settlement's vault draw exceeds the vault balance.
      * - NotionalAboveMaximum (712) if the resulting position exceeds the size ceiling.
      * - OpenInterestExceeded (715) if the side's open interest would exceed `maxOpenInterest`.
      * - UtilizationExceeded (714) if the reserved value would exceed the utilization cap.
@@ -476,6 +487,7 @@ export class TradingContract extends Contract {
      *   position was last marked against.
      * - NotLiquidatable (722) if equity still covers the maintenance margin
      *   and the wind-down waiver does not apply.
+     * - VaultInsolvent (755) if the settlement's vault draw exceeds the vault balance.
      */
     executeLiquidation(keeper: string, user: string, isLong: boolean, price: Buffer | Uint8Array): string {
         return this.call(
@@ -521,13 +533,13 @@ export class TradingContract extends Contract {
      * - AdlNotTriggered (770) if the side is not flagged for deleveraging, or
      *   its pending PnL is already at or below `adlClearTarget`.
      * - PositionNotFound (720) if no position exists for `(user, isLong)`.
-     * - StalePrice (740) if the verified price is older than the newest price
-     *   the market has consumed, or than the price the position was last
-     *   marked against.
+     * - StalePrice (740) if the effective price is older than the price the
+     *   position was last marked against.
      * - AdlNotEligible (772) if the close does not reduce the side's pending PnL.
      * - AdlOvershoot (771) if the close lands the side under the clear
      *   allowance re-measured on the settled vault balance.
      * - InvalidOrder (732) if `amount` is not positive.
+     * - VaultInsolvent (755) if the settlement's vault draw exceeds the vault balance.
      * - NotionalLocked (721) or NotionalBelowMinimum (711) from the
      *   underlying decrease.
      */

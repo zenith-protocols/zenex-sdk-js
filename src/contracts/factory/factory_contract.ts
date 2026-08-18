@@ -3,13 +3,21 @@ import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operati
 import { u32 } from '../../index.js';
 import { TradingConfig, tradingConfigToScVal } from '../trading/trading_types.js';
 
-// FactoryInitMeta - constructor arg for the factory
+/**
+ * Deployment inputs for the markets this factory creates. Replaceable by the
+ * owner via `set_init_meta`; already-deployed markets are unaffected by a
+ * later change.
+ */
 export interface FactoryInitMeta {
+    /** WASM hash of the trading (market) contract installed on new deploys. */
     trading_hash: Buffer | Uint8Array;
+    /** Treasury address wired into every newly deployed trading contract. */
     treasury: string;
+    /** WASM hash of the strategy-vault contract installed on new deploys. */
     vault_hash: Buffer | Uint8Array;
 }
 
+/** Constructor arguments for deploying the Factory contract itself. */
 export interface FactoryConstructorArgs {
     init_meta: FactoryInitMeta;
 }
@@ -28,6 +36,7 @@ export class FactoryContract extends Contract {
         /** Returns the deployed `[trading, vault]` address pair. */
         deployMarket: (result: string): [string, string] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
+        /** Returns whether the queried trading address was deployed by this factory. */
         isDeployed: (result: string): boolean =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
     };
@@ -153,7 +162,8 @@ export class FactoryContract extends Contract {
     // ============================================================
 
     /**
-     * Returns `true` if the given trading address was deployed by this factory.
+     * Returns whether `tradingId` was deployed by this factory. Never throws
+     * — an address never deployed here simply decodes to `false`.
      */
     isDeployed(tradingId: string): string {
         return this.call(

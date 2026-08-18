@@ -6,6 +6,7 @@ export enum FactoryEventType {
     Deploy = 'deploy',
 }
 
+/** Discriminated-union base shared by all factory events; narrow on `eventType`. */
 export interface BaseFactoryEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Factory;
     eventType: FactoryEventType;
@@ -20,4 +21,5 @@ export interface FactoryDeployEvent extends BaseFactoryEvent {
     vault: string;
 }
 
+/** Discriminated union of all factory contract events. */
 export type FactoryEvent = FactoryDeployEvent;

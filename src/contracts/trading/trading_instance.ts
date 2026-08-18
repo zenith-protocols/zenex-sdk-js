@@ -6,11 +6,11 @@ import { parseAdlState, parseTradingConfig } from './trading_types.js';
 
 
 export interface TradingInstanceState {
-    /** Global trading parameters. */
+    /** Global trading parameters, mostly SCALAR_18 rates and ratios; mutable at runtime via the owner-only `set_config`. */
     config: TradingConfig;
-    /** 32-byte price stream id (`BytesN<32>`, immutable anchor). */
+    /** 32-byte Chainlink Data Streams stream id (`BytesN<32>` on-chain); a V3 (`0x0003…`) stream, immutable after construction. */
     feedId: Buffer;
-    /** Operational status discriminant. */
+    /** Market lifecycle stage; only `Active` admits new position opens. */
     status: Status;
     /** Strategy-vault contract. */
     vault: string;
@@ -20,15 +20,16 @@ export interface TradingInstanceState {
     oracle: string;
     /** Treasury contract (protocol fee sink). */
     treasury: string;
-    /** First-delist timestamp; lazy (absent unless delisted). */
+    /** First-delist timestamp, unix seconds; anchors the grace/deadline window and stays set through the wind-down; lazy (absent unless ever delisted). */
     delistedAt?: bigint;
-    /** Flat settlement price (price_scalar); lazy (absent until set). */
+    /** Flat settlement price, price_scalar units; lazy, settable only once a delisted market's grace window has expired. */
     terminalPrice?: bigint;
     /** ADL flags; zeroed default until first written. */
     adl: AdlState;
     /**
-     * Current owner (`stellar_access::ownable`); absent once ownership has been
-     * renounced. Not a `DataKey` variant — the OZ module owns this slot.
+     * Current owner (`stellar_access::ownable`) — check this equals the
+     * governance contract rather than a bare key. Absent once ownership has
+     * been renounced. Not a `DataKey` variant — the OZ module owns this slot.
      */
     owner?: string;
 }
