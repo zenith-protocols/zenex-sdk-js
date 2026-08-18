@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Address, StrKey, xdr, nativeToScVal } from '@stellar/stellar-sdk';
-import { instanceOwner, instanceStorage } from '../../src/contracts/instance.js';
+import { instanceStorage } from '../../src/contracts/instance.js';
 import {
     parseTreasuryInstance,
     parseTreasuryRate,
@@ -29,8 +29,7 @@ describe('instanceStorage', () => {
             new xdr.ScMapEntry({ key: unitKey('Variant'), val: xdr.ScVal.scvU32(1) }),
             new xdr.ScMapEntry({ key: sym('Bare'), val: xdr.ScVal.scvU32(2) }),
         ]);
-        const storage = instanceStorage(value, 'test');
-        expect([...storage.keys()].sort()).toEqual(['Bare', 'Variant']);
+        expect(instanceStorage(value, 'test').keys().sort()).toEqual(['Bare', 'Variant']);
     });
 
     it('rejects a value that is not a contract instance', () => {
@@ -44,15 +43,24 @@ describe('instanceStorage', () => {
             new xdr.ScMapEntry({ key: xdr.ScVal.scvU32(9), val: xdr.ScVal.scvU32(1) }),
             new xdr.ScMapEntry({ key: sym('Kept'), val: xdr.ScVal.scvU32(2) }),
         ]);
-        expect([...instanceStorage(value, 'test').keys()]).toEqual(['Kept']);
+        expect(instanceStorage(value, 'test').keys()).toEqual(['Kept']);
     });
 
-    it('reads Owner, and reports undefined once renounced', () => {
+    it('reads an optional address, undefined when the slot is unset', () => {
         const withOwner = contractInstance([
             new xdr.ScMapEntry({ key: unitKey('Owner'), val: addr(OWNER) }),
         ]);
-        expect(instanceOwner(instanceStorage(withOwner, 'test'))).toBe(OWNER);
-        expect(instanceOwner(instanceStorage(contractInstance([]), 'test'))).toBeUndefined();
+        expect(instanceStorage(withOwner, 'test').optionalAddress('Owner')).toBe(OWNER);
+        expect(
+            instanceStorage(contractInstance([]), 'test').optionalAddress('Owner'),
+        ).toBeUndefined();
+    });
+
+    it('names the contract in a missing-key error, so call sites need not', () => {
+        expect(() => instanceStorage(contractInstance([]), 'oracle').require('Verifier'))
+            .toThrow('oracle instance is missing Verifier');
+        expect(() => instanceStorage(contractInstance([]), 'oracle').address('Verifier'))
+            .toThrow('oracle instance is missing Verifier');
     });
 });
 

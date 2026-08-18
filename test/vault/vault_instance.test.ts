@@ -41,7 +41,7 @@ describe('parseVaultInstance', () => {
         const noAsset = contractInstance([
             new xdr.ScMapEntry({ key: unitKey('TotalSupply'), val: nativeToScVal(1n, { type: 'i128' }) }),
         ]);
-        expect(() => parseVaultInstance(noAsset)).toThrow(/asset address/);
+        expect(() => parseVaultInstance(noAsset)).toThrow(/missing AssetAddress|asset address/);
     });
 
     it('rejects a non-instance value', () => {

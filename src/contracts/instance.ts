@@ -18,6 +18,28 @@ import { Address, xdr } from '@stellar/stellar-sdk';
 import { decodeEntryKey } from '../ledger-keys.js';
 
 /**
+ * A contract's instance storage, addressed by key name and bound to the
+ * contract it came from — so a missing key names itself without every call site
+ * repeating which contract it is reading.
+ */
+export interface InstanceStorage {
+    /** Key names present in the entry. */
+    keys(): string[];
+    /** Raw value for a key, or `undefined` when the contract has not set it. */
+    get(name: string): xdr.ScVal | undefined;
+    /** As {@link get}, but an absent key is an error. */
+    require(name: string): xdr.ScVal;
+    /** A required `Address` slot, as a strkey. */
+    address(name: string): string;
+    /**
+     * An optional `Address` slot. `Owner` is the common case: absent means
+     * ownership was renounced, or the contract never had an owner (the strategy
+     * vault and the router do not).
+     */
+    optionalAddress(name: string): string | undefined;
+}
+
+/**
  * Index a contract-instance value by storage-key name.
  *
  * Handles both key shapes a contract produces: a `#[contracttype]` enum variant
@@ -25,16 +47,17 @@ import { decodeEntryKey } from '../ledger-keys.js';
  *
  * @param instanceVal - The `.val()` of a `ContractDataEntry` whose key is
  *   `scvLedgerKeyContractInstance`.
- * @param label - Contract name, for the error message.
+ * @param label - Contract name, used in every error this storage raises.
  * @throws If the value is not a contract instance.
  */
 export function instanceStorage(
     instanceVal: xdr.ScVal,
     label: string,
-): Map<string, xdr.ScVal> {
+): InstanceStorage {
     if (instanceVal.switch() !== xdr.ScValType.scvContractInstance()) {
         throw new Error(`expected a ${label} contract-instance value`);
     }
+
     const entries = new Map<string, xdr.ScVal>();
     for (const item of instanceVal.instance().storage() ?? []) {
         let name: string;
@@ -47,31 +70,23 @@ export function instanceStorage(
         }
         entries.set(name, item.val());
     }
-    return entries;
-}
 
-/**
- * The `Owner` slot written by `stellar_access::ownable`.
- *
- * `undefined` means ownership has been renounced, or the contract never had an
- * owner (the strategy vault and the router do not).
- */
-export function instanceOwner(
-    storage: Map<string, xdr.ScVal>,
-): string | undefined {
-    const value = storage.get('Owner');
-    return value ? Address.fromScVal(value).toString() : undefined;
-}
+    const require = (name: string): xdr.ScVal => {
+        const value = entries.get(name);
+        if (value === undefined) {
+            throw new Error(`${label} instance is missing ${name}`);
+        }
+        return value;
+    };
 
-/** Read a key that must be present, with a message naming what was missing. */
-export function requireKey(
-    storage: Map<string, xdr.ScVal>,
-    name: string,
-    label: string,
-): xdr.ScVal {
-    const value = storage.get(name);
-    if (value === undefined) {
-        throw new Error(`${label} instance is missing ${name}`);
-    }
-    return value;
+    return {
+        keys: () => [...entries.keys()],
+        get: (name) => entries.get(name),
+        require,
+        address: (name) => Address.fromScVal(require(name)).toString(),
+        optionalAddress: (name) => {
+            const value = entries.get(name);
+            return value ? Address.fromScVal(value).toString() : undefined;
+        },
+    };
 }

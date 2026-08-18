@@ -1,14 +1,14 @@
 import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
-import { instanceOwner, instanceStorage } from '../instance.js';
+import { instanceStorage } from '../instance.js';
 
 // =============================================================================
 // Treasury contract-instance storage.
 //
-// Two slots, and the key shapes differ: the fee rate is stored under a BARE
+// Two slots with different key shapes: the fee rate under a BARE
 // `Symbol("Rate")` (treasury/src/storage.rs: `set::<Symbol, i128>`), not a
-// `#[contracttype]` enum variant, while `Owner` comes from
-// `stellar_access::ownable`. The contract reads the rate with `.unwrap_or(0)`,
-// so an absent key is the SCALAR_18 rate `0`.
+// `#[contracttype]` enum variant, and `Owner` from `stellar_access::ownable`.
+// The contract reads the rate with `.unwrap_or(0)`, so an absent key is the
+// SCALAR_18 rate `0`.
 // =============================================================================
 
 /** The treasury contract's decoded instance storage. */
@@ -22,7 +22,6 @@ export interface TreasuryInstanceState {
 /**
  * Walk a treasury contract-instance value into its decoded state.
  *
- * @param instanceVal - The `.val()` of the treasury instance `ContractDataEntry`.
  * @throws If the value is not a contract instance.
  */
 export function parseTreasuryInstance(
@@ -32,14 +31,12 @@ export function parseTreasuryInstance(
     const rate = storage.get('Rate');
     return {
         rate: rate ? scValToBigInt(rate) : 0n,
-        owner: instanceOwner(storage),
+        owner: storage.optionalAddress('Owner'),
     };
 }
 
 /**
- * The protocol fee rate alone.
- *
- * Kept because the rate is the only field the quote math needs, and it is what
+ * The protocol fee rate alone — the only field the quote math needs, and what
  * `loadTreasuryRate` returns.
  */
 export function parseTreasuryRate(instanceVal: xdr.ScVal): bigint {

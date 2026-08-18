@@ -1,14 +1,14 @@
 import { xdr, scValToNative } from '@stellar/stellar-sdk';
-import { instanceOwner, instanceStorage, requireKey } from '../instance.js';
+import { instanceStorage } from '../instance.js';
 import type { FactoryInitMeta } from './factory_contract.js';
 
 // =============================================================================
 // Factory contract-instance storage.
 //
 // `InitMeta` under a bare `Symbol` (factory/src/storage.rs) plus `Owner`. The
-// deployed markets themselves live in PERSISTENT storage under
-// `FactoryDataKey::Pools(address)`, one entry each, so they are not part of this
-// read.
+// deployed markets live in PERSISTENT storage under
+// `FactoryDataKey::Pools(address)`, one entry each, so they are not part of
+// this read.
 // =============================================================================
 
 /** The factory contract's decoded instance storage. */
@@ -29,9 +29,7 @@ export function parseFactoryInstance(
 ): FactoryInstanceState {
     const storage = instanceStorage(instanceVal, 'factory');
     return {
-        initMeta: scValToNative(
-            requireKey(storage, 'InitMeta', 'factory'),
-        ) as FactoryInitMeta,
-        owner: instanceOwner(storage),
+        initMeta: scValToNative(storage.require('InitMeta')) as FactoryInitMeta,
+        owner: storage.optionalAddress('Owner'),
     };
 }

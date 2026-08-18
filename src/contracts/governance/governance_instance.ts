@@ -1,12 +1,12 @@
 import { xdr, scValToNative } from '@stellar/stellar-sdk';
-import { instanceOwner, instanceStorage, requireKey } from '../instance.js';
+import { instanceStorage } from '../instance.js';
 
 // =============================================================================
 // Governance contract-instance storage.
 //
-// `Delay` and `Nonce` (governance/src/storage.rs) plus `Owner`. The queued
-// calls themselves are TEMPORARY entries under `GovKey::Queued(nonce)`, one per
-// nonce, so they are read separately — this is the timelock's standing config.
+// `Delay` and `Nonce` (governance/src/storage.rs) plus `Owner`. Queued calls
+// are TEMPORARY entries under `GovKey::Queued(nonce)`, one per nonce, read
+// separately — this is the timelock's standing config.
 // =============================================================================
 
 /** The governance contract's decoded instance storage. */
@@ -30,9 +30,9 @@ export function parseGovernanceInstance(
     const storage = instanceStorage(instanceVal, 'governance');
     const nonce = storage.get('Nonce');
     return {
-        delay: BigInt(scValToNative(requireKey(storage, 'Delay', 'governance'))),
+        delay: BigInt(scValToNative(storage.require('Delay'))),
         // `next_nonce` reads with `unwrap_or(0)`, so an absent key is 0.
         nonce: nonce ? Number(scValToNative(nonce)) : 0,
-        owner: instanceOwner(storage),
+        owner: storage.optionalAddress('Owner'),
     };
 }

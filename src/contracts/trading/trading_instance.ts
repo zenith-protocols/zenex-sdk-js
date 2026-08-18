@@ -1,5 +1,5 @@
-import { Address, xdr, scValToBigInt, scValToNative } from '@stellar/stellar-sdk';
-import { decodeEntryKey } from '../../ledger-keys.js';
+import { xdr, scValToBigInt, scValToNative } from '@stellar/stellar-sdk';
+import { instanceStorage } from '../instance.js';
 import { Status } from './trading_types.js';
 import type { AdlState, TradingConfig } from './trading_types.js';
 import { parseAdlState, parseTradingConfig } from './trading_types.js';
@@ -53,15 +53,6 @@ export interface TradingInstanceState {
     owner?: string;
 }
 
-/** Safely decode a storage entry key to its variant name, `undefined` if not a key shape. */
-function entryKeyName(key: xdr.ScVal): string | undefined {
-    try {
-        return decodeEntryKey(key);
-    } catch {
-        return undefined;
-    }
-}
-
 /**
  * Walk a trading contract-instance value (`ScVal::ContractInstance`) into its
  * decoded [`TradingInstanceState`].
@@ -75,82 +66,24 @@ function entryKeyName(key: xdr.ScVal): string | undefined {
 export function parseTradingInstance(
     instanceVal: xdr.ScVal,
 ): TradingInstanceState {
-    if (instanceVal.switch() !== xdr.ScValType.scvContractInstance()) {
-        throw new Error('expected a trading contract-instance value');
-    }
-    const storage = instanceVal.instance().storage();
-    if (!storage) {
-        throw new Error('Trading instance storage is empty');
-    }
-
-    let config: TradingConfig | undefined;
-    let feedId: Buffer | undefined;
-    let status: Status | undefined;
-    let vault: string | undefined;
-    let token: string | undefined;
-    let oracle: string | undefined;
-    let treasury: string | undefined;
-    let delistedAt: bigint | undefined;
-    let terminalPrice: bigint | undefined;
-    let adl: AdlState | undefined;
-    let owner: string | undefined;
-
-    storage.forEach((item) => {
-        switch (entryKeyName(item.key())) {
-            case 'Config':
-                config = parseTradingConfig(scValToNative(item.val()));
-                break;
-            case 'FeedId':
-                feedId = Buffer.from(item.val().bytes());
-                break;
-            case 'Status':
-                status = Number(scValToNative(item.val())) as Status;
-                break;
-            case 'Vault':
-                vault = Address.fromScVal(item.val()).toString();
-                break;
-            case 'Token':
-                token = Address.fromScVal(item.val()).toString();
-                break;
-            case 'Oracle':
-                oracle = Address.fromScVal(item.val()).toString();
-                break;
-            case 'Treasury':
-                treasury = Address.fromScVal(item.val()).toString();
-                break;
-            case 'DelistedAt':
-                delistedAt = scValToBigInt(item.val());
-                break;
-            case 'TerminalPrice':
-                terminalPrice = scValToBigInt(item.val());
-                break;
-            case 'Adl':
-                adl = parseAdlState(scValToNative(item.val()));
-                break;
-            case 'Owner':
-                owner = Address.fromScVal(item.val()).toString();
-                break;
-        }
-    });
-
-    const required = <T>(value: T | undefined, name: string): T => {
-        if (value === undefined) {
-            throw new Error(`trading instance is missing ${name}`);
-        }
-        return value;
-    };
+    const storage = instanceStorage(instanceVal, 'trading');
+    const delistedAt = storage.get('DelistedAt');
+    const terminalPrice = storage.get('TerminalPrice');
+    const adl = storage.get('Adl');
 
     return {
-        config: required(config, 'Config'),
-        feedId: required(feedId, 'FeedId'),
-        status: required(status, 'Status'),
-        vault: required(vault, 'Vault'),
-        token: required(token, 'Token'),
-        oracle: required(oracle, 'Oracle'),
-        treasury: required(treasury, 'Treasury'),
-        delistedAt,
-        terminalPrice,
-        adl: adl ?? { long: false, short: false },
-        owner,
+        config: parseTradingConfig(scValToNative(storage.require('Config'))),
+        feedId: Buffer.from(storage.require('FeedId').bytes()),
+        status: Number(scValToNative(storage.require('Status'))) as Status,
+        vault: storage.address('Vault'),
+        token: storage.address('Token'),
+        oracle: storage.address('Oracle'),
+        treasury: storage.address('Treasury'),
+        delistedAt: delistedAt ? scValToBigInt(delistedAt) : undefined,
+        terminalPrice: terminalPrice ? scValToBigInt(terminalPrice) : undefined,
+        adl: adl
+            ? parseAdlState(scValToNative(adl))
+            : { long: false, short: false },
+        owner: storage.optionalAddress('Owner'),
     };
 }

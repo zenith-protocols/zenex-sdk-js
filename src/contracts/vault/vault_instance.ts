@@ -1,5 +1,5 @@
-import { Address, xdr, scValToBigInt } from '@stellar/stellar-sdk';
-import { decodeEntryKey } from '../../ledger-keys.js';
+import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
+import { instanceStorage } from '../instance.js';
 
 // =============================================================================
 // Strategy-vault instance-storage walker for `getLedgerEntries` reads.
@@ -47,15 +47,6 @@ function extractMetaDecimals(val: xdr.ScVal): number | undefined {
     return undefined;
 }
 
-/** Safely decode a storage entry key to its variant name, `undefined` if not a key shape. */
-function entryKeyName(key: xdr.ScVal): string | undefined {
-    try {
-        return decodeEntryKey(key);
-    } catch {
-        return undefined;
-    }
-}
-
 /**
  * Walk a vault contract-instance value (`ScVal::ContractInstance`) into its
  * decoded [`VaultInstanceState`].
@@ -66,56 +57,27 @@ function entryKeyName(key: xdr.ScVal): string | undefined {
  *   share metadata is missing (both are constructor-set invariants).
  */
 export function parseVaultInstance(instanceVal: xdr.ScVal): VaultInstanceState {
-    if (instanceVal.switch() !== xdr.ScValType.scvContractInstance()) {
-        throw new Error('expected a vault contract-instance value');
-    }
-    const storage = instanceVal.instance().storage();
-    if (!storage) {
-        throw new Error('Vault instance storage is empty');
-    }
-
-    let asset: string | undefined;
-    let totalSharesAtomic = 0n;
-    let decimalsOffset = 0;
-    let shareDecimals: number | undefined;
-    let strategy: string | undefined;
-
-    storage.forEach((item) => {
-        switch (entryKeyName(item.key())) {
-            case 'AssetAddress':
-                asset = Address.fromScVal(item.val()).toString();
-                break;
-            case 'TotalSupply':
-                totalSharesAtomic = scValToBigInt(item.val());
-                break;
-            case 'VirtualDecimalsOffset':
-                decimalsOffset = Number(scValToBigInt(item.val()));
-                break;
-            case 'Meta':
-                shareDecimals = extractMetaDecimals(item.val());
-                break;
-            case 'Strategy':
-                strategy = Address.fromScVal(item.val()).toString();
-                break;
-        }
-    });
-
-    if (!asset) {
-        throw new Error('Vault asset address not found in instance storage');
-    }
+    const storage = instanceStorage(instanceVal, 'vault');
+    // Asset first: it is the most informative thing to be missing, so it should
+    // be the failure a malformed instance reports.
+    const asset = storage.address('AssetAddress');
+    const totalSupply = storage.get('TotalSupply');
+    const offset = storage.get('VirtualDecimalsOffset');
+    const shareDecimals = extractMetaDecimals(storage.require('Meta'));
     if (shareDecimals === undefined) {
-        throw new Error('Vault share metadata not found in instance storage');
+        throw new Error('vault instance Meta is missing decimals');
     }
+    const decimalsOffset = offset ? Number(scValToBigInt(offset)) : 0;
 
     return {
         asset,
-        totalSharesAtomic,
+        totalSharesAtomic: totalSupply ? scValToBigInt(totalSupply) : 0n,
         decimalsOffset,
         shareDecimals,
         // The constructor sets the share token's metadata decimals to
         // asset.decimals() + decimals_offset, so the asset decimals derive
         // from the same instance read.
         assetDecimals: shareDecimals - decimalsOffset,
-        strategy,
+        strategy: storage.optionalAddress('Strategy'),
     };
 }

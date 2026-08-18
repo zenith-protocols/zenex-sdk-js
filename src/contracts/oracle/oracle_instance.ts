@@ -1,5 +1,5 @@
-import { Address, xdr, scValToBigInt, scValToNative } from '@stellar/stellar-sdk';
-import { instanceOwner, instanceStorage, requireKey } from '../instance.js';
+import { xdr, scValToBigInt, scValToNative } from '@stellar/stellar-sdk';
+import { instanceStorage } from '../instance.js';
 
 // =============================================================================
 // Oracle contract-instance storage.
@@ -12,7 +12,7 @@ import { instanceOwner, instanceStorage, requireKey } from '../instance.js';
 
 /** The oracle contract's decoded instance storage. */
 export interface OracleInstanceState {
-    /** Chainlink Data Streams verifier contract the reports are checked against. */
+    /** Chainlink Data Streams verifier the reports are checked against. */
     verifier: string;
     /** Strict staleness window for fills, in seconds (3..=15). */
     tradeStaleness: bigint;
@@ -27,27 +27,19 @@ export interface OracleInstanceState {
 /**
  * Walk an oracle contract-instance value into its decoded state.
  *
- * @throws If the value is not a contract instance, or a required key
- *   (`Verifier`, `TradeStaleness`, `CloseStaleness`, `SpreadReductionFactor`)
- *   is absent.
+ * @throws If the value is not a contract instance, or a required key is absent.
  */
 export function parseOracleInstance(
     instanceVal: xdr.ScVal,
 ): OracleInstanceState {
     const storage = instanceStorage(instanceVal, 'oracle');
     return {
-        verifier: Address.fromScVal(
-            requireKey(storage, 'Verifier', 'oracle'),
-        ).toString(),
-        tradeStaleness: BigInt(
-            scValToNative(requireKey(storage, 'TradeStaleness', 'oracle')),
-        ),
-        closeStaleness: BigInt(
-            scValToNative(requireKey(storage, 'CloseStaleness', 'oracle')),
-        ),
+        verifier: storage.address('Verifier'),
+        tradeStaleness: BigInt(scValToNative(storage.require('TradeStaleness'))),
+        closeStaleness: BigInt(scValToNative(storage.require('CloseStaleness'))),
         spreadReductionFactor: scValToBigInt(
-            requireKey(storage, 'SpreadReductionFactor', 'oracle'),
+            storage.require('SpreadReductionFactor'),
         ),
-        owner: instanceOwner(storage),
+        owner: storage.optionalAddress('Owner'),
     };
 }
