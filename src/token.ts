@@ -17,17 +17,11 @@ import { tokenBalanceLedgerKey } from './ledger-keys.js';
 // fungible token's plain `i128`. Both collapse to the integer balance in the
 // token's own decimals (token-dec).
 //
-// WHERE A BALANCE ACTUALLY LIVES — the trap this module exists to document:
-//
-//   holder     SAC token                      pure-Soroban token
-//   -------    ---------------------------    -----------------------------
-//   C-address  contract data `Balance(C)`     contract data `Balance(C)`
-//   G-address  the account's TRUSTLINE        contract data `Balance(G)`
-//
-// So a classic account's balance of a SAC is NOT a contract-data entry, and
-// reading the `Balance` key for it returns nothing — indistinguishable from a
-// real zero. Our settlement token is a SAC and the vault's share token is a
-// pure-Soroban OZ fungible, so both rows are live for us.
+// This decodes the contract-data slot only, which exists for every CONTRACT
+// holder but not for a classic account holding a SAC (that balance is in a
+// trustline). It is the right tool inside a batch — `Market.load` reads
+// `Balance(vault)` with it — and the wrong tool for a user's wallet balance,
+// which `loadTokenBalance` answers by simulating the token's own `balance()`.
 // =============================================================================
 
 /**

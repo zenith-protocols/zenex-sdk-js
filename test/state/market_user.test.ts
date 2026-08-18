@@ -1,13 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { rpc, xdr, StrKey, nativeToScVal, Asset } from '@stellar/stellar-sdk';
+import { rpc, xdr, StrKey, nativeToScVal } from '@stellar/stellar-sdk';
 import { MarketUser } from '../../src/state/market_user.js';
 import { Market } from '../../src/state/market.js';
 import { marketContext } from '../../src/state/context.js';
-import {
-    loadAssetBalance,
-    loadTokenBalance,
-    loadTokenBalances,
-} from '../../src/state/balance.js';
+import { loadTokenBalance, loadTokenBalances } from '../../src/state/balance.js';
 import { loadTreasuryInstance, loadTreasuryRate } from '../../src/state/treasury.js';
 import {
     contractInstanceLedgerKey,
@@ -38,7 +34,6 @@ const TREASURY = StrKey.encodeContract(Buffer.alloc(32, 5));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7));
 const USER_B = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 8));
 const RATE = 5n * 10n ** 16n;
-const ISSUER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 30));
 
 const network: Network = {
     rpc: 'http://localhost:1337',
@@ -269,73 +264,70 @@ describe('marketContext', () => {
     });
 });
 
-describe('standalone token balance', () => {
-    it('reads one holder in a single key', async () => {
-        const spy = mockEntries([
-            ledgerEntryFor(tokenBalanceLedgerKey(TOKEN, USER), balanceMapScVal(42n)),
-        ]);
-        expect(await loadTokenBalance(network, TOKEN, USER)).toBe(42n);
-        expect(spy.mock.calls[0]).toHaveLength(1);
-    });
+describe('token balance', () => {
+    function mockBalanceSim(amount: bigint) {
+        return vi
+            .spyOn(rpc.Server.prototype, 'simulateTransaction')
+            .mockResolvedValue({
+                latestLedger: 4242,
+                transactionData: {},
+                minResourceFee: '1',
+                result: { retval: nativeToScVal(amount, { type: 'i128' }), auth: [] },
+                events: [],
+                _parsed: true,
+            } as never);
+    }
 
-    it('reads an uncredited CONTRACT holder as zero', async () => {
-        mockEntries([]);
-        const someContract = StrKey.encodeContract(Buffer.alloc(32, 21));
-        expect(await loadTokenBalance(network, TOKEN, someContract)).toBe(0n);
-    });
-
-    it('refuses to report zero for a classic account with no contract-data slot', async () => {
-        // For a SAC, a G-address holds its balance in a TRUSTLINE, so an absent
-        // Balance key is indistinguishable from a real zero. Verified live: an
-        // account holding 522235922427 read as 0 through this path.
-        mockEntries([]);
-        await expect(loadTokenBalance(network, TOKEN, USER)).rejects.toMatchObject({
-            code: 'MISSING_STATE',
-            message: expect.stringContaining('loadAssetBalance'),
-        });
-    });
-
-    it('still returns a present balance for a classic holder of a Soroban token', async () => {
-        // A pure-Soroban fungible (e.g. the vault's share token) really does
-        // keep a G-address balance in contract data.
-        mockEntries([
-            ledgerEntryFor(tokenBalanceLedgerKey(TOKEN, USER), balanceMapScVal(11n)),
-        ]);
-        expect(await loadTokenBalance(network, TOKEN, USER)).toBe(11n);
-    });
-
-    it('returns nothing without a round trip for no tokens', async () => {
-        const spy = mockEntries([]);
-        expect(await loadTokenBalances(network, [], USER)).toEqual([]);
-        expect(spy).not.toHaveBeenCalled();
-    });
-
-    it('reads several tokens for one holder in one round trip, in order', async () => {
-        const other = StrKey.encodeContract(Buffer.alloc(32, 11));
-        const spy = mockEntries([
-            ledgerEntryFor(tokenBalanceLedgerKey(other, USER), balanceMapScVal(7n)),
-            ledgerEntryFor(tokenBalanceLedgerKey(TOKEN, USER), balanceMapScVal(42n)),
-        ]);
-        expect(await loadTokenBalances(network, [TOKEN, other], USER)).toEqual([42n, 7n]);
+    // The property that matters: ONE path for every holder and every token.
+    // Where a balance physically lives varies by both -- a classic account's
+    // SAC balance is a trustline, not contract data -- so reading the ledger
+    // key would report a confident zero for a funded account.
+    it('reads a classic holder through the token, not through a ledger key', async () => {
+        const spy = mockBalanceSim(522_235_922_427n);
+        expect(await loadTokenBalance(network, TOKEN, USER)).toBe(522_235_922_427n);
         expect(spy).toHaveBeenCalledTimes(1);
     });
-});
 
-describe('loadAssetBalance', () => {
-    it('delegates to the SDK helper, which routes classic holders to a trustline', async () => {
-        const spy = vi
-            .spyOn(rpc.Server.prototype, 'getAssetBalance')
-            .mockResolvedValue({ latestLedger: 1, balanceEntry: { amount: '522235922427', authorized: true, clawback: false } } as never);
-        expect(await loadAssetBalance(network, USER, new Asset('ZUSD', ISSUER))).toBe(
-            522_235_922_427n,
+    it('reads a contract holder the same way, with no branch', async () => {
+        const vaultHolder = StrKey.encodeContract(Buffer.alloc(32, 21));
+        mockBalanceSim(4_248_930_129_558n);
+        expect(await loadTokenBalance(network, TOKEN, vaultHolder)).toBe(
+            4_248_930_129_558n,
         );
-        expect(spy).toHaveBeenCalledTimes(1);
     });
 
-    it('reads a holder with no trustline or balance entry as zero', async () => {
-        vi.spyOn(rpc.Server.prototype, 'getAssetBalance')
-            .mockResolvedValue({ latestLedger: 1 } as never);
-        expect(await loadAssetBalance(network, USER, new Asset('ZUSD', ISSUER))).toBe(0n);
+    it('needs no classic Asset, so a share token works too', async () => {
+        // The vault's share token is a pure-Soroban fungible with no
+        // code/issuer; `getAssetBalance` could not address it at all.
+        mockBalanceSim(4_995_000_000_000_000_000n);
+        expect(await loadTokenBalance(network, VAULT, USER)).toBe(
+            4_995_000_000_000_000_000n,
+        );
+    });
+
+    it('reads several tokens for one holder, in request order', async () => {
+        const other = StrKey.encodeContract(Buffer.alloc(32, 11));
+        let call = 0;
+        vi.spyOn(rpc.Server.prototype, 'simulateTransaction').mockImplementation(
+            async () =>
+                ({
+                    latestLedger: 4242,
+                    result: { retval: nativeToScVal(++call === 1 ? 42n : 7n, { type: 'i128' }), auth: [] },
+                    _parsed: true,
+                }) as never,
+        );
+        expect(await loadTokenBalances(network, [TOKEN, other], USER)).toEqual([42n, 7n]);
+    });
+
+    it('surfaces a failed simulation rather than reporting zero', async () => {
+        vi.spyOn(rpc.Server.prototype, 'simulateTransaction').mockResolvedValue({
+            latestLedger: 1,
+            error: 'boom',
+            _parsed: true,
+        } as never);
+        await expect(loadTokenBalance(network, TOKEN, USER)).rejects.toThrow(
+            /Simulation failed/,
+        );
     });
 });
 
