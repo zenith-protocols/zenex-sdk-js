@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
 import { TradingContract, DeployArgs } from '../../src/contracts/trading/trading_contract.js';
 import {
-    OrderKind, VaultOrderKind, FULL_CLOSE, TradingConfig, tradingConfigToScVal,
+    OrderKind, VaultOrderKind, TradingConfig, tradingConfigToScVal,
 } from '../../src/contracts/trading/trading_types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
@@ -168,58 +168,6 @@ describe('TradingContract full surface', () => {
         expect(transfer.args).toEqual([OWNER, 5000]);
         expect(decodeInvoke(contract.acceptOwnership()).fn).toBe('accept_ownership');
         expect(decodeInvoke(contract.renounceOwnership()).fn).toBe('renounce_ownership');
-    });
-
-    it('builds every semantic helper on top of create_order / create_vault_order', () => {
-        const openMarket = decodeInvoke(contract.openMarket({
-            user: USER, isLong: true, notional: 100n, margin: 10n, priceBound: 5n, expiration: 99,
-        }));
-        expect(openMarket.args).toEqual([USER, true, OrderKind.MarketIncrease, 100n, 10n, 0n, 5n, 99]);
-
-        const openLimit = decodeInvoke(contract.openLimit({
-            user: USER, isLong: true, notional: 100n, margin: 10n,
-            triggerPrice: 42n, priceBound: 5n, expiration: 99,
-        }));
-        expect(openLimit.args).toEqual([USER, true, OrderKind.LimitIncrease, 100n, 10n, 42n, 5n, 99]);
-
-        const close = decodeInvoke(contract.closePosition({
-            user: USER, isLong: true, priceBound: 6n, expiration: 4,
-        }));
-        expect(close.args).toEqual([USER, true, OrderKind.MarketDecrease, FULL_CLOSE, 0n, 0n, 6n, 4]);
-
-        const decrease = decodeInvoke(contract.decreasePosition({
-            user: USER, isLong: false, notional: 40n, margin: 4n, priceBound: 0n, expiration: 1,
-        }));
-        expect(decrease.args).toEqual([USER, false, OrderKind.MarketDecrease, 40n, 4n, 0n, 0n, 1]);
-
-        const add = decodeInvoke(contract.addMargin({ user: USER, isLong: true, amount: 7n, expiration: 2 }));
-        expect(add.args).toEqual([USER, true, OrderKind.MarketIncrease, 0n, 7n, 0n, 0n, 2]);
-
-        const withdraw = decodeInvoke(contract.withdrawMargin({ user: USER, isLong: true, amount: 7n, expiration: 2 }));
-        expect(withdraw.args).toEqual([USER, true, OrderKind.MarketDecrease, 0n, 7n, 0n, 0n, 2]);
-
-        const takeProfit = decodeInvoke(contract.placeTakeProfit({
-            user: USER, isLong: true, triggerPrice: 200n, notional: 50n, priceBound: 0n, expiration: 3,
-        }));
-        expect(takeProfit.args).toEqual([USER, true, OrderKind.LimitDecrease, 50n, 0n, 200n, 0n, 3]);
-
-        const takeProfitFull = decodeInvoke(contract.placeTakeProfit({
-            user: USER, isLong: false, triggerPrice: 200n, priceBound: 0n, expiration: 3,
-        }));
-        expect(takeProfitFull.args[2]).toBe(OrderKind.LimitDecrease);
-        expect(takeProfitFull.args[3]).toBe(FULL_CLOSE);
-
-        const stopLoss = decodeInvoke(contract.placeStopLoss({
-            user: USER, isLong: false, triggerPrice: 90n, priceBound: 0n, expiration: 3,
-        }));
-        expect(stopLoss.args[2]).toBe(OrderKind.StopDecrease);
-        expect(stopLoss.args[3]).toBe(FULL_CLOSE);
-
-        const deposit = decodeInvoke(contract.depositVault({ user: USER, amount: 10n, minOut: 1n }));
-        expect(deposit.args).toEqual([USER, VaultOrderKind.Deposit, 10n, 1n]);
-
-        const redeem = decodeInvoke(contract.redeemVault({ user: USER, shares: 20n, minOut: 2n }));
-        expect(redeem.args).toEqual([USER, VaultOrderKind.Redeem, 20n, 2n]);
     });
 
     it('createOrder builds the 8-arg create_order', () => {

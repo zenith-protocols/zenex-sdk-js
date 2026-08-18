@@ -7,7 +7,6 @@ import {
     Order, VaultOrder, Position, MarketData, AdlState,
     tradingConfigToScVal,
     parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState, parseTradingConfig,
-    FULL_CLOSE,
 } from './trading_types.js';
 
 // =============================================================================
@@ -24,80 +23,6 @@ export interface DeployArgs {
     /** 32-byte Data Streams stream id (`BytesN<32>`); must be a V3 (`0x0003…`) stream. */
     feedId: Buffer | Uint8Array;
     config: TradingConfig;
-}
-
-/** Open a position at market (no trigger). */
-export interface OpenMarketArgs {
-    user: string;
-    isLong: boolean;
-    notional: i128;
-    margin: i128;
-    priceBound: i128;
-    expiration: u32;
-}
-
-/** Open a position once the trigger price is crossed. */
-export interface OpenLimitArgs {
-    user: string;
-    isLong: boolean;
-    notional: i128;
-    margin: i128;
-    triggerPrice: i128;
-    priceBound: i128;
-    expiration: u32;
-}
-
-/** Fully close a position at market. */
-export interface ClosePositionArgs {
-    user: string;
-    isLong: boolean;
-    priceBound: i128;
-    expiration: u32;
-}
-
-/** Partially decrease a position, optionally withdrawing margin. */
-export interface DecreasePositionArgs {
-    user: string;
-    isLong: boolean;
-    notional: i128;
-    margin: i128;
-    priceBound: i128;
-    expiration: u32;
-}
-
-/** Margin-only order (notional 0): add or withdraw margin without changing size. */
-export interface ModifyMarginArgs {
-    user: string;
-    isLong: boolean;
-    amount: i128;
-    expiration: u32;
-}
-
-/** A take-profit or stop-loss trigger order. */
-export interface TriggerOrderArgs {
-    user: string;
-    isLong: boolean;
-    triggerPrice: i128;
-    /** Size to close on trigger; defaults to `FULL_CLOSE`. */
-    notional?: i128;
-    priceBound: i128;
-    expiration: u32;
-}
-
-/** Deposit assets into the vault. */
-export interface VaultDepositArgs {
-    user: string;
-    amount: i128;
-    /** Minimum shares received at fill, net of the deposit fee; 0 = unset. */
-    minOut: i128;
-}
-
-/** Redeem vault shares for assets. */
-export interface VaultRedeemArgs {
-    user: string;
-    shares: i128;
-    /** Minimum assets received at fill, net of the redeem fee; 0 = unset. */
-    minOut: i128;
 }
 
 /** Coerce a `Buffer | Uint8Array` price update into a `Buffer` for `scvBytes`. */
@@ -859,95 +784,5 @@ export class TradingContract extends Contract {
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');
-    }
-
-    // ============================================================
-    // Semantic helpers
-    // ============================================================
-
-    /** Open a position at market (`MarketIncrease`; `triggerPrice` unused). */
-    openMarket(args: OpenMarketArgs): string {
-        return this.createOrder(
-            args.user, args.isLong, OrderKind.MarketIncrease, args.notional, args.margin,
-            0n, args.priceBound, args.expiration,
-        );
-    }
-
-    /**
-     * Open a position once the trigger price is crossed favorably
-     * (`LimitIncrease`): a long buys at-or-below the trigger, a short sells
-     * at-or-above it.
-     */
-    openLimit(args: OpenLimitArgs): string {
-        return this.createOrder(
-            args.user, args.isLong, OrderKind.LimitIncrease, args.notional, args.margin,
-            args.triggerPrice, args.priceBound, args.expiration,
-        );
-    }
-
-    /** Fully close a position at market (`MarketDecrease`, `FULL_CLOSE` notional, no margin withdrawal). */
-    closePosition(args: ClosePositionArgs): string {
-        return this.createOrder(
-            args.user, args.isLong, OrderKind.MarketDecrease, FULL_CLOSE, 0n,
-            0n, args.priceBound, args.expiration,
-        );
-    }
-
-    /** Partially decrease a position at market, optionally withdrawing margin. */
-    decreasePosition(args: DecreasePositionArgs): string {
-        return this.createOrder(
-            args.user, args.isLong, OrderKind.MarketDecrease, args.notional, args.margin,
-            0n, args.priceBound, args.expiration,
-        );
-    }
-
-    /** Add margin to a position without changing its size. */
-    addMargin(args: ModifyMarginArgs): string {
-        return this.createOrder(
-            args.user, args.isLong, OrderKind.MarketIncrease, 0n, args.amount,
-            0n, 0n, args.expiration,
-        );
-    }
-
-    /** Withdraw margin from a position without changing its size. */
-    withdrawMargin(args: ModifyMarginArgs): string {
-        return this.createOrder(
-            args.user, args.isLong, OrderKind.MarketDecrease, 0n, args.amount,
-            0n, 0n, args.expiration,
-        );
-    }
-
-    /**
-     * Place a take-profit trigger (`LimitDecrease`): a decrease that fires
-     * when the price crosses the trigger favorably (upside for a long,
-     * downside for a short). Defaults to a full close.
-     */
-    placeTakeProfit(args: TriggerOrderArgs): string {
-        return this.createOrder(
-            args.user, args.isLong, OrderKind.LimitDecrease, args.notional ?? FULL_CLOSE, 0n,
-            args.triggerPrice, args.priceBound, args.expiration,
-        );
-    }
-
-    /**
-     * Place a stop-loss trigger (`StopDecrease`): a decrease that fires when
-     * the price crosses the trigger adversely (downside for a long, upside
-     * for a short). Defaults to a full close.
-     */
-    placeStopLoss(args: TriggerOrderArgs): string {
-        return this.createOrder(
-            args.user, args.isLong, OrderKind.StopDecrease, args.notional ?? FULL_CLOSE, 0n,
-            args.triggerPrice, args.priceBound, args.expiration,
-        );
-    }
-
-    /** Deposit assets into the vault for the keeper to fill. */
-    depositVault(args: VaultDepositArgs): string {
-        return this.createVaultOrder(args.user, VaultOrderKind.Deposit, args.amount, args.minOut);
-    }
-
-    /** Redeem vault shares for assets, for the keeper to fill. */
-    redeemVault(args: VaultRedeemArgs): string {
-        return this.createVaultOrder(args.user, VaultOrderKind.Redeem, args.shares, args.minOut);
     }
 }

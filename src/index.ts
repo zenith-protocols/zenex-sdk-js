@@ -58,14 +58,6 @@ export {
 export type {
     // Argument interfaces
     DeployArgs,
-    OpenMarketArgs,
-    OpenLimitArgs,
-    ClosePositionArgs,
-    DecreasePositionArgs,
-    ModifyMarginArgs,
-    TriggerOrderArgs,
-    VaultDepositArgs,
-    VaultRedeemArgs,
     // Core types
     Order,
     VaultOrder,

@@ -38,3 +38,28 @@ export type {
     VaultRestOnlyExecutionPolicy,
 } from './transactions.js';
 
+
+export {
+    addMarginParams,
+    closePositionParams,
+    decreasePositionParams,
+    openLimitParams,
+    openMarketParams,
+    stopLossParams,
+    takeProfitParams,
+    vaultDepositParams,
+    vaultRedeemParams,
+    withdrawMarginParams,
+} from './intents.js';
+export type {
+    ClosePositionArgs,
+    DecreasePositionArgs,
+    ModifyMarginArgs,
+    OpenLimitArgs,
+    OpenMarketArgs,
+    OrderIntentBase,
+    TriggerOrderArgs,
+    VaultDepositArgs,
+    VaultOrderParams,
+    VaultRedeemArgs,
+} from './intents.js';

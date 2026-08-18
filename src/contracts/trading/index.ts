@@ -2,19 +2,11 @@
 // Trading module public surface.
 // =============================================================================
 
-// Contract binding + argument interfaces
+// Contract binding + its constructor arguments. Named-order helpers live in
+// `src/trading/order/intents.ts`, not here -- this file is the entrypoint
+// binding surface and nothing else.
 export { TradingContract } from './trading_contract.js';
-export type {
-    DeployArgs,
-    OpenMarketArgs,
-    OpenLimitArgs,
-    ClosePositionArgs,
-    DecreasePositionArgs,
-    ModifyMarginArgs,
-    TriggerOrderArgs,
-    VaultDepositArgs,
-    VaultRedeemArgs,
-} from './trading_contract.js';
+export type { DeployArgs } from './trading_contract.js';
 
 // Core types, enums, converters, and parsers
 export {

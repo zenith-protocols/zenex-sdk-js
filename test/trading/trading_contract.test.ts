@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, nativeToScVal } from '@stellar/stellar-sdk';
 import { TradingContract, DeployArgs } from '../../src/contracts/trading/trading_contract.js';
-import { OrderKind, VaultOrderKind, FULL_CLOSE, TradingConfig } from '../../src/contracts/trading/trading_types.js';
+import { OrderKind, VaultOrderKind, TradingConfig } from '../../src/contracts/trading/trading_types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -99,69 +99,6 @@ describe('TradingContract', () => {
         }
     });
 
-    it('closePosition emits MarketDecrease + FULL_CLOSE + zero margin', () => {
-        const operation = contract.closePosition({ user: USER, isLong: true, priceBound: 0n, expiration: 0 });
-        const { fn, args } = decodeInvoke(operation);
-        expect(fn).toBe('create_order');
-        expect(args[2]).toBe(OrderKind.MarketDecrease);
-        expect(args[3]).toBe(FULL_CLOSE);
-        expect(args[4]).toBe(0n);
-    });
-
-    it('openMarket emits MarketIncrease with an unused trigger of 0', () => {
-        const { args } = decodeInvoke(contract.openMarket({
-            user: USER, isLong: true, notional: 100n, margin: 10n, priceBound: 5n, expiration: 99,
-        }));
-        expect(args).toEqual([USER, true, 0, 100n, 10n, 0n, 5n, 99]);
-    });
-
-    it('openLimit emits LimitIncrease carrying the trigger price', () => {
-        const { args } = decodeInvoke(contract.openLimit({
-            user: USER, isLong: true, notional: 100n, margin: 10n,
-            triggerPrice: 50n, priceBound: 0n, expiration: 0,
-        }));
-        expect(args[2]).toBe(OrderKind.LimitIncrease);
-        expect(args[5]).toBe(50n);
-    });
-
-    it('placeTakeProfit emits LimitDecrease and defaults to FULL_CLOSE', () => {
-        const { args } = decodeInvoke(contract.placeTakeProfit({
-            user: USER, isLong: true, triggerPrice: 200n, priceBound: 0n, expiration: 3,
-        }));
-        expect(args[2]).toBe(OrderKind.LimitDecrease);
-        expect(args[3]).toBe(FULL_CLOSE);
-        expect(args[4]).toBe(0n);
-        expect(args[5]).toBe(200n);
-    });
-
-    it('placeStopLoss emits StopDecrease and honours a partial notional', () => {
-        const { args } = decodeInvoke(contract.placeStopLoss({
-            user: USER, isLong: false, triggerPrice: 90n, notional: 40n, priceBound: 0n, expiration: 3,
-        }));
-        expect(args[2]).toBe(OrderKind.StopDecrease);
-        expect(args[3]).toBe(40n);
-        expect(args[5]).toBe(90n);
-    });
-
-    it('withdrawMargin emits MarketDecrease with notional 0', () => {
-        const { fn, args } = decodeInvoke(contract.withdrawMargin({
-            user: USER, isLong: true, amount: 25n, expiration: 0,
-        }));
-        expect(fn).toBe('create_order');
-        expect(args[2]).toBe(OrderKind.MarketDecrease);
-        expect(args[3]).toBe(0n);
-        expect(args[4]).toBe(25n);
-    });
-
-    it('addMargin emits MarketIncrease with notional 0', () => {
-        const { args } = decodeInvoke(contract.addMargin({
-            user: USER, isLong: false, amount: 7n, expiration: 2,
-        }));
-        expect(args[2]).toBe(OrderKind.MarketIncrease);
-        expect(args[3]).toBe(0n);
-        expect(args[4]).toBe(7n);
-    });
-
     it('createVaultOrder builds create_vault_order with a u32 kind and minOut', () => {
         const { fn, rawArgs, args } = decodeInvoke(
             contract.createVaultOrder(USER, VaultOrderKind.Redeem, 500n, 490n),
@@ -170,15 +107,6 @@ describe('TradingContract', () => {
         expect(args).toEqual([USER, 1, 500n, 490n]);
         expect(rawArgs[1].switch().name).toBe('scvU32');
         expect(rawArgs[3].switch().name).toBe('scvI128');
-    });
-
-    it('depositVault and redeemVault map onto the two VaultOrderKind discriminants', () => {
-        const deposit = decodeInvoke(contract.depositVault({ user: USER, amount: 1000n, minOut: 3n }));
-        expect(deposit.fn).toBe('create_vault_order');
-        expect(deposit.args).toEqual([USER, VaultOrderKind.Deposit, 1000n, 3n]);
-
-        const redeem = decodeInvoke(contract.redeemVault({ user: USER, shares: 500n, minOut: 1n }));
-        expect(redeem.args).toEqual([USER, VaultOrderKind.Redeem, 500n, 1n]);
     });
 
     it('executeOrder carries the price bytes', () => {
