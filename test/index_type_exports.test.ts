@@ -115,37 +115,46 @@ describe('package root type exports', () => {
         expect(diagnostics).toEqual([]);
     }, 15_000);
 
-    it('exports subject-bound snapshots without requiring subjects on legacy fixtures', () => {
+    it('exports a subject-bound market context whose subject stays optional on bare fixtures', () => {
         const consumerPath = fileURLToPath(
             new URL('./root-snapshot-subject-consumer.ts', import.meta.url),
         );
         const source = `
             import type {
-                TradingSnapshot,
-                TradingSnapshotSubject,
-                SubjectBoundTradingSnapshot,
-                QuoteResult,
+                MarketContext,
+                MarketSubject,
+                SubjectBoundMarketContext,
+                MarketContracts,
+                MarketStateData,
             } from '../src/index.js';
-            import type {
-                SubjectBoundTradingSnapshot as TradingEntryBoundSnapshot,
-            } from '../src/contracts/trading/index.js';
-            import { loadTradingSnapshot } from '../src/index.js';
+            import { Market, MarketUser, marketContext } from '../src/index.js';
 
-            const legacyFields = {} as Omit<TradingSnapshot, 'subject'>;
-            export const legacy: TradingSnapshot = legacyFields;
-            export const subject: TradingSnapshotSubject = {
+            const bareFields = {} as Omit<MarketContext, 'subject'>;
+            export const bare: MarketContext = bareFields;
+            export const subject: MarketSubject = {
                 user: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
                 isLong: true,
             };
-            export const bound: SubjectBoundTradingSnapshot = {
-                ...legacyFields,
+            export const bound: SubjectBoundMarketContext = {
+                ...bareFields,
                 subject,
                 adl: { long: false, short: false },
                 collateralToken: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
             };
-            export const tradingEntryBound: TradingEntryBoundSnapshot = bound;
-            export const loaded: Promise<QuoteResult<SubjectBoundTradingSnapshot>> =
-                loadTradingSnapshot({} as Parameters<typeof loadTradingSnapshot>[0]);
+            export const contracts: MarketContracts = {
+                market: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+                vault: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+                token: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+            };
+            export const loaded: Promise<Market> =
+                Market.load({} as Parameters<typeof Market.load>[0], contracts);
+            export const rebuilt: Market =
+                Market.fromData({} as Parameters<typeof Market.load>[0], {} as MarketStateData);
+            export const composed: MarketContext = marketContext(
+                rebuilt,
+                {} as MarketUser,
+                { isLong: true, price: bare.price },
+            );
         `;
         const options: ts.CompilerOptions = {
             target: ts.ScriptTarget.ES2022,

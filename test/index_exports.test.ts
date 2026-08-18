@@ -219,7 +219,11 @@ describe('package root exports', () => {
         expect(SDK.quoteVaultRedeem).toBeTypeOf('function');
         expect(SDK.quoteVaultRedeemFill).toBeTypeOf('function');
         expect(SDK.deriveVaultMinimumOutput).toBeTypeOf('function');
-        expect(SDK.loadTradingSnapshot).toBeTypeOf('function');
+        expect(SDK.Market).toBeTypeOf('function');
+        expect(SDK.MarketUser).toBeTypeOf('function');
+        expect(SDK.marketContext).toBeTypeOf('function');
+        expect(SDK.loadTokenBalance).toBeTypeOf('function');
+        expect(SDK.loadTreasuryRate).toBeTypeOf('function');
         expect(SDK.buildOrderOperation).toBeTypeOf('function');
         expect(SDK.buildVaultOrderOperation).toBeTypeOf('function');
         expect(SDK.buildVaultActionExecution).toBeTypeOf('function');

@@ -14,7 +14,7 @@ import type { OrderParams } from '../../contracts/router/router_types.js';
 import { isIncreaseOrderKind, isMarketOrderKind } from '../order/kinds.js';
 import { orderExecutionPrice, validateOrder } from '../order/validation.js';
 import type { PriceData } from '../market/types.js';
-import type { TradingSnapshot } from '../snapshot.js';
+import type { MarketContext } from './context.js';
 import {
     quotePositionAction,
     type PositionAction,
@@ -91,7 +91,7 @@ function gateCode(reason: string): number {
  * building and signing the same `OrderParams`.
  */
 export function applyOrder(
-    snapshot: TradingSnapshot,
+    snapshot: MarketContext,
     order: OrderParams,
     options: ApplyOrderOptions = {},
 ): OrderApplication {
@@ -207,7 +207,7 @@ export function orderPriceBound(
  * order dust floor fits inside the margin gates.
  */
 export function maxWithdrawableMargin(
-    snapshot: TradingSnapshot,
+    snapshot: MarketContext,
     options: ApplyOrderOptions = {},
 ): bigint {
     const probe = (amount: bigint): boolean =>

@@ -50,11 +50,6 @@ export {
     TradingEventType,
 } from './contracts/trading/index.js';
 
-export {
-    loadTradingSnapshot,
-    snapshotFromEntries,
-} from './contracts/trading/index.js';
-
 export type {
     // Argument interfaces
     DeployArgs,
@@ -87,26 +82,16 @@ export type {
     TradingCloseFillEvent,
     TradingLiquidationEvent,
     TradingEvent,
-    SnapshotFromEntriesInput,
-    SubjectBoundTradingSnapshot,
-    TradingDeployment,
-    TradingSnapshot,
-    TradingSnapshotPrice,
-    TradingSnapshotRequest,
-    TradingSnapshotSubject,
     TradingInstanceState,
-    TradingEntriesRequest,
-    TradingEntriesSnapshot,
-    TradingEntriesFailureCode,
 } from './contracts/trading/index.js';
 
-export {
-    parseTradingInstance,
-    loadTradingEntries,
-    loadTradingEntriesBatch,
-    crossCheckVaultTotalAssets,
-    TradingEntriesError,
-} from './contracts/trading/index.js';
+export { parseTradingInstance } from './contracts/trading/index.js';
+
+// =============================================================================
+// State layer (getLedgerEntries reads, one round trip each)
+// =============================================================================
+
+export * from './state/index.js';
 
 // =============================================================================
 // Trading Router Module (stateless batching + create-and-fill flows)
