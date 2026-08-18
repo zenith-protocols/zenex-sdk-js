@@ -5,21 +5,6 @@ import type {
     TradingConfig,
 } from '../../contracts/trading/trading_types.js';
 
-// =============================================================================
-// Display estimates over a stored (unsettled) position.
-//
-// Every formula is ported from the contract's `Position` and math modules.
-// These mark a RAW stored position at a single price without
-// settling accruals into margin, so they are estimates for display surfaces.
-// Transaction code must use `quotePositionAction` / `applyOrder` with one
-// coherent `TradingSnapshot`.
-//
-// Rounding matches the contract's fixed-point helpers: true floor (toward -inf)
-// and true ceil (toward +inf) for every sign. `priceScalar` is the SCALAR_18
-// scalar baked into `Position.tokens` by `math::to_tokens`; callers pass
-// `SCALAR_18`.
-// =============================================================================
-
 /**
  * Signed PnL of `position` marked at `price`, token-dec.
  *
@@ -27,6 +12,9 @@ import type {
  * a short is `notional - ceil(tokens * price / priceScalar)`. The mark rounds
  * against the trader, matching the contract's conservative-for-the-vault
  * rounding. `price` is the exit price (`price.exit(is_long)` on-chain).
+ *
+ * @param priceScalar The scalar baked into `position.tokens` by
+ *   `math::to_tokens`. Pass `SCALAR_18`.
  */
 export function positionPnl(
     position: Position,
@@ -46,10 +34,11 @@ export function positionPnl(
  * Pending funding accrual on `position`, token-dec; positive is owed by the
  * trader, negative is earned.
  *
- * Ports `Position::calculate_fees` / `math::accrued_amount`:
+ * Ports `Position::settle_accruals` / `math::accrued_amount`:
  * `ceil(notional * (marketFundingIdx[side] - position.fundingIdx) / SCALAR_18)`.
  * The ceil rounds toward +inf for both signs so a payer never underpays and a
- * receiver (negative delta) never over-claims.
+ * receiver (negative delta) never over-claims. `marketData`'s index is as of
+ * the market's last on-chain accrual; this does not extrapolate to now.
  */
 export function pendingFunding(
     position: Position,
@@ -70,8 +59,10 @@ export function pendingFunding(
  * Pending borrowing accrual on `position`, token-dec (non-negative; indices
  * only ever grow).
  *
- * Ports `Position::calculate_fees` / `math::accrued_amount`:
+ * Ports `Position::settle_accruals` / `math::accrued_amount`:
  * `ceil(notional * (marketBorrowingIdx[side] - position.borrowingIdx) / SCALAR_18)`.
+ * `marketData`'s index is as of the market's last on-chain accrual; this does
+ * not extrapolate to now.
  */
 export function pendingBorrowing(
     position: Position,
@@ -92,17 +83,23 @@ export function pendingBorrowing(
  * Position equity, token-dec: `margin + pnl - max(0, pendingFunding) -
  * pendingBorrowing`.
  *
- * The contract's `Position::equity` is `margin + pnl` because
- * `calculate_fees` has already debited the accruals into `margin`; a stored
- * position read by the SDK has not been settled, so this subtracts the pending
- * accruals via their index deltas. Matching `Fees::debit`, only paid funding
- * (a positive accrual) debits the margin; earned funding routes to the user's
- * separate claimable balance and never shores up the position's equity.
+ * The contract's settled equity (`Position::settle`) is
+ * `margin - fees.debit() + pnl`, which folds in base and impact trade fees
+ * along with funding and borrowing. This excludes base and impact since no
+ * fill is priced here. Matching `Fees::debit`, only paid funding (a positive
+ * accrual) debits the margin; earned funding routes to the user's separate
+ * claimable balance and never shores up equity. A stored position read by the
+ * SDK has not been settled, so this subtracts the pending funding and
+ * borrowing accruals through their index deltas.
  *
  * The `marketData` indices are as of the market's last on-chain accrual; this
  * does not extrapolate the current rates over the seconds since, whereas the
  * contract advances both indices to `now` before any equity check. Between
- * keeper touches the result slightly overstates equity.
+ * keeper touches the result slightly overstates equity. Use `liquidationState`
+ * for the exact settled equity checked against the maintenance line.
+ *
+ * @param priceScalar The scalar baked into `position.tokens` by
+ *   `math::to_tokens`. Pass `SCALAR_18`.
  */
 export function positionEquity(
     position: Position,
@@ -140,13 +137,14 @@ export function unlockedNotional(position: Position, nowSecs: bigint): bigint {
  *
  * The contract has no liquidation-price function: it checks
  * `equity < ceil(maintenance_margin * notional)` directly
- * (`Position::require_valid` / `liquidate`). This inverts that maintenance
- * line against the same equity model as `positionEquity` to solve for the
- * marking price where equity meets the maintenance margin. It excludes the
- * incremental base/impact close fee, which is second-order for the threshold
- * estimate, and does not extrapolate accrual rates past the market's last
- * on-chain accrual. Use `liquidationState` for an exact checked result at a
- * declared ledger and authenticated price.
+ * (`Position::is_liquidatable`, called from `require_valid` and `liquidate`).
+ * This inverts that maintenance line against the same equity model as
+ * `positionEquity` to solve for the marking price where equity meets the
+ * maintenance margin. It excludes the incremental base and impact close fee,
+ * which is second-order for the threshold estimate, and does not extrapolate
+ * accrual rates past the market's last on-chain accrual. Use
+ * `liquidationState` for an exact checked result at a declared ledger and
+ * authenticated price.
  */
 export function liquidationPrice(
     position: Position,

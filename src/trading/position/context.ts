@@ -1,16 +1,3 @@
-// =============================================================================
-// The state bundle a position action is quoted against.
-//
-// This is the *shape* the exact layer consumes, owned by the exact layer so it
-// does not depend on how the state was fetched. `src/state/` composes one from
-// a `Market`, a `MarketUser` and a caller-supplied price; a test builds one by
-// hand.
-//
-// The price is an input, never a field the SDK reads from chain: signed Data
-// Streams reports are license-restricted and must not reach a browser, so the
-// mark comes from the platform's numeric price surface.
-// =============================================================================
-
 import type { PriceData } from '../market/types.js';
 import type { VaultAtomicState } from '../quote/vault.js';
 import type {
@@ -23,7 +10,9 @@ import type {
 
 /** Whose position, and which side, a context describes. */
 export interface MarketSubject {
+    /** Position owner. */
     readonly user: string;
+    /** Side this position targets. */
     readonly isLong: boolean;
 }
 
@@ -33,7 +22,12 @@ export interface MarketContext {
     readonly subject?: MarketSubject;
     /** Ledger sequence the state was read at; order expiry is measured in it. */
     ledger: number;
-    /** Ledger close time in whole seconds; the clock every time gate uses. */
+    /**
+     * Ledger close time in whole seconds; the clock every time gate uses.
+     * This value is supplied by the caller. It defaults to the wall clock,
+     * because the ledger entry read returns a sequence number, not a close
+     * time.
+     */
     ledgerTime: bigint;
     /** Operational status; only `Active` admits new risk. */
     status: Status;
@@ -57,7 +51,10 @@ export interface MarketContext {
     treasuryRate: bigint;
     /** Per-side ADL flags; a flagged side is closed-only. */
     adl?: AdlState;
-    /** `(terminalPrice, delistedAt)` once retired. */
+    /**
+     * `(terminalPrice, delistedAt)` once retired. `terminalPrice` is
+     * price_scalar, `delistedAt` is unix seconds.
+     */
     retirement?: readonly [bigint, bigint];
     /** Settlement token, when the context carries it. */
     collateralToken?: string;

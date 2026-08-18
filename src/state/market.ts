@@ -1,22 +1,3 @@
-// =============================================================================
-// Market — one market's contract state, loaded in a single `getLedgerEntries`.
-//
-// Four keys: the market instance, MarketData, the vault instance, and the
-// vault's settlement-token Balance. The market instance carries config, status,
-// ADL, retirement, oracle and feed id in ONE entry -- they cannot be fetched
-// apart -- so this deliberately takes all of it on every load rather than
-// splitting a "metadata" tier off. Costs ~3KB per load and buys correctness
-// that does not depend on the event stream staying live.
-//
-// Blend splits `PoolMetadata` from `Pool` because it must discover a variable
-// reserve list before it can build the batch. We have three fixed addresses, so
-// there is nothing to discover and nothing to split.
-//
-// The price is NOT read here. Signed Data Streams reports are license-restricted
-// and must not reach a browser, so the mark comes from the platform's numeric
-// price surface and is supplied by the caller.
-// =============================================================================
-
 import { scValToNative, type xdr } from '@stellar/stellar-sdk';
 import type { Network } from '../index.js';
 import {
@@ -43,20 +24,20 @@ import { MarketStateError, readEntries } from './entries.js';
 import type { EntryBatch } from './entries.js';
 
 /**
- * The contracts a market is read from — everything needed to *build* its ledger
- * keys, and nothing more.
+ * The contracts a market is read from. This is everything needed to build its
+ * ledger keys, and nothing more.
  *
- * The oracle and feed id are deliberately absent: they build no key, and arrive
- * as outputs of the instance read. The treasury is absent for the same reason
- * plus one more — it is deployment-level, shared by every market, and its rate
- * is not part of any user-facing number ({@link loadTreasuryRate}).
+ * The oracle and feed id are deliberately absent. They build no key, and
+ * arrive as outputs of the instance read. The treasury is also absent. It is
+ * deployment-level, shared by every market, and its rate is not part of any
+ * user-facing number ({@link loadTreasuryRate}).
  */
 export interface MarketContracts {
     /** The market (trading) contract. */
     readonly market: string;
     /** Strategy vault wired to the market. */
     readonly vault: string;
-    /** Settlement/collateral token — the vault's asset. */
+    /** Settlement token (the vault's asset). */
     readonly token: string;
 }
 
@@ -68,7 +49,7 @@ export interface MarketStateData {
     readonly contracts: MarketContracts;
     /** Market instance storage: config, status, ADL, wiring, retirement. */
     readonly instance: TradingInstanceState;
-    /** The market singleton. */
+    /** The market singleton: open interest, indices, funding. */
     readonly data: MarketData;
     /** Strategy-vault instance storage. */
     readonly vault: VaultInstanceState;
@@ -102,7 +83,7 @@ function decodeMarket(
     );
 
     // The instance is the market's own account of what it is wired to. Trust it
-    // over the caller's addresses: a mismatch means the request would blend one
+    // over the caller's addresses. A mismatch means the request would blend one
     // market's positions with an unrelated vault's balance.
     if (instance.vault !== contracts.vault) {
         throw new MarketStateError(
@@ -127,8 +108,8 @@ function decodeMarket(
         batch.require(keys.vaultInstance, `vault instance ${contracts.vault}`),
     );
 
-    // The vault's margin balance is an ordinary token Balance slot — the same
-    // read `loadTokenBalance` does for a wallet, through the same decode.
+    // The vault's margin balance is an ordinary token Balance slot, the same
+    // one `loadTokenBalance` reads for a wallet, through the same decode.
     // Absent means a holder never credited, which the token reports as 0.
     const vaultAssetsAtomic = tokenBalanceOrZero(
         batch.at(keys.vaultBalance, `vault balance for ${contracts.vault}`),
@@ -145,11 +126,12 @@ function decodeMarket(
 }
 
 /**
- * One market's contract state at a ledger.
+ * One market's contract state at a ledger. Each accessor mirrors a field on
+ * {@link MarketStateData}, which is held on `state` for caching. Rebuild from
+ * cached state with {@link Market.fromData}.
  *
- * Hold the plain {@link MarketStateData} on `state` for caching; rebuild with
- * {@link Market.fromData} after a cache rehydrate. The class adds accessors and
- * navigation, not data.
+ * The state does not include price. A Data Streams report cannot reach a
+ * browser, so the caller supplies the mark price separately.
  */
 export class Market {
     private constructor(
@@ -157,7 +139,14 @@ export class Market {
         readonly state: MarketStateData,
     ) {}
 
-    /** Read one market's state. One `getLedgerEntries`, four keys. */
+    /**
+     * Read one market's state. One `getLedgerEntries`, four keys.
+     *
+     * @throws {MarketStateError} `MISSING_STATE` when the market or vault
+     *   instance is absent or TTL-expired.
+     * @throws {MarketStateError} `IDENTITY_MISMATCH` when the market instance
+     *   is wired to a different vault or token than `contracts` names.
+     */
     static async load(
         network: Network,
         contracts: MarketContracts,
@@ -179,6 +168,12 @@ export class Market {
      * Markets sharing a settlement token or vault contribute the same key more
      * than once; duplicates are collapsed before the request, which the RPC
      * would otherwise reject outright.
+     *
+     * @throws {MarketStateError} `MISSING_STATE` when a market or vault
+     *   instance is absent or TTL-expired.
+     * @throws {MarketStateError} `IDENTITY_MISMATCH` when a market instance is
+     *   wired to a different vault or token than its entry in `contracts`
+     *   names.
      */
     static async loadMany(
         network: Network,
@@ -195,7 +190,7 @@ export class Market {
         );
     }
 
-    /** Rebuild from cached plain data — e.g. a rehydrated query cache. */
+    /** Rebuild from cached plain data, such as a rehydrated query cache. */
     static fromData(network: Network, state: MarketStateData): Market {
         return new Market(network, state);
     }
@@ -208,7 +203,6 @@ export class Market {
         return this.state.ledger;
     }
 
-    /** The market singleton (open interest, indices, funding). */
     get data(): MarketData {
         return this.state.data;
     }
@@ -265,7 +259,7 @@ export class Market {
 
     /**
      * `(terminalPrice, delistedAt)` once the market has been delisted, else
-     * `undefined` — the shape `get_retirement` returns.
+     * `undefined`. This is the shape `get_retirement` returns.
      */
     get retirement(): readonly [bigint, bigint] | undefined {
         const { terminalPrice, delistedAt } = this.state.instance;
@@ -286,7 +280,7 @@ export class Market {
      * `Vault::total_assets` is exactly the `Balance(vault)` slot read here.
      * Intended as a low-frequency drift alarm on the money path.
      *
-     * @throws {MarketStateError} when the values disagree.
+     * @throws {MarketStateError} `IDENTITY_MISMATCH` when the values disagree.
      */
     crossCheckTotalAssets(simTotalAssets: bigint): void {
         if (this.state.vaultAssetsAtomic !== simTotalAssets) {

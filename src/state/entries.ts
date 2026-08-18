@@ -1,30 +1,3 @@
-// =============================================================================
-// Batched `getLedgerEntries` machinery shared by every state loader.
-//
-// Three invariants live here, and each exists because the RPC will otherwise
-// bite silently:
-//
-//  1. KEYS ARE DEDUPED. `getLedgerEntries` rejects a request containing the
-//     same key twice, and reports it as
-//     `could not query captive core: http request failed with non-200 status
-//     code (404)` -- which blames the server for a caller bug. Markets in one
-//     deployment share a treasury and usually a settlement token, so a naive
-//     `flatMap` over several markets produces duplicates and fails the whole
-//     batch.
-//  2. DECODE IS KEYED BY EXACT KEY BYTES, never by position. The RPC silently
-//     OMITS keys it cannot find, so the response is not positionally aligned
-//     with the request. (Blend demultiplexes on the decoded storage-key symbol
-//     instead; that cannot work here, because a market batch contains three
-//     different contracts' `ContractInstance` keys, which all decode to the
-//     same symbol.)
-//  3. TTL FAILS CLOSED. An entry whose `liveUntilLedgerSeq` is behind the
-//     response's `latestLedger` is expired-but-not-yet-evicted. The chain will
-//     refuse to transact against it, so decoding it as live state does not risk
-//     funds -- but it would render a stale position or quote against stale
-//     funding indices and then eat an opaque rejection at submit. Treating it
-//     as missing turns that into an actionable error.
-// =============================================================================
-
 import { rpc, xdr } from '@stellar/stellar-sdk';
 import type { Network } from '../index.js';
 
@@ -61,7 +34,11 @@ interface ReturnedEntry {
 export interface EntryBatch {
     /** Latest ledger the batch read closed at. */
     readonly ledger: number;
-    /** Decoded value for a key, or `undefined` when the RPC omitted it. */
+    /**
+     * Decoded value for a key, or `undefined` when the RPC omitted it.
+     * @throws {MarketStateError} `MISSING_STATE` when the entry's TTL lapsed
+     *   before `ledger`. A lapsed entry is reported as missing, never decoded.
+     */
     at(key: xdr.LedgerKey, label: string): xdr.ScVal | undefined;
     /** As {@link at}, but a missing entry is a `MISSING_STATE` error. */
     require(key: xdr.LedgerKey, label: string): xdr.ScVal;

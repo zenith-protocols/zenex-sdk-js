@@ -36,7 +36,7 @@ export { TradingEventType } from './trading_events.js';
 export { parseTradingInstance } from './trading_instance.js';
 export type { TradingInstanceState } from './trading_instance.js';
 
-// State loaders live in `src/state/` — `Market.load`, `MarketUser.load`,
+// State loaders live in `src/state/`: `Market.load`, `MarketUser.load`,
 // `loadTokenBalance`, `loadTreasuryRate`.
 
 export type {

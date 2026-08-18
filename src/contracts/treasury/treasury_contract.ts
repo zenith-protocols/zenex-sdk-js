@@ -6,23 +6,19 @@ import { i128, u32 } from '../../index.js';
 export interface TreasuryConstructorArgs {
     /** Admin address; may change the rate and withdraw accumulated fees. */
     owner: string;
-    /** Protocol fee rate (SCALAR_18 fraction, e.g. 1e17 = 10%); bounded to [0, SCALAR_18/2]. */
+    /** Protocol fee rate (SCALAR_18 fraction, e.g. 1e17 = 10%); bounded to [0, SCALAR_18 / 2] (0% to 50%). */
     rate: i128;
 }
 
 /**
- * TreasuryContract - Operation builder for the Zenex Treasury contract
+ * Operation builder for the Zenex Treasury contract.
  *
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class TreasuryContract extends Contract {
     static spec: contract.Spec = new contract.Spec(treasurySpec);
 
-    /**
-     * Result parsers for each contract method, keyed by JS method name —
-     * pass the base64 XDR returned by simulation through the matching
-     * parser to get the native value.
-     */
+    /** Parsers for each contract method's simulated result (base64 XDR), keyed by JS method name. */
     static readonly parsers = {
         // Treasury methods
         getRate: (result: string): i128 =>
@@ -38,10 +34,9 @@ export class TreasuryContract extends Contract {
     };
 
     /**
-     * Deploy a new instance of the Treasury contract
-     * Constructor: __constructor(owner, rate)
+     * Deploy a new instance of the Treasury contract.
      *
-     * Traps with `InvalidRate` if `rate` is outside `[0, SCALAR_18 / 2]` (0% to 50%).
+     * If `args.rate` is out of range, the call traps with `InvalidRate`.
      */
     static deploy(
         deployer: string,
@@ -64,9 +59,9 @@ export class TreasuryContract extends Contract {
     }
 
     /**
-     * Set the protocol fee rate that the market reads at every settlement (owner only)
-     * @param rate - SCALAR_18 fraction, e.g. 1e17 = 10%; traps with `InvalidRate`
-     *   outside `[0, SCALAR_18 / 2]` (0% to 50%)
+     * Set the protocol fee rate that the market reads at every settlement (owner only).
+     * @param rate - SCALAR_18 fraction, e.g. 1e17 = 10%. If `rate` is outside
+     *   `[0, SCALAR_18 / 2]` (0% to 50%), the call traps with `InvalidRate`.
      */
     setRate(rate: i128): string {
         return this.call(
@@ -76,9 +71,10 @@ export class TreasuryContract extends Contract {
     }
 
     /**
-     * Withdraw accumulated protocol fees to `to` (owner only). No balance
-     * check of its own — over-withdrawing traps in the token transfer.
-     * @param amount - Token-dec amount, not SCALAR_18
+     * Withdraw accumulated protocol fees to `to` (owner only). The contract
+     * does not check the balance itself. If `amount` is more than the
+     * balance, the token transfer traps.
+     * @param amount - Token-dec amount, not SCALAR_18.
      */
     withdraw(token: string, to: string, amount: i128): string {
         return this.call(
@@ -99,9 +95,11 @@ export class TreasuryContract extends Contract {
     }
 
     /**
-     * Begin a two-step transfer to `newOwner`, who must call `acceptOwnership`
-     * by `liveUntilLedger` (owner only). `liveUntilLedger = 0` cancels any
-     * pending transfer instead.
+     * Begin a two-step transfer of ownership to `newOwner` (owner only).
+     * @param newOwner - Must call `acceptOwnership` before the deadline to
+     *   complete the transfer.
+     * @param liveUntilLedger - Ledger sequence deadline. `0` cancels any
+     *   pending transfer instead.
      */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
@@ -129,12 +127,7 @@ export class TreasuryContract extends Contract {
     // View / Getter Methods
     // ============================================================
 
-    /**
-     * Get the current protocol fee rate (SCALAR_18 fraction, e.g. 1e17 = 10%);
-     * this is the rate the market pays at every settlement. Reads back 0 if
-     * never set, which is unreachable once deployed since the constructor
-     * always sets it.
-     */
+    /** Get the current protocol fee rate (SCALAR_18 fraction, e.g. 1e17 = 10%). */
     getRate(): string {
         return this.call('get_rate').toXDR('base64');
     }

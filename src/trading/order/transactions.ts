@@ -28,6 +28,22 @@ import {
 
 const U32_MAX = 4_294_967_295;
 
+/**
+ * How `buildOrderOperation` and `buildRestingMarketOrderOperation` submit
+ * the built operation.
+ *
+ * `fillOrKill` batches `create_order` with an immediate Router fill in one
+ * transaction. It needs `price`, a nonempty signed price update, and
+ * `keeper`, the address credited the fill reward. `buildOrderOperation`
+ * does not restrict the order kind for this policy.
+ *
+ * `restOnly` creates the order alone, for a keeper to fill later, and
+ * carries no price. `buildOrderOperation` accepts it only for a limit or
+ * stop order and rejects a market order as `INVALID_INPUT`.
+ * `buildRestingMarketOrderOperation` accepts it only for a price-free
+ * resting market order, the fallback for a caller that cannot co-sign a
+ * Router fill.
+ */
 export type ContractExecutionPolicy =
     | {
           kind: 'fillOrKill';
@@ -38,26 +54,35 @@ export type ContractExecutionPolicy =
     | { kind: 'restOnly'; transport: 'direct' };
 
 interface PreparedExecutionBase {
+    /** The policy kind used to build this operation. */
     policy: ContractExecutionPolicy['kind'];
+    /** The built operation, base64 XDR, ready to add to a transaction. Not yet submitted or signed. */
     operationXdr: string;
 }
 
+/** A built order operation, ready to add to a transaction envelope. */
 export type PreparedExecution = PreparedExecutionBase & {
     transport: 'direct';
 };
 
 export interface BuildOrderOperationInput {
+    /** The trading contract that will create the order. */
     tradingAddress: string;
     /** Required for fill-or-kill execution. */
     routerAddress?: string;
+    /** The order owner; must authorize the built operation. */
     user: string;
+    /** The order to submit. */
     order: OrderParams;
     /** Optional calls after the one primary order. */
     calls?: Call[];
+    /** How to submit the order. See `ContractExecutionPolicy` for which order kinds each policy accepts. */
     policy: ContractExecutionPolicy;
+    /** The ledger snapshot to check `order` against before building the operation. */
     validation: OrderValidationContext;
 }
 
+/** The rest-only policy, narrowed for building a vault order. */
 export type VaultRestOnlyExecutionPolicy = Extract<
     ContractExecutionPolicy,
     { kind: 'restOnly' }
@@ -70,41 +95,64 @@ export type RestOnlyExecutionPolicy = Extract<
 >;
 
 export interface BuildRestingMarketOrderInput {
+    /** The trading contract that will create the order. */
     tradingAddress: string;
+    /** The order owner; must authorize the built operation. */
     user: string;
     /** A `MarketIncrease`/`MarketDecrease` order with `priceBound` as its guard. */
     order: OrderParams;
+    /** Always 'restOnly'; carried onto the returned operation's `policy` field. */
     policy: RestOnlyExecutionPolicy;
+    /**
+     * The ledger snapshot to check `order` against. Its `price` and
+     * `priceUpdate` are cleared before the check runs, so a `price` on the
+     * snapshot has no effect here.
+     */
     validation: OrderValidationContext;
 }
 
 export interface BuildVaultOrderOperationInput {
+    /** The trading contract that will create the vault order. */
     tradingAddress: string;
+    /** The vault order owner; must authorize the built operation. */
     user: string;
+    /** The exact resting creation quote to build from. */
     quote: ExactVaultRestingOrderCreationQuote;
+    /** Must be `restOnly`; a vault order carries no price. */
     policy: VaultRestOnlyExecutionPolicy;
 }
 
+/** A built resting vault deposit or redeem, ready to add to a transaction envelope. */
 export type PreparedVaultRestingExecution = PreparedExecution & {
     action: 'resting';
+    /** Which vault action was built: deposit or redeem. */
     vaultAction: 'deposit' | 'redeem';
     policy: 'restOnly';
 };
 
+/**
+ * A built Retired-market redeem, ready to add to a transaction envelope.
+ * Executes in the same call once submitted; no keeper fill follows.
+ */
 export interface PreparedVaultRetiredImmediateRedeemExecution {
     action: 'retiredImmediateRedeem';
     policy: 'retiredImmediateRedeem';
     transport: 'direct';
+    /** The built operation, base64 XDR, ready to add to a transaction. Not yet submitted or signed. */
     operationXdr: string;
 }
 
+/** The result of `buildVaultActionExecution`: a resting order, or an immediate Retired-market redeem. */
 export type PreparedVaultActionExecution =
     | PreparedVaultRestingExecution
     | PreparedVaultRetiredImmediateRedeemExecution;
 
 export interface BuildVaultActionExecutionInput {
+    /** The trading contract that will create the vault order. */
     tradingAddress: string;
+    /** The vault order owner; must authorize the built operation. */
     user: string;
+    /** The exact vault action quote to build from: a resting deposit or redeem, or a Retired-market immediate redeem. */
     quote: ExactVaultOrderCreationQuote;
     /** Required for a resting action and forbidden for Retired redemption. */
     policy?: VaultRestOnlyExecutionPolicy;
@@ -203,7 +251,35 @@ function validateTrailingOrders(
     return undefined;
 }
 
-/** Build exactly the operation selected by the caller's explicit policy. */
+/**
+ * Check an order against a ledger snapshot and build the operation its
+ * policy selects. A `fillOrKill` policy builds an atomic Router
+ * create-and-fill. A `restOnly` policy builds a create alone, for a keeper
+ * to fill later.
+ *
+ * Runs `validateOrder(input.order, input.validation)` first. Any failed
+ * check blocks the build, including a `Frozen` or `Retired` status
+ * (contract error #704). A `restOnly` policy also needs a limit or stop
+ * order; a market order with `restOnly` is rejected as `INVALID_INPUT`.
+ * A `fillOrKill` policy needs `input.routerAddress`. For a
+ * `MarketIncrease` under `fillOrKill`, the build then also checks that
+ * `input.validation.status` is `Active`, catching `OnIce` and `Delisted`
+ * (contract error #705; `Frozen` and `Retired` were already caught by
+ * `validateOrder`). This check does not read `notional`, so it also
+ * blocks a zero-notional, margin-only increase that the market contract
+ * itself would allow while only opens are blocked. Every `create_order`
+ * call in `input.calls` after the first is checked with the same gates as
+ * the primary order; any other call passes through unchecked.
+ *
+ * @returns An `exact` QuoteResult holding the built operation as base64
+ * XDR, bound to `input.validation.ledger`, on success. Returns
+ * `unavailable` and builds nothing on failure: code `INVALID_INPUT` for a
+ * policy or kind mismatch, a missing `routerAddress`, or a thrown error.
+ * Code `CONTRACT_GATE` names the failing market contract error code, from
+ * `validateOrder`'s list or #705 above, when the order or a trailing
+ * order fails a check. Do not submit the transaction when the result is
+ * `unavailable`.
+ */
 export function buildOrderOperation(
     input: BuildOrderOperationInput,
 ): QuoteResult<PreparedExecution> {
@@ -288,13 +364,28 @@ export function buildOrderOperation(
 /**
  * Build a price-free resting market order for keeper execution.
  *
- * This is the non-auth-wallet fallback: a user who cannot co-sign a Router
+ * This is the non-auth-wallet fallback. A user who cannot co-sign a Router
  * fill-or-kill still opens or adjusts a position by resting a
  * `MarketIncrease`/`MarketDecrease` create_order that a keeper fills at the
- * prevailing mark. No signed price update is embedded here — the keeper splices
- * the verified price at fill time — so `priceBound` is the on-chain slippage
- * guard that caps the fill's adverse price. Unlike a limit/stop resting order,
- * a market order carries no trigger, so `triggerPrice` must be zero.
+ * prevailing mark. No signed price update is embedded here. The keeper
+ * splices the verified price at fill time, so `priceBound` is the on-chain
+ * slippage guard that caps the fill's adverse price. Unlike a limit/stop
+ * resting order, a market order carries no trigger, so `triggerPrice`
+ * must be zero.
+ *
+ * `input.validation` is checked with its `price` and `priceUpdate`
+ * cleared. The price bound gate (contract error #741) is left to the
+ * keeper at fill and is not previewed here.
+ *
+ * @returns An `exact` QuoteResult holding the built operation as base64
+ * XDR, bound to `input.validation.ledger`, on success. Returns
+ * `unavailable` with code `INVALID_INPUT` and no operation when
+ * `input.policy.kind` is not `restOnly`, `input.order.kind` is not a
+ * market kind, `triggerPrice` is nonzero, `priceBound` is not positive, or
+ * building the operation throws. Returns `unavailable` with code
+ * `CONTRACT_GATE` and the failing market contract error code (see
+ * `validateOrder`) when the order fails a check against the snapshot. Do
+ * not submit the transaction when the result is `unavailable`.
  */
 export function buildRestingMarketOrderOperation(
     input: BuildRestingMarketOrderInput,
@@ -361,7 +452,21 @@ export function buildRestingMarketOrderOperation(
     }
 }
 
-/** Build exactly one price-free vault order from an exact creation quote. */
+/**
+ * Build one price-free vault order, a deposit or a redeem, from an exact
+ * resting creation quote.
+ *
+ * The order carries no price and is filled by a keeper later, at the
+ * deposit or redeem rate then in force. This function does not re-run
+ * `validateOrder`; it trusts `input.quote` was produced against a valid
+ * snapshot.
+ *
+ * @returns An `exact` QuoteResult holding the built operation as base64
+ * XDR, bound to `input.quote.ledger`, on success. Returns `unavailable`
+ * with code `INVALID_INPUT` and no operation when `input.policy.kind` is
+ * not `restOnly`, `input.quote` is not an exact resting creation quote, or
+ * building the operation throws.
+ */
 export function buildVaultOrderOperation(
     input: BuildVaultOrderOperationInput,
 ): QuoteResult<PreparedExecution> {
@@ -405,8 +510,22 @@ function invalidVaultAction(
 }
 
 /**
- * Prepare one exact vault action without conflating a resting order with the
- * direct-only Retired redemption path.
+ * Build one exact vault action: a resting deposit or redeem for keeper
+ * fill, or an immediate redeem on a Retired market.
+ *
+ * `input.quote.value.kind` selects the path. A `resting` value needs
+ * `input.policy` and delegates to `buildVaultOrderOperation`. A
+ * `retiredImmediateRedeem` value forbids `input.policy` and redeems
+ * `creation.shares` shares straight out of the vault in the same call, no
+ * keeper and no exec fee. `creation.shares` must be positive or the
+ * market contract rejects it (error #732, `InvalidOrder`); `minOut` is
+ * not applied on this path.
+ *
+ * @returns An `exact` QuoteResult on success, holding the built operation
+ * as base64 XDR and, for a resting action, `vaultAction` naming which
+ * action it is. Returns `unavailable` with code `INVALID_INPUT` when
+ * `input.quote.kind` is not `exact`, `input.policy` is present or absent
+ * against the wrong quote kind, or building the operation throws.
  */
 export function buildVaultActionExecution(
     input: BuildVaultActionExecutionInput,

@@ -8,10 +8,11 @@ import {
 export { ContractError, ContractErrorType, TradingError, contractErrorFromCode } from './errors.js';
 
 /**
- * Parse an RPC error response into a ContractError.
+ * Parse a failed simulation, send-transaction, or get-transaction response
+ * into a ContractError.
  *
- * The per-contract error-code namespaces are disjoint, so every code
- * resolves directly through `contractErrorFromCode`.
+ * Never throws. Returns a ContractError with type `UnknownError` when the
+ * response carries no recognizable contract error code.
  */
 export function parseError(
     errorResponse:
@@ -80,6 +81,11 @@ export function parseError(
     return new ContractError(ContractErrorType.UnknownError);
 }
 
+/**
+ * Decode the return value of a successful simulation or transaction, using
+ * `parser` to decode the XDR. Returns `undefined` when the response carries
+ * no return value.
+ */
 export function parseResult<T>(
     response: rpc.Api.SimulateTransactionSuccessResponse | rpc.Api.GetSuccessfulTransactionResponse,
     parser: (xdr: string) => T

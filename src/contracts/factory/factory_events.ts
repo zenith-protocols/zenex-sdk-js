@@ -1,18 +1,17 @@
 import { ZenexContractType, BaseZenexEvent } from '../../base_event.js';
 
-// Factory event types. Values are the on-chain name topics: bare
-// `#[contractevent]` defaults to snake_case of the struct name.
+/** Factory event types, keyed by the event's on-chain name. */
 export enum FactoryEventType {
     Deploy = 'deploy',
 }
 
-/** Discriminated-union base shared by all factory events; narrow on `eventType`. */
+/** Base shape shared by every factory event. Narrow on `eventType` to access an event's own fields. */
 export interface BaseFactoryEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Factory;
     eventType: FactoryEventType;
 }
 
-/** Trading + vault pair deployed via `deploy`. Topics: trading, vault. */
+/** Trading and vault pair deployed via `deploy`. */
 export interface FactoryDeployEvent extends BaseFactoryEvent {
     eventType: FactoryEventType.Deploy;
     /** The deployed trading contract address. */

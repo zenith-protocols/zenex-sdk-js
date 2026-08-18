@@ -2,25 +2,26 @@ import { governanceSpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { u32, u64 } from '../../index.js';
 
-/**
- * A queued admin call, as returned by `getQueued`. `unlock_time` is the ledger
- * timestamp (Unix seconds) at or after which `execute` is allowed. The entry
- * lives in temporary storage with a TTL derived from the delay — once it
- * expires (or the call is executed/cancelled), lookups revert with `NotQueued`.
- */
+/** A queued admin call. Returned by `getQueued`. */
 export interface QueuedCall {
+    /** Contract address the call will invoke. */
     target: string;
+    /** Function name to invoke on `target`. */
     fn_name: string;
+    /** Arguments passed to `fn_name`. */
     args: unknown[];
+    /** Unix timestamp, in seconds, at or after which `execute` is allowed. */
     unlock_time: bigint;
 }
 
-/**
- * `delay` is the mandatory timelock wait, in seconds, bounded to `(0, 60 days]`
- * — the constructor panics with `InvalidDelay` outside that range.
- */
+/** Constructor arguments for {@link GovernanceContract.deploy}. */
 export interface GovernanceConstructorArgs {
+    /** Address that becomes the initial owner. */
     owner: string;
+    /**
+     * Mandatory timelock delay, in seconds. Must be in `(0, 60 days]` or
+     * the constructor reverts with `InvalidDelay`.
+     */
     delay: bigint;
 }
 
@@ -33,11 +34,7 @@ export interface GovernanceConstructorArgs {
 export class GovernanceContract extends Contract {
     static spec: contract.Spec = new contract.Spec(governanceSpec);
 
-    /**
-     * Decoders for each method's `simulateTransaction` result. Void-returning
-     * methods (`cancel`, `execute`, `setStatus`, ...) only emit events on
-     * chain, so their parsers are no-ops.
-     */
+    /** Decoders for each method's `simulateTransaction` result. Methods that only emit events parse to nothing. */
     static readonly parsers = {
         // Timelock methods
         queue: (result: string): u32 =>
@@ -62,9 +59,9 @@ export class GovernanceContract extends Contract {
     };
 
     /**
-     * Build the `createCustomContract` operation deploying a Governance
-     * instance, invoking `__constructor(owner, delay)`. `args.delay` must be
-     * in `(0, 60 days]` seconds or the constructor panics with `InvalidDelay`.
+     * Build the `createCustomContract` operation that deploys a Governance
+     * instance and calls its constructor with `args`. The constructor
+     * reverts with `InvalidDelay` if `args.delay` is out of range.
      */
     static deploy(
         deployer: string,
@@ -88,9 +85,8 @@ export class GovernanceContract extends Contract {
 
     /**
      * Queue a `target.fnName(args)` call to become executable after the
-     * configured delay (owner only). Returns the monotonically increasing
-     * nonce (starting at 0) used to reference this call in `cancel`,
-     * `execute`, and `getQueued`.
+     * configured delay (owner only). Returns the nonce, starting at 0, used
+     * to reference this call in `cancel`, `execute`, and `getQueued`.
      * @param args - Pre-serialized ScVal arguments for the target function
      */
     queue(target: string, fnName: string, args: xdr.ScVal[]): string {
@@ -104,7 +100,8 @@ export class GovernanceContract extends Contract {
 
     /**
      * Cancel a queued call before it executes (owner only). Reverts with
-     * `NotQueued` if `nonce` is unknown, already executed/cancelled, or expired.
+     * `NotQueued` if `nonce` is unknown, already run, already cancelled, or
+     * expired.
      */
     cancel(nonce: u32): string {
         return this.call(
@@ -114,10 +111,10 @@ export class GovernanceContract extends Contract {
     }
 
     /**
-     * Execute a queued call once its delay has elapsed (permissionless — any
-     * caller may submit this). Reverts with `NotUnlocked` if called before
-     * `unlock_time`, or `NotQueued` if the nonce is unknown, already run,
-     * cancelled, or expired.
+     * Execute a queued call once its delay has passed. Permissionless, any
+     * caller may submit this. Reverts with `NotQueued` if the nonce is
+     * unknown, already run, cancelled, or expired. Reverts with
+     * `NotUnlocked` if called before `unlock_time`.
      */
     execute(nonce: u32): string {
         return this.call(
@@ -128,8 +125,8 @@ export class GovernanceContract extends Contract {
 
     /**
      * Immediately invoke `target.set_status(status)`, bypassing the timelock
-     * entirely (owner only) — the escape hatch for emergency halts.
-     * @param status - The target contract's `Status` enum discriminant
+     * delay (owner only). This is the bypass used for emergency halts.
+     * @param status - The market contract's `Status` enum discriminant
      */
     setStatus(target: string, status: u32): string {
         return this.call(
@@ -140,11 +137,11 @@ export class GovernanceContract extends Contract {
     }
 
     /**
-     * Queue a change to the timelock delay itself (owner only). The new
-     * value only takes effect once the *current* delay elapses and
+     * Queue a change to the timelock delay (owner only). This only queues
+     * the change: it takes effect once the current delay elapses and
      * `applyDelay` is called, so a delay can never be shortened instantly.
-     * @param newDelay - New delay in seconds, must be in `(0, 60 days]`
-     *   (reverts with `InvalidDelay` otherwise)
+     * @param newDelay - New delay, in seconds. Must be in `(0, 60 days]` or
+     *   the call reverts with `InvalidDelay`.
      */
     setDelay(newDelay: bigint): string {
         return this.call(
@@ -155,7 +152,7 @@ export class GovernanceContract extends Contract {
 
     /**
      * Apply a delay change queued by `setDelay`, once the current delay has
-     * elapsed (permissionless). Reverts with `NotQueued` if no change is
+     * elapsed. Permissionless. Reverts with `NotQueued` if no change is
      * pending, or `NotUnlocked` if called too early.
      */
     applyDelay(): string {
@@ -170,7 +167,13 @@ export class GovernanceContract extends Contract {
     /**
      * Begin a 2-step ownership transfer to `newOwner` (owner only). The new
      * owner must call `acceptOwnership` by ledger sequence `liveUntilLedger`
-     * or the offer lapses; passing `0` cancels any pending transfer instead.
+     * or the offer lapses.
+     * @param liveUntilLedger - Ledger sequence the offer expires at. Pass
+     *   `0` to cancel a pending transfer to `newOwner` instead of starting
+     *   one. Reverts with `InvalidLiveUntilLedger` if it is in the past or
+     *   beyond the maximum allowed range. Reverts with `NoPendingTransfer`
+     *   or `InvalidPendingAccount` if `0` and no matching transfer is
+     *   pending.
      */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
@@ -181,7 +184,11 @@ export class GovernanceContract extends Contract {
         ).toXDR('base64');
     }
 
-    /** Accept a pending ownership transfer (caller becomes owner). */
+    /**
+     * Accept a pending ownership transfer (pending owner only). Reverts
+     * with `NoPendingTransfer` if none is pending, or `TransferExpired` if
+     * the offer's `liveUntilLedger` has passed.
+     */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
@@ -189,7 +196,8 @@ export class GovernanceContract extends Contract {
     /**
      * Permanently remove the owner (owner only), disabling every owner-gated
      * method (`queue`, `cancel`, `setStatus`, `setDelay`, `transferOwnership`)
-     * for good. Reverts if a transfer is currently pending.
+     * for good. Reverts with `TransferInProgress` if an ownership transfer
+     * is currently pending.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');
@@ -202,7 +210,7 @@ export class GovernanceContract extends Contract {
 
     /**
      * Look up a queued call by nonce. Reverts with `NotQueued` if the nonce
-     * is unknown, already executed/cancelled, or has expired.
+     * is unknown, already run, already cancelled, or expired.
      */
     getQueued(nonce: u32): string {
         return this.call(

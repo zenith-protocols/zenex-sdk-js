@@ -18,7 +18,9 @@ import {
 } from './capacity.js';
 import type { PriceData } from './types.js';
 
+/** Result of advancing a market's accrual indices to a quote time. */
 export interface AccrualResult {
+    /** Market data with `borrowingIdx` and `fundingIdx` advanced to `elapsed` seconds past `accruedAt`. */
     market: MarketData;
     /** Seconds both indices accrued over, from the shared `accruedAt` clock. */
     elapsed: bigint;
@@ -74,6 +76,18 @@ export function borrowingRate(config: TradingConfig, utilization: bigint): bigin
     return addI128(base, mulDivCeil(rateGap, excess, span));
 }
 
+/**
+ * Advance the borrowing accrual by `elapsed` seconds. Returns a new
+ * `MarketData` with `borrowingIdx` moved forward; `data` is unchanged.
+ *
+ * Ports `MarketData::accrue_borrowing`. The side with the strictly larger
+ * base `tokens` pays; on a token tie both sides pay. Each paying side
+ * accrues at the kink rate (`borrowingRate`) over its own
+ * `reserveUtilization`, measured against its half of `vaultAssets`
+ * (token-dec). A zero-utilization side accrues nothing.
+ *
+ * If `elapsed` (seconds) is negative, the call throws a `RangeError`.
+ */
 export function advanceBorrowing(
     data: MarketData,
     config: TradingConfig,
@@ -139,6 +153,24 @@ function evolvedFundingRate(
     return next > config.fundingMax ? config.fundingMax : next;
 }
 
+/**
+ * Advance the funding accrual by `elapsed` seconds. Returns a new
+ * `MarketData` with `fundingRate` and `fundingIdx` moved forward; `data` is
+ * unchanged.
+ *
+ * Ports `MarketData::accrue_funding`. The rate evolves under the velocity
+ * model: it accelerates toward the dominant side when skew is wide or the
+ * rate is fresh or flipped, decays flat toward zero when skew is narrow,
+ * and otherwise holds. The result clamps to `config.fundingMax`.
+ *
+ * The window charges at the evolved rate, floored at `config.fundingMin`.
+ * The paying side's `fundingIdx` rises by the charged rate times `elapsed`.
+ * The receiving side's `fundingIdx` falls by the paid total spread pro-rata
+ * over the receiver's `notional`. With no notional on the receiving side,
+ * the paid funding is not credited to it.
+ *
+ * If `elapsed` (seconds) is negative, the call throws a `RangeError`.
+ */
 export function advanceFunding(
     data: MarketData,
     config: TradingConfig,
@@ -175,6 +207,17 @@ export function advanceFunding(
     return next;
 }
 
+/**
+ * Advance both accrual indices to `now`, in one shared elapsed window.
+ * Returns a new `MarketData` plus the elapsed seconds; `data` is unchanged.
+ *
+ * Ports `Market::load`'s accrual step: computes `elapsed = now - data.accruedAt`
+ * once, then applies `advanceBorrowing` and `advanceFunding` over that same
+ * window before stamping `accruedAt` to `now`. Call this before quoting or
+ * applying any action, so borrowing and funding are current at the quote time.
+ *
+ * If `now` predates `data.accruedAt`, the call throws a `RangeError`.
+ */
 export function advanceMarketAccruals(
     data: MarketData,
     config: TradingConfig,

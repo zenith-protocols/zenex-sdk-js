@@ -3,16 +3,7 @@ import type { VaultEvent } from './contracts/vault/vault_events.js';
 import type { GovernanceEvent } from './contracts/governance/governance_events.js';
 import type { FactoryEvent } from './contracts/factory/factory_events.js';
 
-// =============================================================================
-// Typed event surface (types only).
-//
-// The per-contract `*_events.ts` files mirror the contract event schemas as
-// discriminated unions keyed on their `eventType` enums; consumers that read
-// events (the platform indexer, integrators on `getEvents`) own their own
-// decode path and import these types to stay in sync with the on-chain
-// shapes. The SDK ships no event decoders.
-// =============================================================================
-
+/** Identifies which Zenex contract raised an event, discriminating `ZenexEvent`. */
 export enum ZenexContractType {
     Vault = 'vault',
     Trading = 'trading',
@@ -20,13 +11,21 @@ export enum ZenexContractType {
     Governance = 'governance',
 }
 
+/** Fields common to every Zenex contract event. */
 export interface BaseZenexEvent {
     id: string;
     contractId: string;
     contractType: ZenexContractType;
+    /** Ledger sequence number the event was emitted in. */
     ledger: number;
+    /** Close time of the ledger `ledger` refers to, as returned by `getEvents`. */
     ledgerClosedAt: string;
     txHash: string;
 }
 
+/**
+ * Every event a Zenex contract can raise, discriminated on `contractType` and
+ * each event's own `eventType`. These are types only. Decode a raw event
+ * yourself from the values `getEvents` returns; the SDK ships no decoder.
+ */
 export type ZenexEvent = TradingEvent | VaultEvent | GovernanceEvent | FactoryEvent;

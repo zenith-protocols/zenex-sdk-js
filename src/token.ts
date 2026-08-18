@@ -1,35 +1,13 @@
 import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
 import { tokenBalanceLedgerKey } from './ledger-keys.js';
 
-// =============================================================================
-// Token reads. Not a contract binding — there is no Zenex token contract, only
-// whatever SAC or fungible token a deployment settles in — so this sits beside
-// `ledger-keys.ts` rather than under `contracts/`.
-//
-// Nothing here is vault-specific. A `Balance` slot has the same shape for any
-// holder of any token, so the same pair serves the vault's margin balance
-// (`Balance(vault)`, which is exactly `Vault::total_assets`) and a wallet
-// balance for the connected user. `Market.load` and `loadTokenBalance` both go
-// through it rather than each rolling their own.
-//
-// The slot is either the SAC `BalanceValue` map
-// (`{ amount: i128, authorized: bool, clawback: bool }`) or a pure-Soroban
-// fungible token's plain `i128`. Both collapse to the integer balance in the
-// token's own decimals (token-dec).
-//
-// This decodes the contract-data slot only, which exists for every CONTRACT
-// holder but not for a classic account holding a SAC (that balance is in a
-// trustline). It is the right tool inside a batch — `Market.load` reads
-// `Balance(vault)` with it — and the wrong tool for a user's wallet balance,
-// which `loadTokenBalance` answers by simulating the token's own `balance()`.
-// =============================================================================
-
 /**
- * Extract the integer balance (token-dec) from a token `Balance(holder)`
- * storage value. Handles both the SAC map shape and the direct `i128` shape.
- * A map without an `amount` field reads as `0`.
+ * Extract the integer balance, in the token's own decimals (token-dec), from
+ * a token `Balance(holder)` storage value. Handles both the SAC map shape and
+ * a plain Soroban fungible token's `i128` shape. A map with no `amount` field
+ * decodes as `0n`.
  * @param val - The `ScVal` from the token's `Balance(holder)` ledger entry.
- * @returns The balance as a bigint.
+ * @returns The balance as a bigint, in the token's own decimals.
  */
 export function parseTokenBalance(val: xdr.ScVal): bigint {
     if (val.switch() === xdr.ScValType.scvMap()) {
@@ -51,11 +29,11 @@ export function parseTokenBalance(val: xdr.ScVal): bigint {
 }
 
 /**
- * The ledger key of a holder's balance on a token contract.
- *
- * Re-exported here so a caller building a batch reaches for the key and the
- * decode in one place; it is the same builder `src/ledger-keys.ts` defines
- * alongside the rest of the storage mirror.
+ * The ledger key for a holder's `Balance` entry on a token contract.
+ * Re-exported here so a caller can get the key and the decoder from one
+ * module. Reads the contract-data slot directly, so it works for a contract
+ * holder. For a classic account's SAC balance, held in a trustline, call the
+ * token's `balance()` instead.
  */
 export { tokenBalanceLedgerKey };
 

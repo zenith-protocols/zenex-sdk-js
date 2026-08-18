@@ -30,7 +30,11 @@ export function tokenBalanceLedgerKey(tokenContractId: string, accountAddress: s
 }
 
 /**
- * Decode entry key from ScVal
+ * Decode a ledger entry key ScVal into its `DataKey` variant name, or
+ * `'ContractInstance'` for the contract-instance key. Throws if `entryKey` is
+ * not a symbol, a vec led by a symbol, or the contract-instance key.
+ * @param entryKey - The `key` ScVal from a `LedgerKeyContractData`.
+ * @returns The variant name.
  */
 export function decodeEntryKey(entryKey: xdr.ScVal): string {
     switch (entryKey.switch()) {
@@ -50,8 +54,10 @@ export function decodeEntryKey(entryKey: xdr.ScVal): string {
 }
 
 /**
- * Create a ledger key for a contract instance.
- * This is used to access the contract's instance storage.
+ * Build the ledger key for a contract's instance storage: its shared config
+ * and small singleton state. Instance entries use persistent durability, so
+ * they can be archived past their TTL. Restore the entry before you read it
+ * again.
  * @param contractId - The contract address.
  * @returns The ledger key for the contract instance.
  */
@@ -66,10 +72,11 @@ export function contractInstanceLedgerKey(contractId: string): xdr.LedgerKey {
 }
 
 /**
- * Create a ledger key for persistent contract storage.
- * This is used for data that persists beyond the contract instance.
+ * Build the ledger key for an entry in a contract's persistent storage: data
+ * that outlives the contract instance, keyed by `keyVec`. A persistent entry
+ * can be archived once its TTL lapses. Restore it before you read it again.
  * @param contractId - The contract address.
- * @param keyVec - Array of ScVal items that make up the storage key.
+ * @param keyVec - The ScVal items that make up the storage key.
  * @returns The ledger key for the persistent storage entry.
  */
 export function persistentLedgerKey(contractId: string, keyVec: xdr.ScVal[]): xdr.LedgerKey {
@@ -83,10 +90,11 @@ export function persistentLedgerKey(contractId: string, keyVec: xdr.ScVal[]): xd
 }
 
 /**
- * Create a ledger key for temporary contract storage.
- * Used for data with a fixed TTL that auto-expires.
+ * Build the ledger key for an entry in a contract's temporary storage, keyed
+ * by `keyVec`. A temporary entry is deleted once its TTL lapses and cannot be
+ * restored. The contract must write it again.
  * @param contractId - The contract address.
- * @param keyVec - Array of ScVal items that make up the storage key.
+ * @param keyVec - The ScVal items that make up the storage key.
  * @returns The ledger key for the temporary storage entry.
  */
 export function temporaryLedgerKey(contractId: string, keyVec: xdr.ScVal[]): xdr.LedgerKey {
@@ -122,59 +130,59 @@ function toAddressScVal(address: string | Address): xdr.ScVal {
 // These are not separate ledger entries: read the contract instance itself
 // (`contractInstanceLedgerKey`) and match this ScVal against its storage map.
 
-/** `DataKey::Config` -> Config: global trading parameters; mutable singleton. */
+/** `DataKey::Config` -> Config: global trading parameters, mutable singleton (instance tier). */
 export function tradingConfigKey(): xdr.ScVal {
     return tradingUnitDataKey('Config');
 }
 
-/** `DataKey::FeedId` -> BytesN<32>: price stream id; immutable, constructor-set. */
+/** `DataKey::FeedId` -> BytesN<32>: price stream id, immutable, constructor-set (instance tier). */
 export function tradingFeedIdKey(): xdr.ScVal {
     return tradingUnitDataKey('FeedId');
 }
 
-/** `DataKey::Status` -> u32: operational status (Status discriminant). */
+/** `DataKey::Status` -> u32: operational status, the Status discriminant (instance tier). */
 export function tradingStatusKey(): xdr.ScVal {
     return tradingUnitDataKey('Status');
 }
 
-/** `DataKey::Vault` -> Address: strategy-vault contract. */
+/** `DataKey::Vault` -> Address: strategy-vault contract (instance tier). */
 export function tradingVaultKey(): xdr.ScVal {
     return tradingUnitDataKey('Vault');
 }
 
-/** `DataKey::Token` -> Address: settlement token (collateral asset). */
+/** `DataKey::Token` -> Address: settlement token, the collateral asset (instance tier). */
 export function tradingTokenKey(): xdr.ScVal {
     return tradingUnitDataKey('Token');
 }
 
-/** `DataKey::Oracle` -> Address: oracle contract. */
+/** `DataKey::Oracle` -> Address: oracle contract (instance tier). */
 export function tradingOracleKey(): xdr.ScVal {
     return tradingUnitDataKey('Oracle');
 }
 
-/** `DataKey::Treasury` -> Address: treasury contract (protocol fee sink). */
+/** `DataKey::Treasury` -> Address: treasury contract, the protocol fee sink (instance tier). */
 export function tradingTreasuryKey(): xdr.ScVal {
     return tradingUnitDataKey('Treasury');
 }
 
-/** `DataKey::DelistedAt` -> u64: first-delist timestamp; lazy (absent unless delisted). */
+/** `DataKey::DelistedAt` -> u64: first-delist timestamp, lazy, absent unless delisted (instance tier). */
 export function tradingDelistedAtKey(): xdr.ScVal {
     return tradingUnitDataKey('DelistedAt');
 }
 
-/** `DataKey::TerminalPrice` -> i128: flat settlement price; lazy (absent until set). */
+/** `DataKey::TerminalPrice` -> i128: flat settlement price, lazy, absent until set (instance tier). */
 export function tradingTerminalPriceKey(): xdr.ScVal {
     return tradingUnitDataKey('TerminalPrice');
 }
 
-/** `DataKey::Adl` -> AdlState: ADL flags + freshness anchor; zeroed default until first written. */
+/** `DataKey::Adl` -> AdlState: ADL flags and freshness anchor, zeroed default until first written (instance tier). */
 export function tradingAdlKey(): xdr.ScVal {
     return tradingUnitDataKey('Adl');
 }
 
 // --- persistent, shared tier ---
 
-/** `DataKey::MarketData` -> MarketData: hot per-market state; singleton, own entry. */
+/** `DataKey::MarketData` -> MarketData: hot per-market state, singleton, own entry (persistent, shared tier). */
 export function tradingMarketDataLedgerKey(contractId: string): xdr.LedgerKey {
     return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('MarketData')]);
 }
@@ -193,7 +201,7 @@ export function tradingPriceCacheLedgerKey(contractId: string): xdr.LedgerKey {
 
 // --- persistent, user tier ---
 
-/** `DataKey::Position(user, is_long)` -> Position: netted position (hedge mode). */
+/** `DataKey::Position(user, is_long)` -> Position: netted position, hedge mode (persistent user tier). */
 export function tradingPositionLedgerKey(
     contractId: string,
     user: string | Address,
@@ -206,7 +214,7 @@ export function tradingPositionLedgerKey(
     ]);
 }
 
-/** `DataKey::VaultOrder(user, id)` -> VaultOrder: pending vault deposit or redemption. */
+/** `DataKey::VaultOrder(user, id)` -> VaultOrder: pending vault deposit or redemption (persistent user tier). */
 export function tradingVaultOrderLedgerKey(
     contractId: string,
     user: string | Address,
@@ -219,12 +227,12 @@ export function tradingVaultOrderLedgerKey(
     ]);
 }
 
-/** `DataKey::OrderCounter(user)` -> u32: next order id (trade + vault), allocated from 1. */
+/** `DataKey::OrderCounter(user)` -> u32: next id for trade and vault orders, allocated from 1 (persistent user tier). */
 export function tradingOrderCounterLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
     return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('OrderCounter'), toAddressScVal(user)]);
 }
 
-/** `DataKey::ClaimableFunding(user)` -> i128: funding owed to the user (token-dec). */
+/** `DataKey::ClaimableFunding(user)` -> i128: funding owed to the user, in token-dec (persistent user tier). */
 export function tradingClaimableFundingLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
     return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('ClaimableFunding'), toAddressScVal(user)]);
 }

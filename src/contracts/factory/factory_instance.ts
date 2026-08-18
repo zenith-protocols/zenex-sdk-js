@@ -3,13 +3,13 @@ import { instanceStorage } from '../instance.js';
 import type { FactoryInitMeta } from './factory_contract.js';
 
 export interface FactoryInstanceState {
-    /** WASM hashes and wiring every market this factory deploys is given. */
+    /** The factory's current `FactoryInitMeta`. */
     initMeta: FactoryInitMeta;
-    /** Owner allowed to replace `initMeta`; absent once renounced. */
+    /** Owner allowed to replace `initMeta`. Absent once ownership is renounced. */
     owner?: string;
 }
 
-/** Throws when `InitMeta` is absent — the constructor always sets it. */
+/** Throws unless `InitMeta` is set. It is a constructor invariant. */
 export function parseFactoryInstance(
     instanceVal: xdr.ScVal,
 ): FactoryInstanceState {

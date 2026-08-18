@@ -13,11 +13,11 @@ export interface Call {
 }
 
 /**
- * The trading-contract `create_order` arguments, in a shape the router
+ * The trading contract's `create_order` arguments, in a shape the router
  * builders can turn into a fillable [`Call`] (see [`createOrderCall`]).
  *
- * Mirrors `trading::create_order` one-for-one, plus the `trading` target the
- * `Call` runs against. `kind` crosses the ABI as a plain `u32` discriminant.
+ * Mirrors `create_order` one-for-one, plus the `trading` target the `Call`
+ * runs against.
  */
 export interface OrderParams {
     /** The target trading contract the `create_order` runs on. */
@@ -26,29 +26,28 @@ export interface OrderParams {
     user: string;
     /** Side the order targets. */
     isLong: boolean;
-    /** OrderKind discriminant (0 = MarketIncrease .. 5 = StopDecrease). */
+    /** The order kind. See `OrderKind`. */
     kind: OrderKind;
     /** Size change magnitude (>= 0), token-dec. */
     notional: i128;
     /** Margin change magnitude (>= 0), token-dec. */
     margin: i128;
-    /** Crossing level for a trigger kind (price_scalar); unread for a market kind. */
+    /** Crossing level for a trigger kind (price_scalar, 18-dec); unread for a market kind. */
     triggerPrice: i128;
-    /** Fill slippage limit (price_scalar); 0 = unbounded. */
+    /** Fill slippage limit (price_scalar, 18-dec); 0 = unbounded. */
     priceBound: i128;
     /** Ledger sequence; eligible while the current sequence <= expiration. */
     expiration: u32;
 }
 
 /**
- * Build a `create_order`-shaped [`Call`] from [`OrderParams`], for composing
- * router batches (`multicall`, `create_and_fill`, and their kin).
+ * Build a `create_order`-shaped [`Call`] from [`OrderParams`], for router
+ * batches (`multicall`, `create_and_fill`, and their kin).
  *
- * The encoding mirrors `TradingContract.createOrderCall` exactly, so a bundled
- * order is byte-identical to a direct one; only the router executes it (and
- * the user's auth entry nests under the router call). The router's fill
- * convention treats the FIRST call in a batch as the order to fill, so this
- * helper's output is what belongs at `calls[0]` of a create-and-fill batch.
+ * The encoding matches the trading contract's `create_order` exactly, so a
+ * bundled order is byte-identical to a direct call. Put it at `calls[0]` of
+ * a create-and-fill batch: the router treats the first call as the order to
+ * fill.
  */
 export function createOrderCall(params: OrderParams): Call {
     return {
@@ -71,12 +70,10 @@ export function createOrderCall(params: OrderParams): Call {
 export const UNTYPED_FAILURE = 0xffffffff;
 
 /**
- * The decoded result of one batched call.
+ * The decoded result of one batched call from `multicall_try`.
  *
- * On the wire `multicall_try` returns raw values, one per call: the call's
- * return value when it lands, or the failure as a host `Error` value when it
- * does not (the two cannot collide; the host turns an error-tagged return
- * into a failure). This interface is the SDK's decoded view of one element.
+ * Holds the call's return value when it lands, or the failure code when it
+ * does not; the two cannot collide.
  */
 export interface CallOutcome {
     /** The call landed. */
@@ -93,7 +90,7 @@ export interface CallOutcome {
     error: number;
 }
 
-/** Encode a `Call` as an alphabetically key-ordered `ScMap` (args, contract, func). */
+/** Encode a `Call` as an `ScVal` for a router batch argument. */
 export function callToScVal(call: Call): xdr.ScVal {
     const entry = (key: string, val: xdr.ScVal) =>
         new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });

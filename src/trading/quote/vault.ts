@@ -47,50 +47,71 @@ class VaultQuoteGateError extends VaultProtocolGateError {
     }
 }
 
+/** Vault state read atomically at one ledger, mirroring `StrategyVaultContract` state. */
 export interface VaultAtomicState {
+    /** Vault's asset balance before any uPnL mark, token-dec. Mirrors `Vault::total_assets`. */
     totalAssets: bigint;
+    /** Outstanding share supply, share-dec. Mirrors `Base::total_supply`. */
     totalSupply: bigint;
+    /** Extra decimals shares carry over the asset. Share-dec equals token-dec plus this value; fixed at construction (`decimals_offset`). */
     decimalsOffset: number;
 }
 
+/** A caller-supplied fill estimate that `deriveVaultMinimumOutput` derives a `minOut` bound from. */
 export interface VaultEstimatedOutputReference {
     readonly kind: 'estimate';
+    /** Estimated fill output: shares for a deposit, assets for a redeem (share-dec or token-dec, matching the order side). */
     readonly output: bigint;
 }
 
+/** A `minOut` slippage bound derived from an estimated fill; ready for `VaultOrderCreationQuoteInput.minOut`. */
 export interface VaultMinimumOutput {
+    /** The estimate `minOut` was derived from. */
     readonly reference: VaultEstimatedOutputReference;
-    /** Maximum slippage in basis points (10_000 = 100%). */
+    /** Echoes the input `maximumSlippageBps` used to derive `minOut`. */
     readonly maximumSlippageBps: bigint;
+    /** Rounding always floors, in the vault's favor. */
     readonly rounding: 'floor';
+    /** The slippage bound: `reference.output` cut by `maximumSlippageBps`, same units as `reference.output`. */
     readonly minOut: bigint;
 }
 
+/** Input to `deriveVaultMinimumOutput`. */
 export interface DeriveVaultMinimumOutputInput {
+    /** The caller's estimated fill output to derive a `minOut` bound from. */
     readonly reference: VaultEstimatedOutputReference;
     /** Maximum slippage in basis points (10_000 = 100%). */
     readonly maximumSlippageBps: bigint;
 }
 
+/** Input to `quoteVaultOrderCreation`, mirroring `create_vault_order`'s arguments and the market state it reads. */
 export interface VaultOrderCreationQuoteInput {
     ledger: number;
     now: bigint;
     status: Status;
     config: TradingConfig;
+    /** Deposit escrows `amount` assets; redeem escrows `amount` shares. */
     action: 'deposit' | 'redeem';
+    /** Assets to deposit (token-dec) or shares to redeem (share-dec). */
     amount: bigint;
+    /** Slippage bound applied at fill: shares for a deposit or assets for a redeem. `0` means unset. */
     minOut: bigint;
     /** Required only for a Retired market redeem, which executes directly. */
     vault?: VaultAtomicState;
 }
 
+/** A vault order accepted to rest, mirroring the `VaultOrder` row `create_vault_order` stores. */
 export interface VaultRestingOrderCreation {
     kind: 'resting';
     policy: 'restOnly';
     action: 'deposit' | 'redeem';
+    /** Assets escrowed (deposit, token-dec) or shares escrowed (redeem, share-dec). */
     amount: bigint;
+    /** Slippage bound carried into the fill. `0` means unset. */
     minOut: bigint;
+    /** Flat keeper fee escrowed alongside the order, settlement token, token-dec. */
     executionFee: bigint;
+    /** Order creation timestamp, unix seconds. */
     createdAt: bigint;
     /**
      * Earliest ledger timestamp at which a fill can land (the fill ledger must
@@ -102,44 +123,71 @@ export interface VaultRestingOrderCreation {
     redeemUnlockAt: bigint | null;
     /** Settlement token escrow, including executionFee. */
     escrowedAssets: bigint;
+    /** Shares escrowed for a redeem, share-dec. `0` for a deposit. */
     escrowedShares: bigint;
 }
 
+/**
+ * The instant redeem `create_vault_order` runs on a Retired market: it burns
+ * `shares` and pays `assets` directly, with no resting order, no `minOut`
+ * check, and no keeper `executionFee`.
+ */
 export interface VaultRetiredImmediateRedeem {
     kind: 'retiredImmediateRedeem';
     policy: 'direct';
     action: 'redeem';
+    /** Shares burned, share-dec. */
     shares: bigint;
+    /** Assets paid, token-dec. Priced at `net_pnl = 0`, exact because a retired market's book is flat. */
     assets: bigint;
     minOutApplied: false;
     executionFee: 0n;
 }
 
+/** Outcome of `quoteVaultOrderCreation`: a resting order, or an instant retired-market redeem. */
 export type VaultOrderCreationOutcome =
     VaultRestingOrderCreation | VaultRetiredImmediateRedeem;
 
+/** An exact `quoteVaultOrderCreation` result, unwrapped from its `QuoteResult` envelope. */
 export interface ExactVaultOrderCreationQuote {
     kind: 'exact';
     value: VaultOrderCreationOutcome;
     ledger: number;
 }
 
+/** `ExactVaultOrderCreationQuote` narrowed to the resting-order outcome. */
 export interface ExactVaultRestingOrderCreationQuote extends ExactVaultOrderCreationQuote {
     value: VaultRestingOrderCreation;
 }
 
+/**
+ * Result of `quoteVaultDepositFill` or `quoteVaultRedeemFill`, mirroring the
+ * `DepositFill` and `RedeemFill` receipts `execute_vault_order` emits.
+ */
 export interface VaultQuoteOutcome {
     kind: 'deposit' | 'redeem';
+    /** Assets deposited or shares redeemed, before fees: token-dec for a deposit, share-dec for a redeem. */
     input: bigint;
+    /** Shares minted (deposit, share-dec) or assets paid to the redeemer (redeem, token-dec), net of the vault fee. */
     output: bigint;
+    /** Assets moved through the vault before the fee cut, token-dec. Equals `input` for a deposit. */
     grossAssets: bigint;
+    /** `depositFee` or `redeemFee` cut of `grossAssets`, token-dec, rounded down. */
     vaultFee: bigint;
+    /** Flat keeper fee escrowed at order creation, paid to the keeper on fill, token-dec. */
     executionFee: bigint;
+    /** Pending trader PnL the fill priced against, capped and signed, token-dec. Does not change what the user receives. */
     netPnl: bigint;
+    /**
+     * Vault backing projected after this fill, token-dec, including the
+     * vault's cut of `vaultFee`. The keeper and treasury cuts leave the vault,
+     * so this is not `vaultFee` added in full, and it does not change `output`.
+     */
     postVaultAssets: bigint;
     valuation: 'transactionQuoteMarkedNav';
 }
 
+/** Shared inputs for `quoteVaultDepositFill` and `quoteVaultRedeemFill`: the market and vault state a fill prices against. */
 export interface VaultQuoteContext {
     ledger: number;
     now: bigint;
@@ -147,22 +195,33 @@ export interface VaultQuoteContext {
     config: TradingConfig;
     price: PriceData;
     vault: VaultAtomicState;
+    /** Treasury's cut of the fill fee (SCALAR_18), read live like `execute_vault_order` reads it at fill time. */
     treasuryRate: bigint;
+    /** Flat keeper fee escrowed on the order, settlement token, token-dec. */
     executionFee: bigint;
+    /** Slippage bound from the resting order. `0` means unset. */
     minOut: bigint;
 }
 
+/** Input to `quoteVaultDepositFill`. */
 export interface VaultDepositQuoteInput extends VaultQuoteContext {
+    /** Assets escrowed by the resting order, token-dec. */
     assets: bigint;
+    /** The order's creation timestamp; the fill price must postdate it. */
     createdAt: bigint;
 }
 
+/** Input to `quoteVaultRedeemFill`. */
 export interface VaultRedeemQuoteInput extends VaultQuoteContext {
+    /** Shares escrowed by the resting order, share-dec. */
     shares: bigint;
+    /** The order's creation timestamp; the fill price must postdate it, and the redeem lock counts from it. */
     createdAt: bigint;
 }
 
+/** Input to `checkVaultWithdrawGates`. */
 export interface VaultGateInput extends VaultQuoteContext {
+    /** Vault backing to gate the withdrawal against, token-dec. */
     postVaultAssets: bigint;
 }
 
@@ -193,7 +252,18 @@ function exchangeBasis(
     };
 }
 
-/** @internal Mirrors strategy-vault preview_deposit exactly. */
+/**
+ * @internal Mirrors `StrategyVault::assets_to_shares` exactly. Shares minted
+ * for `assets` at the uPnL-marked exchange rate, rounded down in the vault's
+ * favor.
+ *
+ * @param assets - assets to convert, token-dec. Must be nonnegative.
+ * @param netPnl - signed pending trader PnL marked against the vault,
+ *   token-dec. Positive is profit the vault still owes.
+ * @returns shares, share-dec (token-dec plus `vault.decimalsOffset`).
+ * @throws {VaultQuoteGateError} 800 if `assets` is negative.
+ * @throws {VaultQuoteGateError} 801 if `netPnl` exceeds `vault.totalAssets`.
+ */
 export function convertVaultAssetsToShares(
     vault: VaultAtomicState,
     assets: bigint,
@@ -204,7 +274,18 @@ export function convertVaultAssetsToShares(
     return mulDivFloor(assets, basis.supply, basis.assets);
 }
 
-/** @internal Mirrors strategy-vault preview_redeem exactly. */
+/**
+ * @internal Mirrors `StrategyVault::shares_to_assets` exactly. Assets paid
+ * for `shares` at the uPnL-marked exchange rate, rounded down in the vault's
+ * favor.
+ *
+ * @param shares - shares to convert, share-dec. Must be nonnegative.
+ * @param netPnl - signed pending trader PnL marked against the vault,
+ *   token-dec. Positive is profit the vault still owes.
+ * @returns assets, token-dec.
+ * @throws {VaultQuoteGateError} 800 if `shares` is negative.
+ * @throws {VaultQuoteGateError} 801 if `netPnl` exceeds `vault.totalAssets`.
+ */
 export function convertVaultSharesToAssets(
     vault: VaultAtomicState,
     shares: bigint,
@@ -327,7 +408,22 @@ export function deriveVaultMinimumOutput(
     }
 }
 
-/** Quote only the price-free creation leg of a vault order. */
+/**
+ * Quote the price-free creation leg of a vault order: the escrow amounts and
+ * timing bounds `create_vault_order` would produce, without touching price
+ * state. On a Retired market a redeem instead resolves as an instant fill,
+ * mirroring `create_vault_order`'s direct-redeem branch; `input.vault` is
+ * required for that case.
+ *
+ * Returns `unavailable`:
+ * - `MISSING_STATE` if the market is Retired, the action is redeem, and
+ *   `input.vault` was not supplied.
+ * - `CONTRACT_GATE` 710 if `minOut` is negative.
+ * - `CONTRACT_GATE` 704 if the market is Frozen.
+ * - `CONTRACT_GATE` 702 if a deposit is quoted on a Retired market.
+ * - `CONTRACT_GATE` 732 if a deposit falls under `config.minDeposit`, or a
+ *   redeem's share `amount` is not positive.
+ */
 export function quoteVaultOrderCreation(
     input: VaultOrderCreationQuoteInput,
 ): QuoteResult<VaultOrderCreationOutcome> {
@@ -413,6 +509,27 @@ export function quoteVaultOrderCreation(
     }
 }
 
+/**
+ * Quote the keeper fill leg of a deposit order at `input.price`, mirroring
+ * `execute_vault_order`'s deposit branch. Deducts the vault's `depositFee`,
+ * mints shares against the uPnL-marked exchange rate, and projects the vault
+ * balance after the fill. `input.assets` and every fee amount are token-dec;
+ * the minted shares are share-dec.
+ *
+ * Rounding always favors the vault: the fee and the minted shares both floor.
+ * The keeper, treasury, and vault split of `vaultFee` only changes
+ * `postVaultAssets`; it does not change the shares minted.
+ *
+ * Returns `unavailable` with `CONTRACT_GATE`:
+ * - 740 if `price.publishTime` predates `createdAt`, or the fill runs in the
+ *   creation ledger.
+ * - 800 if `assets`, or the post-fee deposit amount, is not positive.
+ * - 801 if the capped pending trader PnL exceeds `vault.totalAssets`.
+ * - 752 if the minted shares fall under `minOut`. Retry with a lower `minOut`
+ *   or wait for a better price.
+ * - 753 if the projected `postVaultAssets` would exceed `config.maxVaultBalance`.
+ *   Wait for the vault to free up room, or deposit less.
+ */
 export function quoteVaultDepositFill(
     input: VaultDepositQuoteInput,
 ): QuoteResult<VaultQuoteOutcome> {
@@ -476,6 +593,29 @@ function saturatingTimestampAdd(left: bigint, right: bigint): bigint {
     return left > U64_MAX - right ? U64_MAX : left + right;
 }
 
+/**
+ * Quote the keeper fill leg of a redeem order at `input.price`, mirroring
+ * `execute_vault_order`'s redeem branch. Burns shares against the uPnL-marked
+ * exchange rate maximized against the redeemer, deducts the vault's
+ * `redeemFee`, and runs the withdraw gates against the projected post-fill
+ * balance. `input.shares` is share-dec; every other amount is token-dec.
+ *
+ * Rounding always favors the vault: the redeemed assets and the fee both
+ * floor. The keeper, treasury, and vault split of the redeem fee only
+ * changes `postVaultAssets`; it does not change the assets paid to the
+ * redeemer.
+ *
+ * Returns `unavailable` with `CONTRACT_GATE`:
+ * - 740 if `price.publishTime` predates `createdAt`, or the fill runs in the
+ *   creation ledger.
+ * - 751 if the `config.redeemLock` cooldown from `createdAt` has not
+ *   elapsed. Wait and requote.
+ * - 732 if `shares` is not positive.
+ * - 752 if the assets paid fall under `minOut`. Retry with a lower `minOut`
+ *   or wait for a better price.
+ * - 714 or 754 if the withdraw gates block the fill; see
+ *   `evaluateVaultWithdrawGates` for the condition and what clears it.
+ */
 export function quoteVaultRedeemFill(
     input: VaultRedeemQuoteInput,
 ): QuoteResult<VaultQuoteOutcome> {

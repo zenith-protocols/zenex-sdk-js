@@ -1,3 +1,10 @@
+/**
+ * Non-trading contract error codes: Soroban host and transaction codes, plus
+ * the shared, token, vault, oracle, strategy-vault, governance, treasury and
+ * fee-abstraction domains. Trading codes (700-772) live in `TradingError`
+ * instead. Resolve a raw code with `contractErrorFromCode`. Do not match on
+ * codes in this enum directly.
+ */
 export enum ContractErrorType {
     UnknownError = -1000,
 
@@ -212,6 +219,12 @@ const errorMessages: Record<number, string> = {
     [5003]: 'Relayer fee is outside the signed fee bounds',
 };
 
+/**
+ * An error decoded from a failed contract call or RPC response. `type`
+ * carries the numeric code. The message defaults to the code's entry in
+ * `errorMessages` or `tradingErrorMessages`, or a fallback string when the
+ * code is not recognized.
+ */
 export class ContractError extends Error {
     public type: ContractErrorType | TradingError;
 
@@ -243,7 +256,7 @@ export function contractErrorFromCode(code: number): ContractError {
 // Soroban contract error codes are u32; anything larger is not a real code.
 const MAXIMUM_ERROR_CODE = 4_294_967_295;
 
-// Strictly the host's `Error(Contract, #N)` shape — bare `#N` fragments in
+// Strictly the host's `Error(Contract, #N)` shape. Bare `#N` fragments in
 // diagnostics are NOT trusted as contract codes.
 const CONTRACT_ERROR_PATTERN = /Error\(Contract, #(\d{1,10})\)/;
 

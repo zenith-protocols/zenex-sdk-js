@@ -54,52 +54,163 @@ class ProtocolGateError extends Error {
     }
 }
 
+/**
+ * The position change to quote, mirroring the fill kinds `execute_order`
+ * settles. `notional`, `margin`, and `amount` are token-dec.
+ */
 export type PositionAction =
-    | { kind: 'increase'; notional: bigint; margin: bigint }
-    | { kind: 'decrease'; notional: bigint; margin: bigint }
+    | {
+          kind: 'increase';
+          /** Size to add. Zero is valid only with a nonzero `margin`, a margin-only top-up. */
+          notional: bigint;
+          /** Margin to post alongside the added size. */
+          margin: bigint;
+      }
+    | {
+          kind: 'decrease';
+          /**
+           * Requested close size. Clamps to a full close if it reaches or
+           * exceeds the open notional, or would leave a survivor under
+           * `config.minPositionNotional`.
+           */
+          notional: bigint;
+          /** Requested withdrawal from the surviving margin. Ignored once the request clamps to a full close. */
+          margin: bigint;
+      }
     | { kind: 'close' }
     | {
           kind: 'adjustMargin';
+          /** `'add'` posts margin with no change to size. `'withdraw'` returns margin, under the same rules as a decrease. */
           direction: 'add' | 'withdraw';
+          /** Margin delta. Must be positive. A zero amount is rejected as a no-op (#732). */
           amount: bigint;
       };
 
+/**
+ * Ports the contract's `Fees`: the itemized costs one action settles, all
+ * token-dec. `funding` is signed. Positive means the position paid into the
+ * funding pool; negative means it earned funding, matching
+ * `claimableFundingDelta`. `execution` and `relay` are the input fees
+ * echoed unchanged; they are not part of `marginDebit` and settle outside
+ * this simulation.
+ */
 export type FeeBreakdown = PositionFeeBreakdown;
 
+/**
+ * The two margin gates `Position::require_valid` and
+ * `Position::is_liquidatable` check, all token-dec. Every field reads zero
+ * when `position.notional` is zero.
+ */
 export interface MarginState {
+    /** `ceil(config.initMargin * notional / SCALAR_18)`, the pre-PnL floor `margin` must clear (#713). */
     initialRequired: bigint;
+    /** `ceil(config.maintenanceMargin * notional / SCALAR_18)`, the settled-equity floor the liquidation gate checks. */
     maintenanceRequired: bigint;
+    /** `margin - initialRequired`. Negative means the position fails the initial-margin gate. */
     initialHeadroom: bigint;
+    /** Settled equity minus `maintenanceRequired`. Negative means the position is liquidatable. */
     maintenanceHeadroom: bigint;
 }
 
+/**
+ * The settled result of quoting a `PositionAction`, mirroring what
+ * `execute_order` would commit on chain. Every amount is exact as of
+ * `PositionQuoteContext.ledger`. Nothing here reflects a fill that lands
+ * after this quote is taken.
+ */
 export interface PositionActionOutcome {
+    /** The action that was quoted, cloned from the input. */
     action: PositionAction;
+    /**
+     * price_scalar (18-dec). The entry-side price, ask for a long and bid
+     * for a short, on an increase or a margin `add`. The exit-side price,
+     * bid for a long and ask for a short, on a decrease, close, or margin
+     * `withdraw`. Still set on a margin-only action, even though no size
+     * fills at it.
+     */
     executionPrice: bigint;
+    /** The position after the action settles. All-zero, the canonical closed row, once notional reaches zero. */
     postPosition: Position;
+    /**
+     * The market aggregates after this action's own fee, PnL, and accrual
+     * legs settle. Reflects only this action. A fill on another position
+     * landing first is not accounted for.
+     */
     postMarket: MarketData;
+    /** The itemized costs this action settled. See `FeeBreakdown`. */
     fees: FeeBreakdown;
+    /**
+     * Realized PnL, token-dec, after the profit haircut. Zero on an
+     * increase or a margin `add`/`withdraw`. On a decrease, the realized
+     * PnL of only the closed fraction. On a close, the realized PnL of the
+     * whole position. Excludes the unrealized PnL of any size the action
+     * leaves open.
+     */
     realizedPnl: bigint;
+    /**
+     * Token-dec. What the trader is owed back to their wallet, net of the
+     * settled fees. Zero on an increase. Excludes `executionFee` and
+     * `relayFee`, which settle outside this simulation.
+     */
     walletPayout: bigint;
+    /** Token-dec. The amount this action added to the trader's claimable funding balance, not the running total. */
     claimableFundingDelta: bigint;
+    /** The margin gates evaluated against `postPosition` and `postMarket`, at the input price and vault assets. */
     margin: MarginState;
 }
 
+/**
+ * The chain state a position quote settles against, all supplied by the
+ * caller. Mirrors what `Position::increase` and `Position::decrease` read
+ * from storage. The SDK does not fetch or check any of it, so a stale
+ * snapshot quotes silently wrong rather than failing.
+ */
 export interface PositionQuoteContext {
+    /** Ledger sequence this quote is exact as of. Stamped onto the returned `QuoteResult`. */
     ledger: number;
+    /** Unix seconds. Advances the funding and borrowing accrual indices, and gates the decrease lock (`unlocksAt`). */
     now: bigint;
+    /** Which side of the `(user, isLong)` position key this quotes. */
     isLong: boolean;
+    /** The trader's current stored position for this side. */
     position: Position;
+    /** The market's current stored aggregates. */
     market: MarketData;
+    /** The market's current owner-set parameters. */
     config: TradingConfig;
+    /** The oracle price to fill against, price_scalar (18-dec). */
     price: PriceData;
+    /**
+     * The vault's tracked balance, token-dec. Mirrors `Market::vault_balance`.
+     * Drives the PnL haircut allowance and the post-fill utilization gate
+     * (#714).
+     */
     vaultAssets: bigint;
+    /**
+     * The treasury's fee cut rate (SCALAR_18), fetched from the treasury
+     * contract at call time. Only feeds this quote's internal utilization
+     * estimate; it is not part of the returned `fees`.
+     */
     treasuryRate: bigint;
 }
 
+/**
+ * The full input to `quotePositionAction`: a `PositionQuoteContext` plus
+ * the action to quote and its two flat fees.
+ */
 export interface PositionActionInput extends PositionQuoteContext {
+    /** The position change to quote. */
     action: PositionAction;
+    /**
+     * The keeper's flat per-order fee, token-dec. Echoed into
+     * `fees.execution` unchanged. The real order escrows it separately at
+     * creation (`Order::exec_fee`), so this quote never deducts it.
+     */
     executionFee: bigint;
+    /**
+     * An off-chain relay cost, token-dec, with no on-chain contract
+     * counterpart. Echoed into `fees.relay` for display only.
+     */
     relayFee: bigint;
 }
 
@@ -611,7 +722,7 @@ function decreaseTransition(
     const locked =
         input.now < position.unlocksAt ? position.lockedNotional : 0n;
     // A request for the whole position (or more) is a full close; so is one
-    // whose survivor would sit below the position minimum — that partial
+    // whose survivor would sit below the position minimum. That partial
     // could never validate (#711), so the fill clamps to a full close.
     if (
         requestedNotional >= position.notional ||
@@ -732,6 +843,63 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
     );
 }
 
+/**
+ * Quote the exact settlement of `input.action`, without touching the chain
+ * or changing `input`.
+ *
+ * Ports the math behind `execute_order`. An `increase` or a margin `add`
+ * runs `Position::increase`. A `decrease`, `close`, or margin `withdraw`
+ * runs `Position::decrease`, which exits through `Position::close_settled`
+ * on a full close. Accruals settle first, mirroring `Market::load`'s
+ * elapsed-window advance.
+ *
+ * The caller must supply `position`, `market`, `vaultAssets`, and
+ * `treasuryRate` exactly as read from the chain. The SDK does not fetch or
+ * check any of them, so a stale snapshot returns a wrong quote, not a
+ * failure.
+ *
+ * This mirrors only the voluntary action path. It does not model the
+ * keeper-only ADL remainder, which skips the initial-margin floor.
+ *
+ * # Returns
+ * - `exact`, with the outcome and the ledger it is exact as of.
+ * - `unavailable`, on every condition below. This function never throws.
+ *
+ * # Errors
+ * Every error below comes back as `unavailable` with code `CONTRACT_GATE`
+ * and the mirrored contract error named in the reason string.
+ * - NegativeValueNotAllowed (710) if a notional, margin, or `adjustMargin`
+ *   amount is negative.
+ * - NotionalBelowMinimum (711) if the resulting position's notional falls
+ *   under `config.minPositionNotional`. Never fires on a close, since that
+ *   path skips this check.
+ * - NotionalAboveMaximum (712) if the resulting position's notional
+ *   exceeds `config.maxPositionNotional`. Same exemption as #711.
+ * - InsufficientMargin (713) if margin falls under the initial requirement,
+ *   or settled equity under the maintenance requirement. Same exemption as
+ *   #711.
+ * - UtilizationExceeded (714) on an increase that adds notional, if either
+ *   side's reserved value exceeds the post-fill utilization cap.
+ * - OpenInterestExceeded (715) on an increase that adds notional, if the
+ *   side's open interest exceeds `config.maxOpenInterest`.
+ * - PositionNotFound (720) if a decrease, close, or margin `withdraw`
+ *   targets a position at zero notional.
+ * - NotionalLocked (721) if a partial decrease exceeds the unlocked
+ *   notional, or a full close, explicit or clamped from a decrease, finds
+ *   any notional still locked.
+ * - PositionLiquidatable (723) on a voluntary decrease, close, or margin
+ *   `withdraw`, if settled equity is under the maintenance margin.
+ *   Liquidation is then the only legal transition.
+ * - InvalidOrder (732) if the action is a no-op: zero notional and margin,
+ *   or a zero `adjustMargin` amount.
+ * - StalePrice (740) if `price.publishTime` is before the position's
+ *   `pricedAt`.
+ *
+ * Two more `unavailable` codes cover the SDK's own checks, not a contract
+ * error:
+ * - `CONTRACT_OVERFLOW` if a settlement step leaves the `i128` or `u64` range.
+ * - `INVALID_INPUT` for any other error the inputs raise.
+ */
 export function quotePositionAction(
     input: PositionActionInput,
 ): QuoteResult<PositionActionOutcome> {

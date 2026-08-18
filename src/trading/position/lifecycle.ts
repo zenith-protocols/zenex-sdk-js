@@ -74,11 +74,32 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
     );
 }
 
+/**
+ * Average entry price implied by `position`, price_scalar:
+ * `floor(notional * SCALAR_18 / tokens)`. `undefined` when `position.tokens`
+ * is `0n` (no open size), matching the entry-implied note on
+ * `Position::tokens`.
+ */
 export function impliedEntryPrice(position: Position): bigint | undefined {
     if (position.tokens === 0n) return undefined;
     return mulDivFloor(position.notional, SCALAR_18, position.tokens);
 }
 
+/**
+ * Leverage of `position` marked at `price`, SCALAR_18 (`SCALAR_18` = 1x):
+ * `notional / (margin + pnl)`. The denominator is margin plus raw PnL, not
+ * the fee-settled equity `liquidationState` returns. It also excludes
+ * pending funding and borrowing, named in the result's `assumptions`.
+ *
+ * The contract has no leverage function; `TradingConfig.initMargin` states
+ * the inverse relation, "max leverage = 1 / initMargin".
+ *
+ * @returns `estimate` of `0n` when `position.notional` is `0n`.
+ *   `unavailable` (`INVALID_INPUT`) when margin plus PnL is zero or
+ *   negative: leverage against non-positive equity is undefined.
+ *   `unavailable` (`CONTRACT_OVERFLOW`) on an i128 overflow, or
+ *   (`INVALID_INPUT`) on any other input error.
+ */
 export function positionLeverage(
     position: Position,
     price: PriceData,
@@ -108,6 +129,25 @@ export function positionLeverage(
     }
 }
 
+/**
+ * Exact liquidation check for `position` at `context.ledger`, token-dec.
+ * Mirrors `Position::is_liquidatable`: advances the market's funding and
+ * borrowing indices to `context.now` (`Market::load`), settles the full
+ * position at `context.price` the way `Position::settle` would on a close,
+ * and compares the result to the maintenance line.
+ *
+ * `equity` is the settled equity floored at `0n`, matching what a close or a
+ * liquidation would pay out. `maintenanceRequired` is
+ * `ceil(notional * maintenanceMargin / SCALAR_18)` (`Position::margin_requirement`).
+ * `liquidatable` is `equity < maintenanceRequired`: `true` is
+ * `Position::liquidate`'s eligibility gate, `false` is `Position::decrease`'s
+ * solvency gate.
+ *
+ * @returns `unavailable` (`CONTRACT_GATE`, "contract error #720: position not
+ *   found") when `position.notional` is `0n`. `unavailable`
+ *   (`CONTRACT_OVERFLOW`) on an i128 overflow, or (`INVALID_INPUT`) on any
+ *   other input error. Otherwise `exact` at `context.ledger`.
+ */
 export function liquidationState(
     position: Position,
     context: PositionQuoteContext,

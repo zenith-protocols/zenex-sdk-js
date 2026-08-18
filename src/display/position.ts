@@ -1,17 +1,3 @@
-// =============================================================================
-// Position display.
-//
-// Wraps the exact estimate mirrors in `src/trading/position/estimates.ts` and
-// converts each value at its own scale. Approximate, display only — never feed
-// these back into an order.
-//
-// Like the mirrors it wraps, this marks a RAW stored position at a single price
-// without settling accruals into margin, and does not extrapolate the accrual
-// indices past the market's last on-chain accrual. Between keeper touches it
-// slightly overstates equity. For a checked result at a declared ledger, use
-// `liquidationState` / `quotePositionAction` and format the bigints yourself.
-// =============================================================================
-
 import type {
     MarketData,
     Position,
@@ -39,7 +25,7 @@ export interface PositionDisplay {
     pnl: number;
     /** Margin + PnL - pending accruals, token units. */
     equity: number;
-    /** Pending funding: positive is owed by the trader, negative is earned. */
+    /** Pending funding, token units. Positive is owed by the trader, negative is earned. */
     pendingFunding: number;
     /** Pending borrowing, token units (never negative). */
     pendingBorrowing: number;
@@ -65,10 +51,18 @@ export interface PositionDisplay {
 }
 
 /**
- * Format a stored position for display at `price`.
+ * Formats a stored position for display at `price`. Approximate. Never feed
+ * the result back into an order.
  *
- * `decimals` is the settlement token's decimals, from the deployment — token
- * amounts use it, while prices and the derived ratios do not.
+ * Marks the raw stored position at a single price. Does not settle pending
+ * accruals into margin, and does not extrapolate the accrual indices past
+ * the market's last on-chain accrual, so between keeper touches the equity
+ * can read slightly high. For a checked result at a declared ledger, use
+ * `liquidationState` or `quotePositionAction` and format the bigints
+ * yourself.
+ *
+ * @param decimals The settlement token's decimals, from the deployment.
+ * Token amounts use it. Prices and the derived ratios do not.
  */
 export function positionDisplay(
     position: Position,

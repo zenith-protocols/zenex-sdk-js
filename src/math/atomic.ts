@@ -1,8 +1,16 @@
 const DECIMAL_TEXT = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?$/;
 
 /**
- * Parse exact base-10 text into atomic units without floating-point arithmetic.
- * The input is never rounded or truncated.
+ * Parse canonical base-10 text into atomic units at `decimals` places, with
+ * no rounding or floating-point step.
+ * Accepts an optional leading `-`, a whole part with no leading zeros, and an
+ * optional fractional part. Rejects a leading `+`, scientific notation, and a
+ * `number` argument.
+ * @param value Canonical decimal text, such as `"12.5"` or `"-0.001"`.
+ * @param decimals The number of decimal places the atomic result uses.
+ * @throws {TypeError} if value is a number instead of text.
+ * @throws {SyntaxError} if value is not canonical base-10 text.
+ * @throws {RangeError} if value has more fractional digits than `decimals`.
  */
 export function parseAtomic(value: string, decimals: number): bigint {
     if (typeof value === 'number') {
@@ -28,7 +36,14 @@ export function parseAtomic(value: string, decimals: number): bigint {
     return match[1] === '-' ? -magnitude : magnitude;
 }
 
-/** Format atomic units as canonical base-10 text with explicit decimals. */
+/**
+ * Format atomic units at `decimals` places as canonical base-10 text.
+ * Trailing zeros in the fraction are dropped, and a whole value has no
+ * decimal point.
+ * @param value The atomic value to format.
+ * @param decimals The number of decimal places `value` is scaled to.
+ * @throws {TypeError} if value is not a bigint.
+ */
 export function formatAtomic(value: bigint, decimals: number): string {
     if (typeof value !== 'bigint') {
         throw new TypeError('atomic value must be a bigint');

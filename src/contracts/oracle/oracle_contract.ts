@@ -3,32 +3,33 @@ import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operati
 import { u32, u64, i128 } from '../../index.js';
 
 /**
- * Verified price data returned by the oracle. Carries the bid/ask pair at
- * feed-native precision (18-dec on most V3 crypto streams, 8-dec on some),
- * after spread reduction toward the mid; the trading contract fills the
- * adverse side. No exponent travels with the price — every consumer
- * converts notional to tokens and back at the same scale.
+ * Verified price returned by the oracle. Bid and ask share one scale:
+ * 18-dec on most V3 crypto streams, 8-dec on some. No exponent travels
+ * with the price, so every consumer converts notional to tokens and back
+ * at the same scale.
  */
 export interface OraclePriceData {
-    /** Data Streams stream id (32 bytes); equals the request's `feedId`. */
+    /** Data Streams stream id, 32 bytes. Equals the request's feedId. */
     feed_id: Buffer;
+    /** Best bid, after spread reduction. The market fills the adverse close side here. */
     bid: i128;
+    /** Best ask, same precision as bid. The market fills the adverse open side here. */
     ask: i128;
-    /** Observation time, Unix seconds — not the validity window's start. */
+    /** Observation time (Unix seconds). Not the start of the validity window. */
     publish_time: u64;
 }
 
 /** Constructor arguments for {@link OracleContract.deploy}. */
 export interface OracleConstructorArgs {
-    /** Admin address; may update the staleness pair and spread reduction factor (not the verifier). */
+    /** Admin address that may update the staleness pair and the spread reduction factor. */
     owner: string;
-    /** Chainlink Data Streams verifier contract address; immutable after deployment. */
+    /** Chainlink Data Streams verifier contract address. Immutable after deployment. */
     verifier: string;
-    /** Max report age for strict (fill) verifications, seconds; in [3, 15]. */
+    /** Max report age for order fills (seconds); in [3, 15]. */
     trade_staleness: u64;
-    /** Max report age for protective (gap-closing) verifications, seconds; in [trade_staleness, 120]. */
+    /** Max report age for gap-closing calls (seconds); in [trade_staleness, 120]. */
     close_staleness: u64;
-    /** SCALAR_18-scaled bid/ask narrowing toward the mid, in [0, SCALAR_18] (0 = off, SCALAR_18 = collapse to mid). */
+    /** Bid/ask narrowing toward the mid (SCALAR_18-scaled); in [0, SCALAR_18]. 0 = off, SCALAR_18 = collapse to the mid. */
     spread_reduction_factor: i128;
 }
 
@@ -54,8 +55,8 @@ export class OracleContract extends Contract {
     static spec: contract.Spec = new contract.Spec(oracleSpec);
 
     /**
-     * Result parsers for each contract method, keyed by JS method name —
-     * pass the base64 XDR returned by simulation through the matching
+     * Result parsers for each contract method, keyed by JS method name.
+     * Pass the base64 XDR returned by simulation through the matching
      * parser to get the native value.
      */
     static readonly parsers = {
@@ -83,16 +84,10 @@ export class OracleContract extends Contract {
     };
 
     /**
-     * Deploy a new instance of the Oracle contract
-     * Constructor: __constructor(owner, verifier, trade_staleness, close_staleness, spread_reduction_factor)
-     *
-     * `verifier` is the address of Chainlink's deployed Data Streams verifier
-     * contract and is immutable after deployment. The staleness pair must
-     * satisfy `3 <= trade_staleness <= 15` and
-     * `trade_staleness <= close_staleness <= 120` (seconds), else the
-     * constructor traps with `InvalidStaleness` (783).
-     * `spread_reduction_factor` is SCALAR_18-scaled in [0, SCALAR_18]
-     * (0 = off, SCALAR_18 = collapse to the mid).
+     * Build the constructor operation for a new Oracle contract instance.
+     * See {@link OracleConstructorArgs} for argument bounds; traps with
+     * `InvalidStaleness` (783) or `InvalidSpreadReduction` (785) if they
+     * are violated.
      */
     static deploy(
         deployer: string,
@@ -122,19 +117,28 @@ export class OracleContract extends Contract {
     // ============================================================
 
     /**
-     * Verify a signed Data Streams report and return the price for a stream
-     * @param report - The signed report blob, exactly as fetched from the API
-     * @param feedId - The caller's immutable 32-byte stream anchor; must equal the report's `feedId`
-     *   and must be a V3 stream (first two bytes `0x00 0x03`), else the call traps
-     * @param protective - Which staleness window gates the report's age:
-     *   `false` (default) applies the strict `trade_staleness` used by order
-     *   fills, `true` the wider `close_staleness` used by gap-closing calls
-     *   (liquidation, ADL, accrual). Only the past side widens — the forward
-     *   allowance is `trade_staleness` for both classes.
-     * @returns base64 XDR operation; parse result with `parsers.verifyPrice`.
-     *   Traps on an unverifiable report (bad signatures, inactive DON config),
-     *   a feed mismatch, an observation older than the selected window, a
-     *   report past its own expiry, or a non-positive/crossed price
+     * Verify a signed Data Streams report and return the price for the
+     * stream; parse the result with `parsers.verifyPrice`.
+     * @param report - The signed report blob, exactly as fetched from the
+     *   API; traps if the Chainlink verifier rejects it (invalid
+     *   signatures or an inactive verifier configuration), with
+     *   `InvalidData` (780) if the body fails to decode or the feed is
+     *   not a V3 stream (`0x0003` prefix), with `PriceAhead` (793) if the
+     *   report sits ahead of the ledger clock by more than the forward
+     *   allowance, with `ReportExpired` (784) if the ledger clock has
+     *   passed its expiry, or with `InvalidPrice` (781) on a
+     *   non-positive price side, a crossed book, or an oversized price
+     *   value
+     * @param feedId - The caller's immutable 32-byte stream anchor;
+     *   traps with `FeedMismatch` (790) if the report prices a different
+     *   stream
+     * @param protective - Selects the staleness window: `false` (default)
+     *   uses the strict `trade_staleness` window for order fills, `true`
+     *   the wider `close_staleness` window for gap-closing calls such as
+     *   liquidation, ADL, and accrual. Only the past side widens; the
+     *   forward allowance stays at `trade_staleness` for both values.
+     *   Traps with `PriceStale` (782) if the observation is older than
+     *   the selected window.
      */
     verifyPrice(
         report: Buffer | Uint8Array,
@@ -154,15 +158,12 @@ export class OracleContract extends Contract {
     // ============================================================
 
     /**
-     * Update both staleness windows in seconds (owner only)
-     *
-     * One call sets the pair atomically, so the `trade <= close` ordering is
-     * always checked against the values that will actually be stored. Must
-     * satisfy `MIN_STALENESS_SECONDS=3 <= tradeStaleness <=
-     * MAX_TRADE_STALENESS_SECONDS=15` and `tradeStaleness <= closeStaleness
-     * <= MAX_CLOSE_STALENESS_SECONDS=120`.
-     * @param tradeStaleness - Max report age for strict (fill) verifications
-     * @param closeStaleness - Max report age for protective (gap-closing) verifications
+     * Update both staleness windows atomically (owner only).
+     * @param tradeStaleness - Max report age for order fills (seconds);
+     *   in [3, 15]
+     * @param closeStaleness - Max report age for gap-closing calls
+     *   (seconds); in [tradeStaleness, 120]. Traps with
+     *   `InvalidStaleness` (783) if either bound is violated.
      */
     updateStaleness(tradeStaleness: u64, closeStaleness: u64): string {
         return this.call(
@@ -173,10 +174,11 @@ export class OracleContract extends Contract {
     }
 
     /**
-     * Update the spread reduction factor (owner only)
-     * SCALAR_18-scaled symmetric bid/ask narrowing toward the mid;
-     * must lie in [0, SCALAR_18] (0 = off, SCALAR_18 = collapse to the mid).
-     * @param spreadReductionFactor - SCALAR_18-scaled narrowing factor
+     * Update the spread reduction factor (owner only).
+     * @param spreadReductionFactor - Bid/ask narrowing toward the mid
+     *   (SCALAR_18-scaled); in [0, SCALAR_18]. 0 = off, SCALAR_18 =
+     *   collapse to the mid. Traps with `InvalidSpreadReduction` (785)
+     *   if out of range.
      */
     updateSpreadReductionFactor(spreadReductionFactor: i128): string {
         return this.call(
@@ -208,15 +210,15 @@ export class OracleContract extends Contract {
         ).toXDR('base64');
     }
 
-    /** Complete a pending ownership transfer; callable only by the proposed new owner. */
+    /** Complete a pending ownership transfer. Only the proposed new owner may call this. */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
 
     /**
      * Permanently remove the owner, disabling `updateStaleness` and
-     * `updateSpreadReductionFactor` for good (owner only). Fails if a
-     * transfer is pending.
+     * `updateSpreadReductionFactor` (owner only). Fails if a transfer is
+     * pending.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');
@@ -226,30 +228,22 @@ export class OracleContract extends Contract {
     // View / Getter Methods
     // ============================================================
 
-    /**
-     * Get the Chainlink Data Streams verifier contract address (immutable)
-     */
+    /** Get the Chainlink Data Streams verifier contract address. */
     verifier(): string {
         return this.call('verifier').toXDR('base64');
     }
 
-    /**
-     * Get the strict (fill) staleness window in seconds
-     */
+    /** Get the trade_staleness window used for order fills (seconds). */
     tradeStaleness(): string {
         return this.call('trade_staleness').toXDR('base64');
     }
 
-    /**
-     * Get the protective (gap-closing) staleness window in seconds
-     */
+    /** Get the close_staleness window used for gap-closing calls (seconds). */
     closeStaleness(): string {
         return this.call('close_staleness').toXDR('base64');
     }
 
-    /**
-     * Get the current spread reduction factor (SCALAR_18-scaled)
-     */
+    /** Get the current spread reduction factor (SCALAR_18-scaled). */
     spreadReductionFactor(): string {
         return this.call('spread_reduction_factor').toXDR('base64');
     }

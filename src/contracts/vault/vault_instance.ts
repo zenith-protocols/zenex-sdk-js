@@ -8,15 +8,15 @@ export interface VaultInstanceState {
     totalSharesAtomic: bigint;
     /** Virtual-share decimals offset (inflation-attack protection). */
     decimalsOffset: number;
-    /** Share-token decimals (asset decimals + offset), from `Meta`. */
+    /** Share-token decimals, from `Meta`. Equals asset decimals plus the offset, so share amounts and asset amounts use different scales. */
     shareDecimals: number;
     /** Underlying asset decimals, derived as `shareDecimals - decimalsOffset`. */
     assetDecimals: number;
-    /** Strategy (market) bound to this vault (`Strategy`), absent until set. */
+    /** Market contract bound to this vault (`Strategy`). Set once at construction. */
     strategy?: string;
 }
 
-/** `Meta` is the OZ `Metadata { decimals, name, symbol }` map. */
+/** `Meta` is the OpenZeppelin `Metadata { decimals, name, symbol }` map. */
 function extractMetaDecimals(val: xdr.ScVal): number | undefined {
     if (val.switch() !== xdr.ScValType.scvMap()) return undefined;
     const map = val.map();
@@ -33,7 +33,7 @@ function extractMetaDecimals(val: xdr.ScVal): number | undefined {
     return undefined;
 }
 
-/** Throws unless `AssetAddress` and `Meta` are set — both constructor invariants. */
+/** Throws unless `AssetAddress` and `Meta` are set. Both are constructor invariants. */
 export function parseVaultInstance(instanceVal: xdr.ScVal): VaultInstanceState {
     const storage = instanceStorage(instanceVal, 'vault');
     // Asset first: it is the most informative thing to be missing, so it should

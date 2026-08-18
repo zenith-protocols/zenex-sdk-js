@@ -87,7 +87,7 @@ export type {
 
 export { parseTradingInstance } from './contracts/trading/index.js';
 
-// Instance-storage walkers — one per contract that keeps instance state.
+// Instance-storage walkers, one per contract that keeps instance state.
 // Each is a single ledger key holding every value below, including `Owner`.
 export { instanceStorage } from './contracts/instance.js';
 export type { InstanceStorage } from './contracts/instance.js';
@@ -257,7 +257,7 @@ export {
     tradingOrderLedgerKey,
 } from './ledger-keys.js';
 
-// Token reads (any holder, any token — not a Zenex contract binding)
+// Token reads. Any holder, any token. Not a Zenex contract binding.
 export * from './token.js';
 
 // Fixed-Point Math

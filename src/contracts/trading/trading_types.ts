@@ -1,19 +1,7 @@
 import { xdr, nativeToScVal } from '@stellar/stellar-sdk';
 import { i128, u32, u64 } from '../../index.js';
 
-// =============================================================================
-// Type mirrors and ScVal converters for the Trading contract's core types.
-//
-// Two ABI facts the TypeScript cannot show: field order in the ScVal maps below
-// matches `#[contracttype]`'s alphabetical snake_case serialization, and the
-// `OrderKind` / `VaultOrderKind` enums are `#[repr(u32)]` in the contract, so
-// they cross as plain `u32` discriminants.
-// =============================================================================
-
-/**
- * Contract operational status (instance storage singleton), stored as its
- * `u32` discriminant and crossing the ABI as a plain `u32`.
- */
+/** Contract operational status (instance storage singleton). */
 export enum Status {
     /** Normal trading. */
     Active = 0,
@@ -29,8 +17,7 @@ export enum Status {
 
 /**
  * The intent of a keeper order: increase or decrease, and how it becomes
- * eligible (immediately, or on a price crossing). Crosses the ABI as its
- * `u32` discriminant.
+ * eligible, immediately or on a price crossing.
  */
 export enum OrderKind {
     /** Grow the position now; `triggerPrice` is unused. */
@@ -47,10 +34,7 @@ export enum OrderKind {
     StopDecrease = 5,
 }
 
-/**
- * Vault liquidity action requested by the user. Crosses the ABI as its
- * `u32` discriminant.
- */
+/** Vault liquidity action requested by the user. */
 export enum VaultOrderKind {
     /** Escrow `amount` assets at creation; mint shares at fill. */
     Deposit = 0,
@@ -61,12 +45,7 @@ export enum VaultOrderKind {
 /** i128::MAX; the conventional full-close sentinel for a decrease order's notional. */
 export const FULL_CLOSE: i128 = 2n ** 127n - 1n;
 
-/**
- * Maximum pending decrease orders per position side
- * (`MAX_ORDERS_PER_SIDE`); the 9th decrease
- * on a side traps `TooManyOrders` (733). Sized so the closure sweep's
- * cancel+refund receipts stay inside per-tx limits.
- */
+/** Maximum pending decrease orders per side; the 9th push traps `TooManyOrders` (733). */
 export const MAX_ORDERS_PER_SIDE = 8;
 
 /**
@@ -79,7 +58,7 @@ export const MAX_ORDERS_PER_SIDE = 8;
 export interface Order {
     /** Side this order targets. */
     isLong: boolean;
-    /** OrderKind discriminant (0 = MarketIncrease .. 5 = StopDecrease). */
+    /** This order's kind. See `OrderKind`. */
     kind: OrderKind;
     /** Size change magnitude (>= 0), token-dec. */
     notional: i128;
@@ -91,7 +70,7 @@ export interface Order {
     priceBound: i128;
     /** Keeper execution fee escrowed at creation, token-dec. */
     execFee: i128;
-    /** Submission timestamp; per-fill anti-replay anchor. */
+    /** Submission timestamp, unix seconds; per-fill anti-replay anchor. */
     createdAt: u64;
     /** Ledger sequence; eligible while the current sequence <= expiration. */
     expiration: u32;
@@ -99,15 +78,15 @@ export interface Order {
 
 /** A pending vault deposit or redeem (persistent storage, keyed `(user, id)`). */
 export interface VaultOrder {
-    /** VaultOrderKind discriminant (0 = Deposit, 1 = Redeem). */
+    /** This order's kind. See `VaultOrderKind`. */
     kind: VaultOrderKind;
     /** Escrowed assets (deposit, token-dec) or shares (redeem, vault share decimals = asset decimals + decimalsOffset). */
     amount: i128;
-    /** Minimum received at fill net of the vault fee: shares (deposit) or assets (redeem); 0 = unset. */
+    /** Minimum received at fill, net of the vault fee: shares (deposit, share-dec) or assets (redeem, token-dec); 0 = unset. */
     minOut: i128;
-    /** Keeper execution fee escrowed at creation (settlement token), token-dec. */
+    /** Keeper execution fee escrowed at creation, token-dec. */
     execFee: i128;
-    /** Creation timestamp; fills need a publish_time at or past it and a later ledger, redeems also the redeem_lock cooldown. */
+    /** Creation timestamp, unix seconds. A fill needs a publish_time at or after it and a later ledger; a redeem also needs the redeemLock cooldown to pass. */
     createdAt: u64;
 }
 
@@ -117,7 +96,7 @@ export interface Position {
     margin: i128;
     /** Size in quote, token-dec. */
     notional: i128;
-    /** Size in base, base-dec (NOT SCALAR_18 — `to_tokens` floors a token-dec notional divided by a price_scalar price); entry implied = notional/tokens. */
+    /** Size in base, base-dec. Not SCALAR_18: `to_tokens` floors a token-dec notional divided by a price_scalar price. Entry price is `notional / tokens`. */
     tokens: i128;
     /** Funding index snapshot at last change (SCALAR_18). */
     fundingIdx: i128;
@@ -125,11 +104,11 @@ export interface Position {
     borrowingIdx: i128;
     /** Notional under the decrease lock, token-dec. */
     lockedNotional: i128;
-    /** Lock deadline ts; lockedNotional counts while now < unlocksAt. */
+    /** Lock deadline, unix seconds; lockedNotional counts while now < unlocksAt. */
     unlocksAt: u64;
-    /** publish_time of the last fill's price; force-close anti-replay floor. */
+    /** publish_time of the last fill's price, unix seconds; force-close anti-replay floor. */
     pricedAt: u64;
-    /** Pending decrease order ids on the side (max `MAX_ORDERS_PER_SIDE` = 8); cleared when the position closes. */
+    /** Pending decrease order ids on the side, max `MAX_ORDERS_PER_SIDE`; cleared when the position closes. */
     decreaseOrders: u32[];
 }
 
@@ -155,7 +134,7 @@ export interface MarketData {
     borrowingIdx: SidePair;
     /** Signed funding rate, + = longs pay (SCALAR_18, per second). */
     fundingRate: i128;
-    /** Last accrual timestamp, shared by both indices. */
+    /** Last accrual timestamp, unix seconds, shared by both indices. */
     accruedAt: u64;
     /** Internal funding pool, token-dec. */
     fundingPool: i128;
@@ -173,84 +152,80 @@ export interface AdlState {
 
 /**
  * Global trading parameters (instance storage singleton), mutable via the
- * owner-only `set_config`. Rates are per-second (GMX parity).
+ * owner-only `set_config`. Rates are per second.
  */
 export interface TradingConfig {
-    /** Keeper share of trade and vault fill fees (SCALAR_18). */
+    /** Keeper share of trade and vault fill fees, up to 50% (SCALAR_18). */
     keeperRate: i128;
-    /** Minimum position notional, token-dec. */
+    /** Minimum position notional, token-dec; > 0. */
     minPositionNotional: i128;
-    /** Maximum position notional, token-dec. */
+    /** Maximum position notional, token-dec; > minPositionNotional. */
     maxPositionNotional: i128;
     /** Per-side open-interest ceiling, token-dec; >= maxPositionNotional. */
     maxOpenInterest: i128;
-    /** Minimum |notional| per order, token-dec (dust floor); <= minPositionNotional. */
+    /** Minimum |notional| per order, token-dec (dust floor); > 0 and <= minPositionNotional. */
     minOrderNotional: i128;
-    /** Minimum |margin| per order, token-dec (dust floor). */
+    /** Minimum |margin| per order, token-dec (dust floor); > 0. */
     minOrderMargin: i128;
-    /** Flat keeper execution fee charged per order at creation, token-dec. */
+    /** Flat keeper execution fee charged per order at creation, token-dec; <= minOrderMargin. */
     execFee: i128;
-    /** Dominant-side trade fee (SCALAR_18). */
+    /** Dominant-side trade fee, up to 1% (SCALAR_18); >= feeNonDom. */
     feeDom: i128;
-    /** Non-dominant trade fee (SCALAR_18). */
+    /** Non-dominant trade fee, up to 1% (SCALAR_18); <= feeDom. */
     feeNonDom: i128;
-    /** Impact fee = notional * min(notional / impactScalar, MAX_IMPACT_RATE); every fill (token-dec). */
+    /** Impact-fee divisor, token-dec. Fee = `notional * min(notional / impactScalar, MAX_IMPACT_RATE)` on every fill; floored so a minPositionNotional chunk pays at most 0.1%. */
     impactScalar: i128;
-    /** Opens blocked above this; also each side's borrow-reserve denominator (SCALAR_18; util = open interest / vault). */
+    /** Opens blocked above this, in (0, 1000%]; also each side's borrow-reserve denominator (SCALAR_18; util = open interest / vault). */
     maxUtilOpen: i128;
-    /** Withdrawals blocked above this; retains min vault liquidity, >= maxUtilOpen (SCALAR_18). */
+    /** Withdrawals blocked above this; retains min vault liquidity, in [maxUtilOpen, 1000%] (SCALAR_18). */
     maxUtilWithdraw: i128;
-    /** Initial margin; max leverage = 1/initMargin (SCALAR_18). */
+    /** Initial margin; max leverage = 1/initMargin. In [0.1%, 50%] and > maintenanceMargin (SCALAR_18). */
     initMargin: i128;
-    /** Hard liquidation floor, < initMargin (SCALAR_18). */
+    /** Hard liquidation floor; > liqFee and < initMargin (SCALAR_18). */
     maintenanceMargin: i128;
-    /** Liquidation fee rate, charged on every liquidation as min(equity, ceil(liqFee * notional)); < maintenanceMargin (SCALAR_18). */
+    /** Liquidation fee rate, charged on every liquidation as min(equity, ceil(liqFee * notional)); up to 25% and < maintenanceMargin (SCALAR_18). */
     liqFee: i128;
-    /** Decrease lock on newly added notional, seconds. */
+    /** Decrease lock on newly added notional, seconds; in [15, 86400] (1 day max). */
     notionalLock: u64;
     /** Kink utilization on the normalized [0,1] reserve curve (SCALAR_18); < 1. */
     targetUtil: i128;
-    /** Borrowing-rate slope: rate = borrowRate * utilization below the kink (SCALAR_18, per second). */
+    /** Borrowing-rate slope: rate = borrowRate * utilization below the kink (SCALAR_18, per second); <= increasedBorrowRate. */
     borrowRate: i128;
-    /** Borrowing rate at full utilization (SCALAR_18, per second); in [borrowRate, MAX_BORROW_RATE]. */
+    /** Borrowing rate at full utilization (SCALAR_18, per second); in [borrowRate, 1000% APR]. */
     increasedBorrowRate: i128;
-    /** Velocity acceleration as skew widens (SCALAR_18, per second^2). */
+    /** Velocity acceleration as skew widens (SCALAR_18, per second^2); up to 1000% APR. */
     fundingIncrease: i128;
-    /** Velocity decay inside the decay band (SCALAR_18, per second^2). */
+    /** Velocity decay inside the decay band (SCALAR_18, per second^2); up to 1000% APR. */
     fundingDecrease: i128;
-    /** Skew band within which the rate holds (SCALAR_18). */
+    /** Skew band within which the rate holds (SCALAR_18); <= 100%. */
     thresholdStableFunding: i128;
     /** Skew band within which the rate decays (SCALAR_18), <= thresholdStableFunding. */
     thresholdDecreaseFunding: i128;
-    /** Charged-rate floor (SCALAR_18, per second). */
+    /** Charged-rate floor (SCALAR_18, per second); <= fundingMax. */
     fundingMin: i128;
-    /** Saved-rate hard cap (SCALAR_18, per second). */
+    /** Saved-rate hard cap (SCALAR_18, per second); up to 1000% APR. */
     fundingMax: i128;
     /** ADL trigger: side pending PnL / (vault / 2) that arms the side; in [MIN_ADL_TRIGGER, maxPnlTrader], < 1 (SCALAR_18). */
     adlMaxPnl: i128;
     /** ADL clear target on the same measure; in [MIN_ADL_CLEAR, adlMaxPnl] (SCALAR_18). */
     adlClearTarget: i128;
-    /** Realized-profit haircut threshold: while side pending PnL exceeds this fraction of half the vault, close payouts scale by allowance / side PnL, < 1 (SCALAR_18). */
+    /** Realized-profit haircut threshold: while side pending PnL exceeds this fraction of half the vault, close payouts scale by allowance / side PnL. >= adlMaxPnl and < 1 (SCALAR_18). */
     maxPnlTrader: i128;
     /** Redeem gate: redeems blocked while a side's pending PnL exceeds this fraction of half the post-redeem balance; in (0, adlMaxPnl] (SCALAR_18). */
     maxPnlWithdraw: i128;
-    /** Redeem cooldown from a vault order's createdAt, seconds; 0 = fill as soon as a post-creation price exists. */
+    /** Redeem cooldown from a vault order's createdAt, seconds; up to 2,592,000 (30 days). 0 = fill as soon as a post-creation price exists. */
     redeemLock: u64;
-    /** Deposit fill fee rate on moved assets (SCALAR_18). */
+    /** Deposit fill fee rate on moved assets (SCALAR_18); up to 1%. */
     depositFee: i128;
-    /** Redeem fill fee rate on moved assets (SCALAR_18). */
+    /** Redeem fill fee rate on moved assets (SCALAR_18); up to 1%. */
     redeemFee: i128;
-    /** Minimum assets per vault order fill, token-dec. */
+    /** Minimum assets per vault order fill, token-dec; > 0 and <= maxVaultBalance / 100. */
     minDeposit: i128;
-    /** Vault balance ceiling enforced on deposit fills, token-dec. */
+    /** Vault balance ceiling enforced on deposit fills, token-dec; > 0. */
     maxVaultBalance: i128;
 }
 
-// =============================================================================
-// Converters: TS -> ScVal
-// =============================================================================
-
-/** Encode a `TradingConfig` as an alphabetically key-ordered `ScMap`. */
+/** Encode a `TradingConfig` for the `deploy` constructor or `set_config` call. */
 export function tradingConfigToScVal(config: TradingConfig): xdr.ScVal {
     const entry = (key: string, val: xdr.ScVal) =>
         new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
@@ -293,10 +268,6 @@ export function tradingConfigToScVal(config: TradingConfig): xdr.ScVal {
         entry('threshold_stable_funding', i128Val(config.thresholdStableFunding)),
     ]);
 }
-
-// =============================================================================
-// Parsers: scValToNative output (snake_case) -> camelCase interface
-// =============================================================================
 
 /** Coerce a decoded numeric (already `bigint`, or occasionally `number`) to `bigint`. */
 function big(v: unknown): bigint {

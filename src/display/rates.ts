@@ -1,12 +1,3 @@
-// =============================================================================
-// Annualized rate display.
-//
-// The contract stores every rate as a per-second SCALAR_18 value, which is
-// unreadable in a UI. These annualize the EXACT rate computed by the market
-// mirrors — they never re-derive the kink curve or the funding velocity in
-// floats. Approximate, display only.
-// =============================================================================
-
 import type { MarketData, TradingConfig } from '../contracts/trading/trading_types.js';
 import type { PriceData } from '../trading/market/types.js';
 import {
@@ -26,12 +17,15 @@ export interface SideRates {
 }
 
 /**
- * Borrowing utilization and APR for one side, at the market's current book.
+ * Computes approximate borrowing utilization and APR for one side of the
+ * market, at its current book. For display only.
  *
- * Mirrors the accrual's own per-side measurement: each side reserves against
- * its own half of the vault, and only the dominant side (strictly greater base
- * tokens) is actually charged — a tie charges both. `charged` reports that, so
- * a UI can show the rate a side *would* pay without implying it is paying.
+ * Only the dominant side (the one holding strictly more base tokens) is
+ * actually charged the borrowing rate. A tie charges both sides. `charged`
+ * reports whether this side is charged now, so a UI can show the rate a
+ * side would pay without implying it is paying.
+ *
+ * @param vaultAssets Total vault assets, settlement-token decimals.
  */
 export function sideRates(
     market: MarketData,
@@ -53,23 +47,25 @@ export function sideRates(
 }
 
 /**
- * The market's current funding rate, annualized percent.
+ * The market's current funding rate as an approximate annualized percent,
+ * for display only.
  *
- * Positive means longs pay shorts; negative means shorts pay longs. This is the
- * stored rate, which is NOT floored at `fundingMin` — the floor applies to the
- * charged magnitude at accrual, so a very small stored rate can display below
- * the minimum it would actually be charged at. Use {@link fundingChargeApr} for
- * what a position is charged.
+ * Positive means longs pay shorts. Negative means shorts pay longs. This is
+ * the raw stored rate. It is not floored at `fundingMin`. The floor applies
+ * only to the charged magnitude at accrual, so a small stored rate can
+ * display below the minimum a position is actually charged. Use
+ * {@link fundingChargeApr} for the charged rate.
  */
 export function fundingApr(market: MarketData): number {
     return formatAnnualPercent(market.fundingRate);
 }
 
 /**
- * The funding rate a payer is actually charged, annualized percent (unsigned).
+ * The funding rate a payer is actually charged, as an approximate unsigned
+ * annualized percent. For display only.
  *
- * Mirrors the accrual's `max(|fundingRate|, fundingMin)` flooring. Zero when
- * the rate is zero, since a zero rate charges nothing at all.
+ * Applies the same floor as accrual: `max(|fundingRate|, fundingMin)`. Zero
+ * when the rate is zero, because a zero rate charges nothing.
  */
 export function fundingChargeApr(market: MarketData, config: TradingConfig): number {
     if (market.fundingRate === 0n) return 0;
@@ -79,7 +75,7 @@ export function fundingChargeApr(market: MarketData, config: TradingConfig): num
     return formatAnnualPercent(charged);
 }
 
-/** Max leverage the initial-margin requirement allows, as a float (`1 / initMargin`). */
+/** Max leverage the initial-margin requirement allows, as an approximate float (`1 / initMargin`). For display only. */
 export function maxLeverage(config: TradingConfig): number {
     if (config.initMargin === 0n) return Infinity;
     return Number(SCALAR_18) / Number(config.initMargin);

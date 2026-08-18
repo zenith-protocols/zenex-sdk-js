@@ -18,11 +18,24 @@ const GATE_REASONS: Readonly<Record<number, string>> = {
     754: 'pending PnL exceeded',
 };
 
+/**
+ * Room left before a withdrawal trips a protocol gate, evaluated at the
+ * `postVaultAssets` the caller checked. Both fields are token-dec and take
+ * the smaller of the long and short side.
+ */
 export interface VaultWithdrawHeadroom {
+    /** Reserved-notional room left before the utilization gate (contract error 714) trips. */
     utilizationHeadroom: bigint;
+    /** Pending-profit room left before the withdraw PnL gate (contract error 754) trips. */
     pnlHeadroom: bigint;
 }
 
+/**
+ * A withdraw-side protocol gate rejected the call. `code` mirrors the
+ * contract error number; the message names which gate failed.
+ * `checkVaultWithdrawGates` catches this and reports it as `CONTRACT_GATE`
+ * instead of throwing it to the caller.
+ */
 export class VaultProtocolGateError extends Error {
     constructor(readonly code: number) {
         super(
@@ -35,7 +48,21 @@ function minimum(left: bigint, right: bigint): bigint {
     return left < right ? left : right;
 }
 
-/** @internal Exact gate math for a market already accrued to the quote time. */
+/**
+ * @internal Mirror the exit gates `Market::require_utilization` and the
+ * redeem PnL check `execute_vault_order` runs after a redeem settles:
+ * reserve utilization, then pending trader PnL, both measured against
+ * `postVaultAssets`. Assumes `market` is already accrued to the quote time.
+ * Returns the headroom on each side if both gates pass.
+ *
+ * @param postVaultAssets - projected vault backing after the withdrawal, token-dec.
+ * @throws {VaultProtocolGateError} code 714 (`MarketError::UtilizationExceeded`)
+ *   if either side's reserved notional would exceed `config.maxUtilWithdraw`
+ *   of half `postVaultAssets`. A smaller withdrawal or less open interest clears it.
+ * @throws {VaultProtocolGateError} code 754 (`MarketError::PendingPnlExceeded`)
+ *   if either side's pending profit would exceed `config.maxPnlWithdraw` of
+ *   half `postVaultAssets`. A smaller withdrawal or an adverse price move clears it.
+ */
 export function evaluateVaultWithdrawGates(
     market: MarketData,
     config: TradingConfig,
@@ -89,6 +116,18 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
     );
 }
 
+/**
+ * Check whether withdrawing down to `input.postVaultAssets` clears the
+ * vault's exit gates, after advancing the market's accrual indices to
+ * `input.now`. Mirrors the same checks `quoteVaultRedeemFill` runs inline,
+ * so a caller can preview a withdrawal without quoting a full redeem.
+ *
+ * Returns `unavailable` with `CONTRACT_GATE`:
+ * - 714 if either side's reserved notional would leave the vault
+ *   under-reserved. A smaller withdrawal or less open interest clears it.
+ * - 754 if either side's pending profit would overhang the withdraw PnL cap.
+ *   A smaller withdrawal or an adverse price move clears it.
+ */
 export function checkVaultWithdrawGates(
     input: VaultGateInput,
 ): QuoteResult<VaultWithdrawHeadroom> {

@@ -27,7 +27,7 @@ import {
  * `fills` carries the exact transition the chain would execute. `rests`
  * means the order creates but does not fill now (trigger orders, or a
  * market order whose price bound is not crossed at this price). `gate`
- * means the order can never fill as constructed — the contract gate code
+ * means the order can never fill as constructed. The contract gate code
  * says why (for example #713 when a decrease would break margin).
  */
 export type OrderApplication =
@@ -87,8 +87,8 @@ function gateCode(reason: string): number {
 /**
  * Apply one order to the snapshot's position and report whether it fills,
  * rests, or gates at the given price. This is the creation pre-flight: the
- * chain accepts orders that can never fill, so callers quote here before
- * building and signing the same `OrderParams`.
+ * chain accepts orders that can never fill, so callers quote here before they
+ * build and sign the same `OrderParams`.
  */
 export function applyOrder(
     snapshot: MarketContext,

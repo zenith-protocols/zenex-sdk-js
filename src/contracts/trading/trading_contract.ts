@@ -21,12 +21,12 @@ export interface DeployArgs {
     config: TradingConfig;
 }
 
-/** Coerce a `Buffer | Uint8Array` price update into a `Buffer` for `scvBytes`. */
+/** Coerce a price update to a `Buffer`. */
 function priceBuffer(price: Buffer | Uint8Array): Buffer {
     return price instanceof Buffer ? price : Buffer.from(price);
 }
 
-/** Coerce a 32-byte feed id into a `Buffer` for `scvBytes` (`BytesN<32>`). */
+/** Coerce a 32-byte feed id to a `Buffer`. Throws if it is not 32 bytes long. */
 function feedIdBuffer(feedId: Buffer | Uint8Array): Buffer {
     if (feedId.length !== 32) {
         throw new Error(`feedId must be 32 bytes, got ${feedId.length}`);
@@ -35,10 +35,10 @@ function feedIdBuffer(feedId: Buffer | Uint8Array): Buffer {
 }
 
 /**
- * TradingContract - Operation builder for the Zenex Trading contract
- * (order -> keeper-execute flow, single market per contract instance).
+ * Builds unsigned operations for one market: order creation, keeper fill
+ * and liquidation, and reads of position and market state.
  *
- * All methods return base64-encoded XDR operations for transaction building.
+ * Every method returns a base64 XDR `Operation` string, not a result.
  */
 export class TradingContract extends Contract {
     static spec: contract.Spec = new contract.Spec(tradingSpec);
@@ -116,11 +116,10 @@ export class TradingContract extends Contract {
     };
 
     /**
-     * Deploy a new instance of the Trading contract.
+     * Build the constructor operation for a new market.
      *
-     * Constructor: `__constructor(owner, token, vault, oracle, treasury,
-     * feed_id, config)`. `MarketData` starts zeroed with its accrual
-     * timestamps at `now`; status starts `Status::Active`.
+     * `MarketData` starts zeroed with accrual timestamps at `now`; status
+     * starts `Status::Active`.
      *
      * # Errors
      * - InvalidConfig (700) if `feedId` is not a V3 (`0x0003…`) stream id, or
@@ -157,17 +156,17 @@ export class TradingContract extends Contract {
     // ============================================================
 
     /**
-     * Replace the global trading configuration.
+     * Replace the global market configuration. Owner only.
      *
-     * A borrowing- or funding-param change requires a same-ledger `accrue`,
-     * waived while `Status::Frozen`: the first accrual at unfreeze then
-     * prices the entire frozen window at the new rates. Owner only.
+     * Call `accrue` in the same ledger as a borrowing or funding rate change,
+     * unless the market is `Frozen`. The first accrual after unfreeze then
+     * prices the whole frozen window at the new rates.
      *
      * # Errors
      * - InvalidConfig (700) if a bound or range check fails.
      * - NegativeValueNotAllowed (710) if any rate, fee, or margin is negative.
-     * - MarketNotAccrued (703) if a borrowing or funding rate param changed
-     *   without a same-ledger accrual (waived while `Status::Frozen`).
+     * - MarketNotAccrued (703) if a borrowing or funding rate param changes
+     *   without a same-ledger accrual.
      */
     setConfig(config: TradingConfig): string {
         return this.call(
@@ -177,10 +176,9 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Set the contract operational status.
+     * Set the contract operational status. Owner only.
      *
-     * Transition validity follows the `Status` lifecycle. Entering
-     * `Status::Retired` sweeps the funding-pool surplus to the vault. Owner only.
+     * Entering `Status::Retired` sweeps the funding-pool surplus to the vault.
      *
      * # Errors
      * - InvalidStatus (702) on an unknown status value or an invalid transition.
@@ -194,13 +192,11 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Set or refresh the flat settlement price of a delisted market.
-     *
-     * Settable only once the delist grace window has expired. Owner only.
+     * Set or refresh the flat settlement price of a delisted market. Owner only.
      *
      * # Errors
      * - InvalidStatus (702) unless the status is `Status::Delisted` and the
-     *   grace window has expired.
+     *   delist grace window has expired.
      * - InvalidPrice (701) if `price` <= 0.
      */
     setTerminalPrice(price: i128): string {
@@ -215,22 +211,22 @@ export class TradingContract extends Contract {
     // ============================================================
 
     /**
-     * Create an `Order` for the keeper to fill.
+     * Create an `Order` for the keeper to fill. `user` authorizes.
      *
-     * The escrow moves by direct `token.transfer` inside this user-authorized
-     * call: an increase kind escrows `margin + execFee`, a decrease kind
-     * escrows the `execFee` alone. The `execFee` (read from config) pays the
-     * keeper on execution and refunds on cancel or on the position closing.
-     * A decrease's `notional` above the position size clamps to a full close
-     * at fill (`FULL_CLOSE` signals a full close).
+     * An increase escrows `margin` plus `execFee`; a decrease escrows
+     * `execFee` alone. `execFee` (read from config) pays the keeper at fill
+     * and refunds on cancel or when the position closes. A decrease that
+     * reaches or passes the position size, or that would leave a dust
+     * remainder behind, clamps to a full close at fill (`FULL_CLOSE` signals
+     * a full close).
      *
-     * @param kind - A market kind fills immediately; a limit/stop kind waits
-     *   on `triggerPrice`, unread by a market kind.
+     * @param kind - A market kind fills immediately; a limit or stop kind
+     *   waits on `triggerPrice`, unread by a market kind.
      * @param notional - Size-change magnitude (token-dec).
      * @param margin - Margin-change magnitude (token-dec).
-     * @param triggerPrice - Crossing level for a limit/stop kind (price_scalar, 18-dec).
-     * @param priceBound - Fill slippage limit (price_scalar, 18-dec); `0` = unbounded.
-     * @param expiration - Last ledger sequence the order is fillable at.
+     * @param triggerPrice - Crossing level for a limit or stop kind (price_scalar, 18-dec).
+     * @param priceBound - Fill slippage limit (price_scalar, 18-dec). `0` means unbounded.
+     * @param expiration - Last ledger sequence the order can still fill at.
      *
      * # Returns
      * - The allocated order id.
@@ -241,7 +237,7 @@ export class TradingContract extends Contract {
      * - NegativeValueNotAllowed (710) if a magnitude, `triggerPrice`, or
      *   `priceBound` is negative.
      * - InvalidOrder (732) if the shape is a no-op, a moved value is below a
-     *   dust floor, or a limit/stop kind carries a non-positive `triggerPrice`.
+     *   dust floor, or a limit or stop kind carries a non-positive `triggerPrice`.
      * - TooManyOrders (733) if the side already holds the maximum
      *   (`MAX_ORDERS_PER_SIDE` = 8) pending decrease orders.
      * - NotionalAboveMaximum (712) if an increase's `notional` exceeds `maxPositionNotional`.
@@ -264,12 +260,12 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Build the `create_order` invocation as a `Call` (contract, func, args),
-     * for batching under the trading-router's `multicall`.
+     * Build the `create_order` invocation as a `Call`, for batching under
+     * the router's `multicall`.
      *
-     * Shares its argument encoding with `createOrder`, so a bundled order is
-     * byte-identical to a direct one; the only difference is the router
-     * executes it (and the user's auth entry nests under the router call).
+     * Produces the same arguments as `createOrder`, so a batched order is
+     * byte-identical to a direct one. The router executes the call, and
+     * `user`'s auth entry nests under the router's.
      */
     createOrderCall(
         user: string,
@@ -298,7 +294,8 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Cancel a pending `Order` the caller owns and refund its escrow.
+     * Cancel a pending `Order` `user` owns and refund its escrow. `user`
+     * authorizes.
      *
      * # Returns
      * - The refunded escrow: an increase's margin plus its `execFee`, a
@@ -314,12 +311,12 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Build the `cancel_order` invocation as a `Call` (contract, func, args),
-     * for batching under the trading-router's `multicall`.
+     * Build the `cancel_order` invocation as a `Call`, for batching under
+     * the router's `multicall`.
      *
-     * Shares its argument encoding with `cancelOrder`, so a bundled cancel is
-     * byte-identical to a direct one; the only difference is the router
-     * executes it (and the user's auth entry nests under the router call).
+     * Produces the same arguments as `cancelOrder`, so a batched cancel is
+     * byte-identical to a direct one. The router executes the call, and
+     * `user`'s auth entry nests under the router's.
      */
     cancelOrderCall(user: string, id: u32): Call {
         return {
@@ -333,13 +330,20 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Create a `VaultOrder` for the keeper to fill; the deposit assets or
-     * redeem shares (plus the `execFee` in the settlement token) are escrowed
-     * in the trading contract at creation.
+     * Create a `VaultOrder` for the keeper to fill. `user` authorizes.
      *
-     * On a `Status::Retired` market a redeem skips the order and executes
-     * immediately: the vault burns the shares and pays the assets straight
-     * out; `minOut` is not applied on this path.
+     * The deposit assets or redeem shares, plus `execFee`, are escrowed at
+     * creation. On a `Status::Retired` market a redeem skips the order and
+     * pays out right away: the vault burns the shares and sends the assets
+     * straight to `user`, and `minOut` does not apply.
+     *
+     * @param kind - `Deposit` moves assets in for shares; `Redeem` moves
+     *   shares in for assets.
+     * @param amount - Assets to deposit (token-dec), or shares to redeem
+     *   (share-dec: token-dec plus the vault's decimals offset).
+     * @param minOut - Minimum received at fill, net of the vault fee: shares
+     *   for a deposit (share-dec), assets for a redeem (token-dec). `0`
+     *   means unset.
      *
      * # Returns
      * - The allocated vault order id, or `0` for a Retired-market instant redeem.
@@ -358,11 +362,12 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Build the `create_vault_order` invocation as a `Call` (contract, func,
-     * args), for batching under the trading-router's `multicall`.
+     * Build the `create_vault_order` invocation as a `Call`, for batching
+     * under the router's `multicall`.
      *
-     * Shares its argument encoding with `createVaultOrder`, so a bundled
-     * deposit or redeem is byte-identical to a direct one.
+     * Produces the same arguments as `createVaultOrder`, so a batched
+     * deposit or redeem is byte-identical to a direct one. The router
+     * executes the call, and `user`'s auth entry nests under the router's.
      */
     createVaultOrderCall(user: string, kind: VaultOrderKind, amount: i128, minOut: i128): Call {
         return {
@@ -378,12 +383,12 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Cancel a pending `VaultOrder` the caller owns and pay back the escrowed
-     * assets or shares.
+     * Cancel a pending `VaultOrder` `user` owns and pay back the escrowed
+     * assets or shares. `user` authorizes.
      *
      * # Returns
      * - The escrowed principal paid back: assets for a deposit (token-dec) or
-     *   shares for a redeem (share decimals).
+     *   shares for a redeem (share-dec).
      *
      * # Errors
      * - MarketFrozen (704) if the market status is `Frozen`.
@@ -395,11 +400,12 @@ export class TradingContract extends Contract {
     }
 
     /**
-     * Build the `cancel_vault_order` invocation as a `Call` (contract, func,
-     * args), for batching under the trading-router's `multicall`.
+     * Build the `cancel_vault_order` invocation as a `Call`, for batching
+     * under the router's `multicall`.
      *
-     * Shares its argument encoding with `cancelVaultOrder`, so a bundled
-     * cancel is byte-identical to a direct one.
+     * Produces the same arguments as `cancelVaultOrder`, so a batched
+     * cancel is byte-identical to a direct one. The router executes the
+     * call, and `user`'s auth entry nests under the router's.
      */
     cancelVaultOrderCall(user: string, id: u32): Call {
         return {
@@ -414,6 +420,7 @@ export class TradingContract extends Contract {
 
     /**
      * Pay out `user`'s accrued claimable funding balance from the pool.
+     * `user` authorizes.
      *
      * # Returns
      * - The amount paid out (token-dec).
@@ -436,6 +443,8 @@ export class TradingContract extends Contract {
     /**
      * Fill a pending `Order` at a verified price and settle it.
      *
+     * @param price - The keeper's signed price update for this market's feed.
+     *
      * # Returns
      * - The keeper's payout (token-dec).
      *
@@ -450,6 +459,9 @@ export class TradingContract extends Contract {
      * - TriggerNotMet (742) if the order's trigger has not been crossed.
      * - PriceBoundExceeded (741) if the fill price is worse than `priceBound`.
      * - PositionNotFound (720) if a decrease targets an absent position.
+     * - PositionLiquidatable (723) if a decrease targets a position whose
+     *   settled equity is already below the maintenance margin. Call
+     *   `executeLiquidation` instead.
      * - NotionalBelowMinimum (711) if the resulting position falls under the size floor.
      * - VaultInsolvent (755) if a decrease settlement's vault draw exceeds the vault balance.
      * - NotionalAboveMaximum (712) if the resulting position exceeds the size ceiling.
@@ -476,6 +488,8 @@ export class TradingContract extends Contract {
      * Eligible when equity has fallen below the maintenance margin, or
      * regardless of margin health once a `Delisted` market's 7-day delist
      * deadline has passed.
+     *
+     * @param price - The keeper's signed price update for this market's feed.
      *
      * # Returns
      * - The keeper's payout (token-dec).
@@ -505,6 +519,8 @@ export class TradingContract extends Contract {
      *
      * A flagged side blocks its increases and is eligible for `executeAdl`.
      *
+     * @param price - The keeper's signed price update for this market's feed.
+     *
      * # Returns
      * - The resulting `AdlState`.
      *
@@ -525,19 +541,28 @@ export class TradingContract extends Contract {
      *
      * Fires only on a side flagged by `updateAdlState`.
      *
+     * @param amount - Notional to close (token-dec). Clamped to the whole
+     *   position, or to a partial slice that leaves at least the minimum
+     *   position size behind.
+     * @param price - The keeper's signed price update for this market's feed.
+     *
      * # Returns
      * - The keeper's payout: the `keeperRate` cut of the trade fee (token-dec).
      *
      * # Errors
      * - MarketFrozen (704) if the market status is `Frozen` or `Retired`.
      * - AdlNotTriggered (770) if the side is not flagged for deleveraging, or
-     *   its pending PnL is already at or below `adlClearTarget`.
+     *   its pending PnL is already at or below `adlClearTarget` of half the
+     *   vault balance.
      * - PositionNotFound (720) if no position exists for `(user, isLong)`.
      * - StalePrice (740) if the effective price is older than the price the
      *   position was last marked against.
      * - AdlNotEligible (772) if the close does not reduce the side's pending PnL.
      * - AdlOvershoot (771) if the close lands the side under the clear
      *   allowance re-measured on the settled vault balance.
+     * - PositionLiquidatable (723) if the position's settled equity is
+     *   already below the maintenance margin. Call `executeLiquidation`
+     *   instead.
      * - InvalidOrder (732) if `amount` is not positive.
      * - VaultInsolvent (755) if the settlement's vault draw exceeds the vault balance.
      * - NotionalLocked (721) or NotionalBelowMinimum (711) from the
@@ -560,6 +585,8 @@ export class TradingContract extends Contract {
      * The whole order fills at once and is removed. The fill deducts the
      * vault fill fee (the `depositFee` or `redeemFee` cut of the moved assets
      * by kind), split between the keeper, the treasury, and the vault.
+     *
+     * @param price - The keeper's signed price update for this market's feed.
      *
      * # Returns
      * - The keeper's payout: the `keeperRate` cut of the vault fill fee (token-dec).
@@ -595,6 +622,8 @@ export class TradingContract extends Contract {
      * Advance both of the market's accrual indices (borrowing and funding)
      * to the current timestamp at a keeper-verified price.
      *
+     * @param price - The keeper's signed price update for this market's feed.
+     *
      * # Returns
      * - The accrued market data.
      *
@@ -612,7 +641,7 @@ export class TradingContract extends Contract {
     // Views
     // ============================================================
 
-    /** Read the trading configuration. */
+    /** Read the market configuration. */
     getConfig(): string {
         return this.call('get_config').toXDR('base64');
     }
@@ -640,8 +669,8 @@ export class TradingContract extends Contract {
      * Look up the pending keeper order `(user, id)`.
      *
      * # Returns
-     * - The stored `Order` row. The read extends the entry's TTL when
-     *   submitted on-chain; a simulated call leaves no footprint.
+     * - The stored `Order` row. The read extends the entry's time-to-live
+     *   (TTL) when submitted on-chain. A simulated call leaves no footprint.
      *
      * # Errors
      * - OrderNotFound (730) if no such order exists.
@@ -664,7 +693,7 @@ export class TradingContract extends Contract {
      *
      * # Returns
      * - The stored `VaultOrder` row. The read extends the entry's TTL when
-     *   submitted on-chain; a simulated call leaves no footprint.
+     *   submitted on-chain. A simulated call leaves no footprint.
      *
      * # Errors
      * - VaultOrderNotFound (750) if no such vault order exists.
@@ -681,8 +710,8 @@ export class TradingContract extends Contract {
      * Read `user`'s order counter.
      *
      * # Returns
-     * - The next order id; ids `1..counter` have been allocated, shared by
-     *   trade and vault orders (`1` = none yet).
+     * - The next order id. Ids `1..counter` are already allocated, shared
+     *   between trade and vault orders (`1` means none allocated yet).
      */
     getOrderCounter(user: string): string {
         return this.call(
@@ -733,9 +762,9 @@ export class TradingContract extends Contract {
      * Read the wind-down anchors.
      *
      * # Returns
-     * - `undefined` while the market has never been delisted; otherwise
-     *   `[terminalPrice, delistedAt]`, with `terminalPrice` `0` until a flat
-     *   settlement price is set (price_scalar units, seconds).
+     * - `undefined` if the market was never delisted. Otherwise
+     *   `[terminalPrice, delistedAt]`, with `terminalPrice` at `0` until a
+     *   flat settlement price is set (price_scalar units, seconds).
      */
     getRetirement(): string {
         return this.call('get_retirement').toXDR('base64');
@@ -755,22 +784,18 @@ export class TradingContract extends Contract {
     // Ownable
     // ============================================================
 
-    /**
-     * Returns the current owner, or `undefined` if ownership has been
-     * renounced.
-     */
+    /** Read the current owner. `undefined` means ownership was renounced. */
     getOwner(): string {
         return this.call('get_owner').toXDR('base64');
     }
 
     /**
-     * Initiates a 2-step ownership transfer to a new address.
+     * Start a 2-step ownership transfer to a new address. Owner only.
      *
-     * Requires authorization from the current owner. The new owner must
-     * later call `acceptOwnership()` to complete the transfer.
+     * The new owner must call `acceptOwnership` to finish the transfer.
      *
-     * `liveUntilLedger`: ledger number until which the new owner can accept.
-     * `0` cancels any pending transfer.
+     * @param liveUntilLedger - Last ledger sequence the new owner can accept
+     *   by. `0` cancels any pending transfer.
      */
     transferOwnership(newOwner: string, liveUntilLedger: u32): string {
         return this.call(
@@ -780,15 +805,15 @@ export class TradingContract extends Contract {
         ).toXDR('base64');
     }
 
-    /** Accepts a pending ownership transfer. */
+    /** Accept a pending ownership transfer. New owner authorizes. */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
 
     /**
-     * Renounces ownership of the contract.
+     * Renounce ownership of the contract. Owner only.
      *
-     * Permanently removes the owner, disabling all owner-only functions.
+     * This permanently removes the owner and disables every owner-only method.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');

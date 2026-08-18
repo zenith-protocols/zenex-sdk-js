@@ -1,18 +1,3 @@
-// =============================================================================
-// Order intents: named orders -> `OrderParams` data.
-//
-// `create_order` is one entrypoint carrying eight positional arguments whose
-// meaning depends on the `OrderKind` discriminant: a market order ignores
-// `triggerPrice`, a margin-only change sets `notional` to 0, a full close sets
-// it to the `FULL_CLOSE` sentinel. These builders encode those combinations so
-// callers name the order they want instead of memorizing the encoding.
-//
-// They return DATA, not XDR. Feed the result to `buildOrderOperation`, which
-// runs `validateOrder` against a ledger snapshot and applies the execution
-// policy. Building the operation straight off a contract binding would skip
-// both, so intents deliberately stop at the parameter object.
-// =============================================================================
-
 import type { i128, u32 } from '../../index.js';
 import type { OrderParams } from '../../contracts/router/router_types.js';
 import {
@@ -25,7 +10,11 @@ import {
 // Argument interfaces
 // =============================================================================
 
-/** Fields every position order carries, whatever its kind. */
+/**
+ * Fields every position order carries, whatever its kind. Every builder below
+ * returns `OrderParams` data, not XDR. Pass the result to `buildOrderOperation`,
+ * which validates it against a ledger snapshot before submission.
+ */
 export interface OrderIntentBase {
     /** The trading contract the order is created on. */
     trading: string;
@@ -39,48 +28,65 @@ export interface OrderIntentBase {
 
 /** Open a position at market (no trigger). */
 export interface OpenMarketArgs extends OrderIntentBase {
+    /** Size to open, token-dec. */
     notional: i128;
+    /** Margin to escrow with the position, token-dec. */
     margin: i128;
+    /** Fill slippage limit, price_scalar. 0 = unbounded. */
     priceBound: i128;
 }
 
 /** Open a position once the trigger price is crossed. */
 export interface OpenLimitArgs extends OrderIntentBase {
+    /** Size to open once the order fills, token-dec. */
     notional: i128;
+    /** Margin to escrow with the position, token-dec. */
     margin: i128;
+    /** Crossing price that makes the order eligible, price_scalar. Must be positive. */
     triggerPrice: i128;
+    /** Fill slippage limit, price_scalar. 0 = unbounded. */
     priceBound: i128;
 }
 
 /** Fully close a position at market. */
 export interface ClosePositionArgs extends OrderIntentBase {
+    /** Fill slippage limit, price_scalar. 0 = unbounded. */
     priceBound: i128;
 }
 
-/** Partially decrease a position, optionally withdrawing margin. */
+/** Decrease a position at market, optionally withdrawing margin. */
 export interface DecreasePositionArgs extends OrderIntentBase {
+    /** Size to close, token-dec. A value at or above the open size closes it fully. */
     notional: i128;
+    /** Margin to withdraw, token-dec. 0 keeps the current margin. */
     margin: i128;
+    /** Fill slippage limit, price_scalar. 0 = unbounded. */
     priceBound: i128;
 }
 
 /** Margin-only order (notional 0): add or withdraw margin without changing size. */
 export interface ModifyMarginArgs extends OrderIntentBase {
+    /** Margin to add or withdraw, token-dec. Always positive; the builder sets the direction. */
     amount: i128;
 }
 
 /** A take-profit or stop-loss trigger order. */
 export interface TriggerOrderArgs extends OrderIntentBase {
+    /** Crossing price that makes the order eligible, price_scalar. Must be positive. */
     triggerPrice: i128;
-    /** Size to close on trigger; defaults to `FULL_CLOSE`. */
+    /** Size to close on trigger, token-dec. Defaults to `FULL_CLOSE`, which closes the whole position. */
     notional?: i128;
+    /** Fill slippage limit, price_scalar. 0 = unbounded. */
     priceBound: i128;
 }
 
 /** Deposit assets into the vault. */
 export interface VaultDepositArgs {
+    /** The trading contract the order is created on. */
     trading: string;
+    /** The order owner. */
     user: string;
+    /** Assets to deposit, token-dec. */
     amount: i128;
     /** Minimum shares received at fill, net of the deposit fee; 0 = unset. */
     minOut: i128;
@@ -88,8 +94,11 @@ export interface VaultDepositArgs {
 
 /** Redeem vault shares for assets. */
 export interface VaultRedeemArgs {
+    /** The trading contract the order is created on. */
     trading: string;
+    /** The order owner. */
     user: string;
+    /** Shares to redeem, vault share decimals. */
     shares: i128;
     /** Minimum assets received at fill, net of the redeem fee; 0 = unset. */
     minOut: i128;
@@ -103,7 +112,7 @@ export interface VaultOrderParams {
     user: string;
     /** Deposit or Redeem. */
     kind: VaultOrderKind;
-    /** Assets to deposit, or shares to redeem; token-dec. */
+    /** Assets to deposit, token-dec, or shares to redeem, vault share decimals. */
     amount: i128;
     /** Minimum output at fill, net of the vault fee; 0 = unset. */
     minOut: i128;
@@ -113,7 +122,11 @@ export interface VaultOrderParams {
 // Position orders
 // =============================================================================
 
-/** Open (or add to) a position at market: `MarketIncrease`, `triggerPrice` unread. */
+/**
+ * Open or add to a position at market (`MarketIncrease`). Fills `notional`,
+ * `margin`, and `priceBound` from the caller. `triggerPrice` is always 0; a
+ * market kind never reads it.
+ */
 export function openMarketParams(args: OpenMarketArgs): OrderParams {
     return {
         trading: args.trading,
@@ -148,8 +161,10 @@ export function openLimitParams(args: OpenLimitArgs): OrderParams {
 }
 
 /**
- * Fully close a position at market: `MarketDecrease` with the `FULL_CLOSE`
- * notional sentinel and no margin withdrawal.
+ * Fully close a position at market (`MarketDecrease`). `notional` is always
+ * `FULL_CLOSE`, which tells the contract to close the entire position.
+ * `margin` is always 0, so nothing is withdrawn beyond the closed proceeds.
+ * `triggerPrice` is always 0; a market kind never reads it.
  */
 export function closePositionParams(args: ClosePositionArgs): OrderParams {
     return {
@@ -165,7 +180,10 @@ export function closePositionParams(args: ClosePositionArgs): OrderParams {
     };
 }
 
-/** Partially decrease a position at market, optionally withdrawing margin. */
+/**
+ * Decrease a position at market (`MarketDecrease`), optionally withdrawing
+ * margin. `triggerPrice` is always 0; a market kind never reads it.
+ */
 export function decreasePositionParams(
     args: DecreasePositionArgs,
 ): OrderParams {
@@ -182,7 +200,11 @@ export function decreasePositionParams(
     };
 }
 
-/** Add margin to a position without changing its size (`notional` 0). */
+/**
+ * Add margin to a position without changing its size (`MarketIncrease` with
+ * `notional` fixed at 0). `triggerPrice` is always 0 and unread by a market
+ * kind. `priceBound` is always 0, so the fill has no slippage limit.
+ */
 export function addMarginParams(args: ModifyMarginArgs): OrderParams {
     return {
         trading: args.trading,
@@ -197,7 +219,11 @@ export function addMarginParams(args: ModifyMarginArgs): OrderParams {
     };
 }
 
-/** Withdraw margin from a position without changing its size (`notional` 0). */
+/**
+ * Withdraw margin from a position without changing its size (`MarketDecrease`
+ * with `notional` fixed at 0). `triggerPrice` is always 0 and unread by a
+ * market kind. `priceBound` is always 0, so the fill has no slippage limit.
+ */
 export function withdrawMarginParams(args: ModifyMarginArgs): OrderParams {
     return {
         trading: args.trading,
@@ -213,9 +239,9 @@ export function withdrawMarginParams(args: ModifyMarginArgs): OrderParams {
 }
 
 /**
- * Place a take-profit trigger (`LimitDecrease`): a decrease that fires when the
- * price crosses the trigger favorably (upside for a long, downside for a
- * short). Defaults to a full close.
+ * Place a take-profit trigger (`LimitDecrease`): closes size when the price
+ * crosses `triggerPrice` favorably, upside for a long and downside for a
+ * short. `margin` is always 0; a trigger order never withdraws margin.
  */
 export function takeProfitParams(args: TriggerOrderArgs): OrderParams {
     return {
@@ -232,9 +258,9 @@ export function takeProfitParams(args: TriggerOrderArgs): OrderParams {
 }
 
 /**
- * Place a stop-loss trigger (`StopDecrease`): a decrease that fires when the
- * price crosses the trigger adversely (downside for a long, upside for a
- * short). Defaults to a full close.
+ * Place a stop-loss trigger (`StopDecrease`): closes size when the price
+ * crosses `triggerPrice` adversely, downside for a long and upside for a
+ * short. `margin` is always 0; a trigger order never withdraws margin.
  */
 export function stopLossParams(args: TriggerOrderArgs): OrderParams {
     return {

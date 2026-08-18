@@ -1,19 +1,3 @@
-// =============================================================================
-// MarketUser — one subject's state on one market, in a single
-// `getLedgerEntries`.
-//
-// Separate from `Market` because it refreshes on a different clock: market
-// state moves with every fill, a user's own state only with their own activity,
-// so a consumer caches them under different keys and invalidates the user's on
-// their own trades. Following Blend, the accessors that interpret this state
-// require the `Market` it belongs to — a position is meaningless without the
-// market that prices it.
-//
-// Both sides are read unconditionally. They are two keys in a batch that is
-// already round-tripping, and a caller almost always wants to know whether the
-// opposite side exists.
-// =============================================================================
-
 import type { xdr } from '@stellar/stellar-sdk';
 import { scValToNative } from '@stellar/stellar-sdk';
 import type { Network } from '../index.js';
@@ -52,9 +36,13 @@ export interface MarketUserData {
     readonly market: string;
     /** Position owner. */
     readonly user: string;
-    /** Long side; zeroed when never opened. */
+    /**
+     * Long side. Zeroed when never opened. An entry evicted after its TTL
+     * archived also reads as zeroed, so a zeroed side is not always proof the
+     * side was never opened.
+     */
     readonly long: Position;
-    /** Short side; zeroed when never opened. */
+    /** Short side. See {@link MarketUserData.long} for the zeroed case. */
     readonly short: Position;
     /** Next order id for this user (trade + vault), allocated from 1. */
     readonly orderCounter: number;
@@ -87,13 +75,9 @@ function decodeUser(
 ): MarketUserData {
     const keys = marketUserKeys(market, user);
 
-    // ARCHIVAL AMBIGUITY: a RETURNED-but-expired Position fails closed via the
-    // TTL guard inside the batch. An ABSENT Position is still ambiguous: it can
-    // mean "this side was never opened" (`Position::zeroed`) OR "the entry was
-    // TTL-archived and evicted" — Position sits in the 100/120-day persistent
-    // tier, and `getLedgerEntries` cannot see evicted entries. A simulation
-    // can (`rpc.Api.isSimulationRestore`), so disambiguating means probing
-    // `get_position` when the key is absent.
+    // An absent Position is ambiguous: never opened, or TTL-archived and
+    // evicted. `getLedgerEntries` cannot see an evicted entry, but a
+    // simulation can (`rpc.Api.isSimulationRestore`).
     // TODO(archival): probe on absence before decoding as "never opened".
     const side = (key: xdr.LedgerKey, label: string): Position => {
         const value = batch.at(key, label);
@@ -126,7 +110,12 @@ function decodeUser(
 export class MarketUser {
     private constructor(readonly state: MarketUserData) {}
 
-    /** Read one subject's state. One `getLedgerEntries`, four keys. */
+    /**
+     * Read one subject's state. One `getLedgerEntries`, four keys.
+     *
+     * @throws {MarketStateError} `MISSING_STATE` when a returned entry's TTL
+     *   has lapsed.
+     */
     static async load(
         network: Network,
         contracts: Pick<MarketContracts, 'market'>,
@@ -144,8 +133,10 @@ export class MarketUser {
 
     /**
      * Read many subjects on one market in a single `getLedgerEntries`, in
-     * request order. This is the shape an indexer wants and the old
-     * one-user-per-market request could not express.
+     * request order.
+     *
+     * @throws {MarketStateError} `MISSING_STATE` when a returned entry's TTL
+     *   has lapsed.
      */
     static async loadMany(
         network: Network,
@@ -198,8 +189,12 @@ export class MarketUser {
      * Sides this subject currently holds, in `[long, short]` order.
      *
      * Takes the {@link Market} it belongs to so the pairing is checked rather
-     * than assumed — reading a user against the wrong market silently produces
-     * zeroed positions, which is exactly the failure this guards.
+     * than assumed. Reading a user against the wrong market would otherwise
+     * silently produce zeroed positions, which is exactly the failure this
+     * guards against.
+     *
+     * @throws {Error} When `market` is not the market this user state was
+     *   read from.
      */
     openSides(market: Market): boolean[] {
         if (market.contracts.market !== this.state.market) {

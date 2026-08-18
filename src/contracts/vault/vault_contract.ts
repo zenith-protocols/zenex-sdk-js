@@ -20,10 +20,9 @@ export interface VaultConstructorArgs {
 }
 
 /**
- * Operation builder for the Zenex Strategy Vault contract (collateral vault
- * for one market; shares are an OpenZeppelin fungible token).
- *
- * All methods return base64-encoded XDR operations for transaction building.
+ * Operation builder for the Zenex Strategy Vault contract: the collateral
+ * vault for one market. Every method returns a base64-encoded XDR
+ * operation for transaction building.
  */
 export class VaultContract extends Contract {
     /** Parsed contract spec, used to decode simulation/invocation results. */
@@ -70,7 +69,6 @@ export class VaultContract extends Contract {
      * with the given constructor args (share metadata, asset, decimals
      * offset, strategy).
      * @param format - Encoding of `wasmHash` when passed as a string
-     * @returns Base64-encoded XDR operation
      */
     static deploy(
         deployer: string,
@@ -99,27 +97,18 @@ export class VaultContract extends Contract {
     // FungibleToken Methods (Share Token)
     // ============================================================
 
-    /**
-     * Get total supply of vault shares (share-dec).
-     * @returns XDR operation string
-     */
+    /** Get total supply of vault shares (share-dec). */
     totalSupply(): string {
         return this.call('total_supply').toXDR('base64');
     }
 
-    /**
-     * Get an account's share balance (share-dec).
-     * @returns XDR operation string
-     */
+    /** Get an account's share balance (share-dec). */
     balance(account: Address | string): string {
         const addr = typeof account === 'string' ? Address.fromString(account) : account;
         return this.call('balance', addr.toScVal()).toXDR('base64');
     }
 
-    /**
-     * Get the remaining share allowance (share-dec) `spender` may transfer from `owner`.
-     * @returns XDR operation string
-     */
+    /** Get the remaining share allowance (share-dec) `spender` may transfer from `owner`. */
     allowance(owner: Address | string, spender: Address | string): string {
         const ownerAddr = typeof owner === 'string' ? Address.fromString(owner) : owner;
         const spenderAddr = typeof spender === 'string' ? Address.fromString(spender) : spender;
@@ -129,7 +118,6 @@ export class VaultContract extends Contract {
     /**
      * Transfer shares from `from` to `to`. `from` must authorize the call.
      * @param amount - Shares to transfer (share-dec)
-     * @returns XDR operation string
      */
     transfer(from: Address | string, to: Address | string, amount: i128): string {
         const fromAddr = typeof from === 'string' ? Address.fromString(from) : from;
@@ -146,7 +134,6 @@ export class VaultContract extends Contract {
      * Transfer shares from `from` to `to`, spending `spender`'s allowance.
      * `spender` must authorize the call.
      * @param amount - Shares to transfer (share-dec)
-     * @returns XDR operation string
      */
     transferFrom(
         spender: Address | string,
@@ -171,7 +158,6 @@ export class VaultContract extends Contract {
      * `owner` must authorize the call.
      * @param amount - Shares approved (share-dec)
      * @param liveUntilLedger - Ledger sequence at which the approval expires
-     * @returns XDR operation string
      */
     approve(
         owner: Address | string,
@@ -193,24 +179,17 @@ export class VaultContract extends Contract {
     /**
      * Get the share token's decimals: the asset's decimals plus the
      * constructor's `decimals_offset`.
-     * @returns XDR operation string
      */
     decimals(): string {
         return this.call('decimals').toXDR('base64');
     }
 
-    /**
-     * Get the share token's name
-     * @returns XDR operation string
-     */
+    /** Get the share token's name. */
     name(): string {
         return this.call('name').toXDR('base64');
     }
 
-    /**
-     * Get the share token's symbol
-     * @returns XDR operation string
-     */
+    /** Get the share token's symbol. */
     symbol(): string {
         return this.call('symbol').toXDR('base64');
     }
@@ -219,10 +198,7 @@ export class VaultContract extends Contract {
     // Vault Views
     // ============================================================
 
-    /**
-     * Get the underlying settlement token's address
-     * @returns XDR operation string
-     */
+    /** Get the underlying settlement token's address. */
     queryAsset(): string {
         return this.call('query_asset').toXDR('base64');
     }
@@ -230,16 +206,14 @@ export class VaultContract extends Contract {
     /**
      * Get the registered strategy (market contract) address; the only
      * address authorized to call the strategy mutations.
-     * @returns XDR operation string
      */
     getStrategy(): string {
         return this.call('get_strategy').toXDR('base64');
     }
 
     /**
-     * Get the vault's total assets (token-dec): exactly the vault contract's
-     * settlement-token `Balance`, before any pending-PnL mark.
-     * @returns XDR operation string
+     * Get the vault's total assets (token-dec): the vault contract's raw
+     * settlement-token balance, before any pending-PnL mark.
      */
     totalAssets(): string {
         return this.call('total_assets').toXDR('base64');
@@ -247,10 +221,13 @@ export class VaultContract extends Contract {
 
     /**
      * Preview the shares a deposit of `assets` would mint at the
-     * uPnL-marked share price (rounded down)
-     * @param assets - Assets to quote (token-dec)
-     * @param netPnl - Signed pending trader PnL marked against the vault (token-dec)
-     * @returns XDR operation string
+     * uPnL-marked share price, rounded down.
+     * @param assets - Assets to quote (token-dec); traps with `InvalidAmount`
+     *   (800) if negative
+     * @param netPnl - Signed pending trader PnL to mark against the vault
+     *   (token-dec). The caller supplies this value; the vault cannot verify
+     *   it. Traps with `PnlExceedsAssets` (801) if it exceeds the vault's
+     *   total assets.
      */
     previewDeposit(assets: i128, netPnl: i128): string {
         return this.call(
@@ -262,10 +239,13 @@ export class VaultContract extends Contract {
 
     /**
      * Preview the assets a redemption of `shares` would pay at the
-     * uPnL-marked share price (rounded down)
-     * @param shares - Shares to quote (share decimals)
-     * @param netPnl - Signed pending trader PnL marked against the vault (token-dec)
-     * @returns XDR operation string
+     * uPnL-marked share price, rounded down.
+     * @param shares - Shares to quote (share-dec); traps with `InvalidAmount`
+     *   (800) if negative
+     * @param netPnl - Signed pending trader PnL to mark against the vault
+     *   (token-dec). The caller supplies this value; the vault cannot verify
+     *   it. Traps with `PnlExceedsAssets` (801) if it exceeds the vault's
+     *   total assets.
      */
     previewRedeem(shares: i128, netPnl: i128): string {
         return this.call(
@@ -281,14 +261,16 @@ export class VaultContract extends Contract {
 
     /**
      * Deposit `assets` and mint the uPnL-priced shares to `receiver`;
-     * returns the shares minted (share decimals, rounded down in the
-     * vault's favor). Strategy auth required.
-     * @param assets - Assets to deposit (token-dec)
+     * returns the shares minted (share-dec, rounded down in the vault's
+     * favor). Strategy auth required.
+     * @param assets - Assets to deposit (token-dec); traps with
+     *   `InvalidAmount` (800) if not positive
      * @param receiver - Address receiving the minted shares
      * @param from - Address providing the assets
      * @param netPnl - Signed pending trader PnL marked against the vault
-     *   (token-dec); positive is profit the vault still owes
-     * @returns XDR operation string
+     *   (token-dec); positive is profit the vault still owes. The caller
+     *   supplies this value; the vault cannot verify it. Traps with
+     *   `PnlExceedsAssets` (801) if it exceeds the vault's total assets.
      */
     strategyDeposit(
         assets: i128,
@@ -311,12 +293,14 @@ export class VaultContract extends Contract {
      * Redeem `shares` from `owner` and pay the uPnL-priced assets to
      * `receiver`; returns the assets paid (token-dec, rounded down in the
      * vault's favor). Strategy auth required.
-     * @param shares - Shares to burn (share decimals)
+     * @param shares - Shares to burn (share-dec); traps with `InvalidAmount`
+     *   (800) if not positive
      * @param receiver - Address receiving the redeemed assets
      * @param owner - Address whose shares are burned
      * @param netPnl - Signed pending trader PnL marked against the vault
-     *   (token-dec); positive is profit the vault still owes
-     * @returns XDR operation string
+     *   (token-dec); positive is profit the vault still owes. The caller
+     *   supplies this value; the vault cannot verify it. Traps with
+     *   `PnlExceedsAssets` (801) if it exceeds the vault's total assets.
      */
     strategyRedeem(
         shares: i128,
@@ -336,11 +320,11 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Strategy (trading contract) withdraws tokens from the vault to pay
-     * winning positions. Decreases `total_assets` and thus share price.
+     * Strategy (market contract) withdraws tokens from the vault to pay
+     * winning positions. Decreases `total_assets` and thus the share price.
      * Strategy auth required.
-     * @param amount - Assets to withdraw to the strategy (token-dec)
-     * @returns XDR operation string
+     * @param amount - Assets to withdraw to the strategy (token-dec); traps
+     *   with `InvalidAmount` (800) if not positive
      */
     strategyWithdraw(amount: i128): string {
         return this.call(

@@ -2,19 +2,19 @@ import { xdr, scValToBigInt, scValToNative } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
 export interface OracleInstanceState {
-    /** Chainlink Data Streams verifier contract whose DON signatures gate every report. */
+    /** Chainlink Data Streams verifier contract address. */
     verifier: string;
-    /** Max report age for order fills, in seconds (3..=15); also the forward-skew allowance applied to close-staleness verifications. */
+    /** Max report age for order fills (seconds); in [3, 15]. */
     tradeStaleness: bigint;
-    /** Max report age for gap-closing calls (liquidation/ADL/accrual), in seconds (tradeStaleness..=120); past side only, forward allowance stays at tradeStaleness. */
+    /** Max report age for gap-closing calls (seconds); in [tradeStaleness, 120]. */
     closeStaleness: bigint;
-    /** Bid/ask narrowing toward the mid, SCALAR_18-scaled fraction in [0, SCALAR_18]; 0 = off, SCALAR_18 = collapse to mid. */
+    /** Bid/ask narrowing toward the mid (SCALAR_18-scaled); in [0, SCALAR_18]. 0 = off, SCALAR_18 = collapse to the mid. */
     spreadReductionFactor: bigint;
-    /** Config admin; absent once ownership has been renounced. */
+    /** Config admin address. Absent once ownership is renounced. */
     owner?: string;
 }
 
-/** Throws unless `Verifier`, both staleness windows and the spread factor are set. */
+/** Parse the oracle's on-chain config. Throws if the verifier, either staleness window, or the spread factor is missing. */
 export function parseOracleInstance(
     instanceVal: xdr.ScVal,
 ): OracleInstanceState {

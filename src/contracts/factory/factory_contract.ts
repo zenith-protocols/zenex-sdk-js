@@ -5,11 +5,11 @@ import { TradingConfig, tradingConfigToScVal } from '../trading/trading_types.js
 
 /**
  * Deployment inputs for the markets this factory creates. Replaceable by the
- * owner via `set_init_meta`; already-deployed markets are unaffected by a
- * later change.
+ * owner through `set_init_meta`. A later change does not affect markets
+ * already deployed.
  */
 export interface FactoryInitMeta {
-    /** WASM hash of the trading (market) contract installed on new deploys. */
+    /** WASM hash of the trading contract installed on new deploys. */
     trading_hash: Buffer | Uint8Array;
     /** Treasury address wired into every newly deployed trading contract. */
     treasury: string;
@@ -23,9 +23,8 @@ export interface FactoryConstructorArgs {
 }
 
 /**
- * FactoryContract - Operation builder for the Zenex Factory contract
- *
- * Deploys an isolated trading + strategy-vault pair per market.
+ * Operation builder for the Zenex Factory contract (deploys an isolated
+ * trading and strategy-vault pair for each market).
  *
  * All methods return base64-encoded XDR operations for transaction building.
  */
@@ -44,13 +43,14 @@ export class FactoryContract extends Contract {
     /**
      * Deploy a new instance of the Factory contract.
      *
-     * Initialize the factory with compiled WASM hashes and the treasury address.
+     * Constructor: `__constructor(owner, init_meta)`. `args.init_meta` sets
+     * the trading and vault WASM hashes and the treasury address that
+     * future `deployMarket` calls use.
      *
-     * Constructor: `__constructor(init_meta)`.
-     *
-     * # Parameters
-     * - `init_meta` - [`FactoryInitMeta`] containing `trading_hash`, `vault_hash`,
-     *   and `treasury` address
+     * # Errors
+     * - This builder encodes only `init_meta` into `constructorArgs`. The
+     *   deployed constructor also takes `owner` as its first argument, so
+     *   the resulting operation fails.
      */
     static deploy(
         deployer: string,
@@ -96,36 +96,33 @@ export class FactoryContract extends Contract {
     // ============================================================
 
     /**
-     * Deploy a single-market pair (strategy-vault + trading contract) atomically
-     * and return the `(trading, vault)` address tuple.
+     * Deploy a single-market pair (strategy-vault and trading contract)
+     * atomically, and return the `(trading, vault)` address pair.
      *
-     * The vault is registered as the trading contract's collateral vault and the
-     * trading contract as the vault's immutable strategy. Both addresses derive
-     * from `admin` and the salts, so a salt alone cannot be front-run by another
-     * deployer.
+     * The vault becomes the trading contract's collateral vault, and the
+     * trading contract becomes the vault's immutable strategy. Both
+     * addresses derive from `admin` and the salts, so a salt alone cannot
+     * be front-run by another deployer. `admin` must authorize the call and
+     * both deployments. It becomes the owner of the new trading contract.
      *
-     * # Authorization
-     * - `admin` must authorize the call and both deployments; it becomes the
-     *   owner of the new trading contract.
-     *
-     * # Arguments
-     * - `salt` - Salt for the trading address; the vault salt is derived from it
-     * - `token` - Collateral token address (settlement token for both contracts)
-     * - `oracle` - Oracle contract address (Chainlink Data Streams verifier wrapper)
-     * - `feedId` - 32-byte Chainlink Data Streams stream id of the market
-     *   (immutable on trading)
-     * - `config` - Initial trading `TradingConfig`
-     * - `vaultName` / `vaultSymbol` - Vault share token metadata
-     * - `vaultDecimalsOffset` - Extra share decimals (inflation attack mitigation)
-     *
-     * # Errors
-     * - Propagates the trading constructor's validation: `InvalidConfig` if
-     *   `config` fails its bounds or `feedId` is not a V3 stream id
-     *   (`0x0003` prefix), `NegativeValueNotAllowed` if a rate, fee, or
-     *   margin is negative.
+     * @param salt - Salt for the trading address. The vault salt derives from it.
+     * @param token - Collateral token used by both the trading contract and the vault.
+     * @param oracle - Oracle contract that supplies prices for `feedId`.
+     * @param feedId - 32-byte Data Streams stream id for the market. Fixed
+     *   for the life of the deployed trading contract.
+     * @param config - Initial `TradingConfig` for the deployed trading contract.
+     * @param vaultDecimalsOffset - Extra decimals on the vault's share
+     *   token. Higher values reduce inflation-attack risk on share pricing.
      *
      * # Returns
-     * - The `(trading, vault)` address tuple; parse with `parsers.deployMarket`.
+     * - The `(trading, vault)` address pair. Parse with `parsers.deployMarket`.
+     *
+     * # Errors
+     * - Propagates the trading contract's constructor validation.
+     * - `InvalidConfig` (700) if `config` fails its bounds, or `feedId` is
+     *   not a V3 (`0x0003…`) stream id.
+     * - `NegativeValueNotAllowed` (710) if a rate, fee, or margin in
+     *   `config` is negative.
      *
      * # Events
      * - Emits `Deploy` with topics `(trading: Address, vault: Address)`.
@@ -162,8 +159,8 @@ export class FactoryContract extends Contract {
     // ============================================================
 
     /**
-     * Returns whether `tradingId` was deployed by this factory. Never throws
-     * — an address never deployed here simply decodes to `false`.
+     * Returns whether `tradingId` was deployed by this factory. An address
+     * that this factory never deployed decodes to `false` rather than an error.
      */
     isDeployed(tradingId: string): string {
         return this.call(

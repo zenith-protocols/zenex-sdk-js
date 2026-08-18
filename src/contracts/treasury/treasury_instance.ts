@@ -4,11 +4,11 @@ import { instanceStorage } from '../instance.js';
 export interface TreasuryInstanceState {
     /** Protocol fee rate (SCALAR_18 fraction); `0n` when unset. */
     rate: bigint;
-    /** Rate/withdrawal admin; absent once ownership has been renounced. */
+    /** Rate and withdrawal admin; absent once ownership has been renounced. */
     owner?: string;
 }
 
-/** Never throws on a treasury instance: both slots have defaults. */
+/** Never throws on a treasury instance. Both slots have a default. */
 export function parseTreasuryInstance(
     instanceVal: xdr.ScVal,
 ): TreasuryInstanceState {

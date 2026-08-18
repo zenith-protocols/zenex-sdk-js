@@ -2,7 +2,7 @@
 // Display layer: float views over the SDK's exact math.
 //
 // Everything exported here returns approximate `number` values intended for
-// rendering. None of it may be fed back into a transaction — quote with
+// rendering. None of it may be fed back into a transaction. Quote with
 // `quotePositionAction` / `quoteTradeFees` and parse input with `parseAtomic`.
 //
 // It lives outside `src/math/` and `src/trading/` so the architecture linter can

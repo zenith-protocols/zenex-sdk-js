@@ -5,10 +5,7 @@ import {
     parseOrder, parseVaultOrder, parseSidePair, parseTradingConfig,
 } from './trading_types.js';
 
-/**
- * Discriminates a decoded {@link TradingEvent}; each value is the contract's
- * snake_case `#[contractevent]` name and its first emitted topic.
- */
+/** Discriminates a decoded {@link TradingEvent}. */
 export enum TradingEventType {
     CreateOrder = 'create_order',
     CancelOrder = 'cancel_order',
@@ -30,13 +27,7 @@ export enum TradingEventType {
     Liquidation = 'liquidation',
 }
 
-/**
- * Common shape decoded from every market contract `#[contractevent]`. Topics
- * are `[<snake_case event name>, ...#[topic] fields in declaration order]`;
- * every other field lands in the data map. Nested structs (`order`,
- * `config`, the accrual `SidePair`s) decode through the `trading_types`
- * parsers into the same camelCase interfaces used elsewhere in the SDK.
- */
+/** Base shape shared by every decoded market contract event. */
 export interface BaseTradingEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Trading;
     eventType: TradingEventType;
@@ -55,17 +46,17 @@ export interface TradingCreateOrderEvent extends BaseTradingEvent {
 }
 
 /**
- * Pending order cancelled: by its owner via `cancel_order` (the refund pays
- * in its own transfer), or by the closure sweep that cancels every decrease
- * order still resting on a side whose position closed (the refunds ride the
- * same-tx `close_fill`/`liquidation` payout transfer, one receipt per swept
- * order).
+ * Pending order cancelled by its owner via `cancel_order`, or by the closure
+ * sweep that cancels every decrease order resting on a side whose position
+ * closed. A direct cancel pays the refund in its own transfer. A swept
+ * cancel's refund rides the same-tx `close_fill` or `liquidation` payout
+ * transfer, one receipt per swept order.
  */
 export interface TradingCancelOrderEvent extends BaseTradingEvent {
     eventType: TradingEventType.CancelOrder;
     user: string;
     orderId: u32;
-    /** Escrow returned by this cancel (`Order::escrow_amount`), token-dec. */
+    /** Escrow returned by this cancel, token-dec. */
     refund: i128;
 }
 
@@ -96,9 +87,9 @@ export interface TradingDepositFillEvent extends BaseTradingEvent {
     orderId: u32;
     /** The keeper rewarded for the fill. */
     keeper: string;
-    /** Gross assets moved from escrow, token-dec. */
+    /** Gross assets moved from escrow, token-dec. The vault receives assets - fee. */
     assets: i128;
-    /** Shares minted to the depositor. */
+    /** Shares minted to the user. */
     shares: i128;
     /** Vault fill fee deducted (keeper, treasury, and vault cuts), token-dec. */
     fee: i128;
@@ -110,15 +101,14 @@ export interface TradingDepositFillEvent extends BaseTradingEvent {
 export interface TradingRedeemFillEvent extends BaseTradingEvent {
     eventType: TradingEventType.RedeemFill;
     user: string;
-    /** Order id; `0` marks a Retired-market instant redeem (see `source`). */
     orderId: u32;
-    /** `'order'` for a keeper fill of a pending order, `'instant'` for a Retired-market direct redeem (orderId `0`). */
+    /** `'order'` for a keeper fill of a pending order, `'instant'` for a Retired-market direct redeem. */
     source: 'order' | 'instant';
-    /** The keeper rewarded for the fill; the user themselves on an instant redeem. */
+    /** The keeper rewarded for the fill. On an instant redeem, this is the user. */
     keeper: string;
-    /** Shares burned. */
+    /** Shares burned from escrow. */
     shares: i128;
-    /** Gross assets redeemed (the user is paid assets - fee), token-dec. */
+    /** Gross assets redeemed, token-dec. The user is paid assets - fee. */
     assets: i128;
     /** Vault fill fee deducted (keeper, treasury, and vault cuts), token-dec. */
     fee: i128;
@@ -166,7 +156,7 @@ export interface TradingBorrowingAccrualEvent extends BaseTradingEvent {
 /** Operational status changed via `set_status`. */
 export interface TradingStatusUpdateEvent extends BaseTradingEvent {
     eventType: TradingEventType.StatusUpdate;
-    /** The new operational status (Status discriminant). */
+    /** The new status, as a `Status` discriminant. */
     status: u32;
 }
 
@@ -180,14 +170,14 @@ export interface TradingConfigUpdateEvent extends BaseTradingEvent {
 /** Flat settlement price set or refreshed via `set_terminal_price`. */
 export interface TradingTerminalPriceUpdateEvent extends BaseTradingEvent {
     eventType: TradingEventType.TerminalPriceUpdate;
-    /** Flat settlement price (price_scalar units). */
+    /** Flat settlement price, price_scalar units. */
     price: i128;
 }
 
 /**
- * A keeper fill of an increase order that OPENS the side (no prior position);
- * an increase on an already-open position emits `increase_fill` instead, which
- * additionally settles funding and borrowing.
+ * A keeper fill of an increase order that opens the side. There was no
+ * prior position. An increase on an already-open position emits
+ * `increase_fill` instead, which also settles funding and borrowing.
  */
 export interface TradingOpenFillEvent extends BaseTradingEvent {
     eventType: TradingEventType.OpenFill;
@@ -196,7 +186,7 @@ export interface TradingOpenFillEvent extends BaseTradingEvent {
     isLong: boolean;
     /** The keeper rewarded for the fill. */
     keeper: string;
-    /** Entry-side execution price (ask long / bid short), price_scalar units. */
+    /** Entry-side execution price (ask for a long, bid for a short), price_scalar units. */
     price: i128;
     /** Size opened, token-dec. */
     notional: i128;
@@ -218,13 +208,13 @@ export interface TradingIncreaseFillEvent extends BaseTradingEvent {
     isLong: boolean;
     /** The keeper rewarded for the fill. */
     keeper: string;
-    /** Entry-side execution price (ask long / bid short), price_scalar units. */
+    /** Entry-side execution price (ask for a long, bid for a short), price_scalar units. */
     price: i128;
     /** Size added, token-dec. */
     notional: i128;
     /** Base size bought, base-dec. */
     tokens: i128;
-    /** Margin pulled from escrow, token-dec. */
+    /** Margin pulled from the trader, token-dec. */
     margin: i128;
     /** Trade fee charged, token-dec. */
     baseFee: i128;
@@ -237,26 +227,21 @@ export interface TradingIncreaseFillEvent extends BaseTradingEvent {
 }
 
 /**
- * A keeper fill of a partial decrease (the position survives the fill).
+ * A keeper fill of a partial decrease. The position survives the fill.
  *
- * `notional` and `tokens` are the closed fraction at ENTRY pricing (what
- * leaves the position), so `notional * SCALAR_18 / tokens` is the entry
- * price of the closed chunk; `price` is the exit price the close settled at.
- * `margin` and `pnl` are gross of the itemized fees; `returned` is the
- * actual payout: the withdrawal plus the profit leg, less the fees they
- * cover (a realized loss debits the surviving margin, never the payout).
+ * `notional` and `tokens` are the closed fraction at entry pricing, so
+ * `notional * SCALAR_18 / tokens` is the entry price of the closed chunk.
  */
 export interface TradingDecreaseFillEvent extends BaseTradingEvent {
     eventType: TradingEventType.DecreaseFill;
     user: string;
-    /** Order id; `0` marks an ADL close (see `source`). */
     orderId: u32;
-    /** `'order'` for a keeper fill of a user order, `'adl'` for an ADL close (orderId `0`). */
+    /** `'order'` for a keeper fill of a user order, `'adl'` for an ADL close. */
     source: 'order' | 'adl';
     isLong: boolean;
     /** The keeper rewarded for the fill. */
     keeper: string;
-    /** Exit-side execution price (bid long / ask short), price_scalar units. */
+    /** Exit-side execution price (bid for a long, ask for a short), price_scalar units. */
     price: i128;
     /** Closed size at entry pricing, token-dec. */
     notional: i128;
@@ -274,31 +259,21 @@ export interface TradingDecreaseFillEvent extends BaseTradingEvent {
     funding: i128;
     /** Settled borrowing fee, token-dec. */
     borrowing: i128;
-    /** Amount transferred to the trader, token-dec. */
+    /** Amount transferred to the trader, token-dec. It is the withdrawal plus the profit leg, less the fees they cover. A realized loss debits the surviving margin, not this payout. */
     returned: i128;
 }
 
-/**
- * A keeper fill that closes the whole position (the stored row zeroes).
- *
- * `notional` and `tokens` are the full closed size at ENTRY pricing; `price`
- * is the exit price the close settled at. `margin` and `pnl` are gross
- * of the itemized fees; `returned` is the post-fee equity floored at zero,
- * any shortfall emitted as `badDebt`. The transfer to the trader adds the
- * swept decrease-order escrows announced by the same-tx `cancel_order`
- * receipts.
- */
+/** A keeper fill that closes the whole position. The stored row zeroes. */
 export interface TradingCloseFillEvent extends BaseTradingEvent {
     eventType: TradingEventType.CloseFill;
     user: string;
-    /** Order id; `0` marks an ADL close (see `source`). */
     orderId: u32;
-    /** `'order'` for a keeper fill of a user order, `'adl'` for an ADL close (orderId `0`). */
+    /** `'order'` for a keeper fill of a user order, `'adl'` for an ADL close. */
     source: 'order' | 'adl';
     isLong: boolean;
     /** The keeper rewarded for the fill. */
     keeper: string;
-    /** Exit-side execution price (bid long / ask short), price_scalar units. */
+    /** Exit-side execution price (bid for a long, ask for a short), price_scalar units. */
     price: i128;
     /** Full closed size at entry pricing, token-dec. */
     notional: i128;
@@ -318,27 +293,18 @@ export interface TradingCloseFillEvent extends BaseTradingEvent {
     borrowing: i128;
     /** Fees and losses past the freed margin, absorbed by the vault, token-dec. */
     badDebt: i128;
-    /** Post-fee equity floored at zero, transferred to the trader, token-dec. */
+    /** Post-fee equity floored at zero, transferred to the trader, token-dec. The transfer adds the swept decrease-order escrows announced by the same-tx `cancel_order` receipts. */
     returned: i128;
 }
 
-/**
- * A keeper liquidation receipt (the full size is force-closed).
- *
- * `margin` and `pnl` are gross of the itemized fees; every liquidation
- * charges `liqFee = min(equity, ceil(config.liqFee * notional))` (split
- * keeper/treasury/vault like a trade fee) and pays the trader the rest on
- * `returned` — zero exactly where the fee saturates on the whole remainder;
- * any shortfall past the freed margin is emitted as `badDebt` and absorbed
- * by the vault.
- */
+/** A keeper liquidation receipt. The full size is force-closed. */
 export interface TradingLiquidationEvent extends BaseTradingEvent {
     eventType: TradingEventType.Liquidation;
     user: string;
     isLong: boolean;
     /** The keeper rewarded for the liquidation. */
     keeper: string;
-    /** Exit-side execution price (bid long / ask short), price_scalar units. */
+    /** Exit-side execution price (bid for a long, ask for a short), price_scalar units. */
     price: i128;
     /** Force-closed size, token-dec. */
     notional: i128;
@@ -359,16 +325,17 @@ export interface TradingLiquidationEvent extends BaseTradingEvent {
     /** Fees and losses past the freed margin, absorbed by the vault, token-dec. */
     badDebt: i128;
     /**
-     * Remainder paid to the trader net of the liquidation fee, token-dec; the
-     * transfer adds the swept decrease-order escrows announced by the same-tx
-     * `cancel_order` receipts.
+     * Remainder paid to the trader net of the liquidation fee, token-dec. It
+     * is zero exactly where the fee saturates the whole remainder. The
+     * transfer adds the swept decrease-order escrows announced by the
+     * same-tx `cancel_order` receipts.
      */
     returned: i128;
-    /** Liquidation fee charged: min(equity, ceil(config.liqFee * notional)), token-dec. */
+    /** Liquidation fee charged: min(equity, ceil(config.liqFee * notional)), token-dec. Split between the keeper, treasury, and vault like a trade fee. */
     liqFee: i128;
 }
 
-/** A decoded market contract event; narrow on `eventType` for the concrete shape. */
+/** A decoded market contract event. Narrow on `eventType` for the concrete shape. */
 export type TradingEvent =
     | TradingCreateOrderEvent
     | TradingCancelOrderEvent

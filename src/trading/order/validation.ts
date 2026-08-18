@@ -27,17 +27,37 @@ const ORDER_KINDS = new Set<number>([
     OrderKind.StopDecrease,
 ]);
 
+/**
+ * One failed check returned by `validateOrder`. A batch order can fail
+ * several checks at once; `buildOrderOperation` only surfaces the first.
+ */
 export interface OrderValidationIssue {
+    /** The market contract error code this failure maps to, or 0 for an input error the contract never sees. */
     code: number;
+    /** The `OrderParams` field at fault, or 'batch' when no single field is responsible. */
     field: keyof OrderParams | 'batch';
+    /** A message safe to show to the caller. */
     reason: string;
 }
 
+/**
+ * A snapshot of ledger state to check an order against. Build one snapshot
+ * per as-of ledger and reuse it for every order checked against that ledger.
+ */
 export interface OrderValidationContext {
+    /** Ledger sequence the snapshot was read at, u32 range. An order's `expiration` must be at or after this value. */
     ledger: number;
+    /** Unix seconds the snapshot was read at. Not read by `validateOrder`. */
     now: bigint;
+    /** Market operational status at the snapshot. `Frozen` and `Retired` block order creation. */
     status: Status;
+    /** Market config at the snapshot. Supplies the dust floors and the max position notional checked here. */
     config: TradingConfig;
+    /**
+     * Verified market price at the snapshot. Omit it to skip the price
+     * checks: the malformed-price check and, for a market order, the price
+     * bound check both need it.
+     */
     price?: PriceData;
     /**
      * Serialized update submitted when `price` was loaded; terminal markets
@@ -45,9 +65,11 @@ export interface OrderValidationContext {
      */
     priceUpdate?: Uint8Array;
     /**
-     * The side's stored position. When present, decrease kinds preflight the
-     * `MAX_ORDERS_PER_SIDE` pending-decrease cap (#733) that `create_order`
-     * enforces when it appends to `decrease_orders`.
+     * The side's stored position. When present, a decrease kind preflights
+     * the `MAX_ORDERS_PER_SIDE` pending-decrease cap (contract error #733)
+     * that `create_order` enforces when it appends to `decrease_orders`.
+     * Omit it to skip this preflight; the contract still enforces the cap
+     * at submission.
      */
     position?: Position;
 }
@@ -90,6 +112,11 @@ function checkedAtomic(
     }
 }
 
+/**
+ * The price a fill against `kind` and `isLong` would execute at: the ask
+ * for a long increase or a short decrease, the bid for a short increase or
+ * a long decrease. `price.bid` and `price.ask` are 18-dec.
+ */
 export function orderExecutionPrice(
     kind: OrderKind,
     isLong: boolean,
@@ -112,7 +139,48 @@ function validatePrice(price: PriceData): OrderValidationIssue[] {
     return [];
 }
 
-/** Mirror the price-free create_order checks and market-order price bound. */
+/**
+ * Check one order's shape against a ledger snapshot before submission.
+ * Mirrors the market contract's price-free `create_order` checks, and, for
+ * a market order, its price bound. Nothing throws; every failed check is
+ * returned.
+ *
+ * @param params - The order to check.
+ * @param context - The ledger snapshot to check it against.
+ * @returns Every failed check, in the order found. Empty when the order is
+ * valid at this snapshot. The contract can still reject a valid order at
+ * submission if the ledger has since moved past `context.ledger`.
+ *
+ * Each issue's `code` names the market contract error it maps to:
+ * - 0: `context.ledger` is not a valid u32 ledger sequence. An input error
+ *   the contract never sees.
+ * - 704 (`MarketFrozen`): `context.status` is `Frozen` or `Retired`.
+ * - 710 (`NegativeValueNotAllowed`): a magnitude, `triggerPrice`, or
+ *   `priceBound` is not a valid i128, or is negative.
+ * - 712 (`NotionalAboveMaximum`): an increase's `notional` exceeds
+ *   `context.config.maxPositionNotional`.
+ * - 731 (`OrderExpired`): `expiration` is not a valid u32 ledger sequence,
+ *   or is behind `context.ledger`.
+ * - 732 (`InvalidOrder`): a moved `notional` or `margin` is below its dust
+ *   floor, the order moves neither, or a trigger kind carries a
+ *   `triggerPrice` of zero.
+ * - 733 (`TooManyOrders`): the order is a decrease kind and
+ *   `context.position` already holds `MAX_ORDERS_PER_SIDE` pending
+ *   decrease orders.
+ * - 734 (`UnknownKind`): `kind` is not one of the six `OrderKind` values.
+ * - 740: `context.price` is set and its `bid` or `ask` is not positive, or
+ *   `bid` exceeds `ask`. This code number coincides with
+ *   `MarketError::StalePrice` but does not test staleness. A malformed
+ *   price never reaches the market contract, since the oracle verifier
+ *   rejects it first.
+ * - 741 (`PriceBoundExceeded`): `context.price` is set, `kind` is a market
+ *   kind, `priceBound` is positive, and the execution price would cross
+ *   it.
+ *
+ * `IncreaseHalted` (#705) and every sizing, margin, and utilization gate
+ * run only at fill, against the position the order would produce, and are
+ * not previewed here.
+ */
 export function validateOrder(
     params: OrderParams,
     context: OrderValidationContext,
@@ -285,6 +353,13 @@ export function validateOrder(
     return issues;
 }
 
+/**
+ * Decode a `create_order` `Call` back into `OrderParams`, so a trailing
+ * order in a batch can be checked with `validateOrder` before submission.
+ *
+ * @throws {TypeError} if `call.func` is not `create_order`, or its
+ * argument count is not eight.
+ */
 export function decodeCreateOrderCall(call: Call): OrderParams {
     if (call.func !== 'create_order') {
         throw new TypeError('call function must be create_order');

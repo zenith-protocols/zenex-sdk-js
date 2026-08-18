@@ -20,17 +20,13 @@ export interface TradingInstanceState {
     oracle: string;
     /** Treasury contract (protocol fee sink). */
     treasury: string;
-    /** First-delist timestamp, unix seconds; anchors the grace/deadline window and stays set through the wind-down; lazy (absent unless ever delisted). */
+    /** First-delist timestamp, unix seconds. Absent unless the market is delisted, and cleared again if the delist reverts within the grace window. */
     delistedAt?: bigint;
     /** Flat settlement price, price_scalar units; lazy, settable only once a delisted market's grace window has expired. */
     terminalPrice?: bigint;
     /** ADL flags; zeroed default until first written. */
     adl: AdlState;
-    /**
-     * Current owner (`stellar_access::ownable`) — check this equals the
-     * governance contract rather than a bare key. Absent once ownership has
-     * been renounced. Not a `DataKey` variant — the OZ module owns this slot.
-     */
+    /** Current owner. Absent if ownership is renounced. */
     owner?: string;
 }
 

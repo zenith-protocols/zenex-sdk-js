@@ -15,11 +15,18 @@ const SIMULATION_ACCOUNT =
 const SIMULATION_SEQUENCE = '123';
 
 /**
- * Simulate a contract call and parse the result
- * @param network - Network configuration
- * @param operation - Base64 encoded XDR operation
- * @param parser - Function to parse the result
- * @returns Parsed result and latest ledger
+ * Simulate `operation` against `network` and decode the return value with
+ * `parser`.
+ *
+ * Throws when the simulation needs a state restore instead of returning a
+ * result. The caller must restore the archived ledger entries and retry.
+ * Throws with the decoded message when the simulation itself fails. Throws
+ * when the simulation succeeds but carries no return value.
+ * @param network - Network configuration and RPC connection.
+ * @param operation - The contract call, as a base64-encoded XDR operation.
+ * @param parser - Function that decodes the base64 XDR return value.
+ * @returns The parsed result and the ledger sequence the simulation ran
+ * against.
  */
 export async function simulateAndParse<T>(
     network: Network,

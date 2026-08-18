@@ -1,9 +1,7 @@
 import { u32, u64 } from '../../index.js';
 import { ZenexContractType, BaseZenexEvent } from '../../base_event.js';
 
-// Governance event types (matches Rust events). Values are the on-chain
-// name topics: bare `#[contractevent]` defaults to snake_case of the
-// struct name.
+/** Governance event topic values, matched against decoded event names. */
 export enum GovernanceEventType {
     Queued = 'queued',
     Executed = 'executed',
@@ -12,29 +10,30 @@ export enum GovernanceEventType {
     DelaySet = 'delay_set',
 }
 
+/** Fields shared by every governance event. */
 export interface BaseGovernanceEvent extends BaseZenexEvent {
     contractType: ZenexContractType.Governance;
     eventType: GovernanceEventType;
 }
 
 /**
- * Call queued via `queue`, or a pending delay change queued via `set_delay`
- * (nonce `u32::MAX`, target the governance contract itself, fnName `set_delay`).
- * Topics: nonce.
+ * Emitted by `queue` when a call is queued. Also emitted by `setDelay`
+ * when a delay change is queued, with nonce `u32::MAX`, target this
+ * governance contract, and fnName `set_delay`. Topics: nonce.
  */
 export interface GovernanceQueuedEvent extends BaseGovernanceEvent {
     eventType: GovernanceEventType.Queued;
-    /** Monotonically increasing id for this queued call; ties an Executed/Cancelled event back to it. */
+    /** Queue id. Ties a later Executed or Cancelled event to this one. */
     nonce: u32;
     /** Contract address the queued call will invoke. */
     target: string;
     /** Function name to invoke on `target`. */
     fnName: string;
-    /** Unix timestamp (seconds) after which the call becomes executable. */
+    /** Unix timestamp, in seconds, at or after which the call becomes executable. */
     unlockTime: u64;
 }
 
-/** Queued call executed via `execute` after its delay passed. Topics: nonce. */
+/** Emitted by `execute` after a queued call runs. Topics: nonce. */
 export interface GovernanceExecutedEvent extends BaseGovernanceEvent {
     eventType: GovernanceEventType.Executed;
     /** Nonce of the Queued event this execution corresponds to. */
@@ -45,14 +44,14 @@ export interface GovernanceExecutedEvent extends BaseGovernanceEvent {
     fnName: string;
 }
 
-/** Queued call cancelled by the owner via `cancel`. Topics: nonce. */
+/** Emitted by `cancel` when the owner cancels a queued call. Topics: nonce. */
 export interface GovernanceCancelledEvent extends BaseGovernanceEvent {
     eventType: GovernanceEventType.Cancelled;
     /** Nonce of the Queued event this cancellation corresponds to. */
     nonce: u32;
 }
 
-/** Immediate `set_status` forwarded to `target`, bypassing the timelock delay. Topics: target. */
+/** Emitted by `setStatus`, bypassing the timelock delay. Topics: target. */
 export interface GovernanceStatusSetEvent extends BaseGovernanceEvent {
     eventType: GovernanceEventType.StatusSet;
     /** Market contract address that received the status update. */
@@ -61,7 +60,7 @@ export interface GovernanceStatusSetEvent extends BaseGovernanceEvent {
     status: u32;
 }
 
-/** Pending delay change applied via `apply_delay` once its own timelock elapsed. */
+/** Emitted by `applyDelay` when a pending delay change takes effect. */
 export interface GovernanceDelaySetEvent extends BaseGovernanceEvent {
     eventType: GovernanceEventType.DelaySet;
     /** Previous timelock delay, in seconds. */
@@ -70,6 +69,7 @@ export interface GovernanceDelaySetEvent extends BaseGovernanceEvent {
     newDelay: u64;
 }
 
+/** Union of every governance contract event. */
 export type GovernanceEvent =
     | GovernanceQueuedEvent
     | GovernanceExecutedEvent

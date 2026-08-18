@@ -48,7 +48,7 @@ export function isRestingOrderKind(kind: OrderKind): boolean {
     return !isMarketOrderKind(kind);
 }
 
-/** Alias for resting orders when the caller is reasoning about eligibility. */
+/** Same as `isRestingOrderKind`, worded for a caller reasoning about triggers rather than pending state. */
 export function isTriggerOrderKind(kind: OrderKind): boolean {
     return isRestingOrderKind(kind);
 }

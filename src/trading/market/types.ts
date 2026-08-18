@@ -15,9 +15,18 @@ export interface PriceData {
     publishTime: bigint;
 }
 
+/**
+ * Trade fee split for a signed notional change on one side of the book,
+ * token-dec. Ports `Market::trade_fees` and `MarketData::skew_split`. The
+ * total fee charged is `base + impact`.
+ */
 export interface TradeFees {
+    /** Portion of the fill's notional that widens the book's token imbalance. Sums with `improving` to the fill's notional. */
     worsening: bigint;
+    /** Portion of the fill's notional that narrows the book's token imbalance. */
     improving: bigint;
+    /** Base fee: `ceil(worsening * feeDom)` plus `ceil(improving * feeNonDom)`, both SCALAR_18 rates. */
     base: bigint;
+    /** Size-quadratic impact fee on the fill's full notional, capped at 10% of it. */
     impact: bigint;
 }

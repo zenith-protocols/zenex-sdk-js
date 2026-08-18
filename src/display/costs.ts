@@ -1,15 +1,3 @@
-// =============================================================================
-// Order cost preview.
-//
-// Replaces hand-rolled float re-implementations of the contract's fee model.
-// Every figure here is produced by the EXACT mirror (`quoteTradeFees`, which
-// ports `Market::trade_fees`) and only then converted for display, so a preview
-// can never drift from the fill the way a parallel float implementation does.
-//
-// Approximate at the last step only. The exact bigints remain available on
-// `exact` for anything that must reconcile against a quote.
-// =============================================================================
-
 import type { MarketData, TradingConfig } from '../contracts/trading/trading_types.js';
 import type { PriceData, TradeFees } from '../trading/market/types.js';
 import { entryPrice, exitPrice, quoteTradeFees } from '../trading/market/capacity.js';
@@ -17,33 +5,37 @@ import { SCALAR_18, mulDivFloor } from '../math/fixed.js';
 import { formatPrice, formatToken } from './format.js';
 
 export interface OrderCostPreview {
-    /** Skew-split base fee (`feeDom` on the worsening leg, `feeNonDom` on the improving leg). */
+    /** Skew-split base fee, token units (`feeDom` on the worsening leg, `feeNonDom` on the improving leg). */
     baseFee: number;
-    /** Size-quadratic impact fee, capped at 10% of notional. */
+    /** Size-quadratic impact fee, token units, capped at 10% of notional. */
     impactFee: number;
-    /** Flat keeper execution fee escrowed with the order. */
+    /** Flat keeper execution fee escrowed with the order, token units. */
     execFee: number;
-    /** baseFee + impactFee + execFee. */
+    /** baseFee + impactFee + execFee, token units. */
     totalFees: number;
-    /** Margin escrowed at creation for an increase (`margin + execFee`), else `execFee` alone. */
+    /** Margin escrowed at creation for an increase (`margin + execFee`), else `execFee` alone. Token units. */
     escrowed: number;
     /** Execution price the fill is sized at: ask for a long open, bid for a short. */
     executionPrice: number;
-    /** Base size the notional buys at `executionPrice`. */
+    /** Base size the notional buys at `executionPrice`, token units. */
     tokens: number;
-    /** The unrounded fee bigints behind the floats above. */
+    /** The exact fee bigints behind the floats above, for reconciliation against a quote. */
     exact: TradeFees;
 }
 
 /**
- * Preview the cost of opening (or adding to) a position.
+ * Previews the cost of opening, or adding to, a position. Approximate,
+ * for display only.
  *
- * `notional` and `margin` are token-dec bigints — parse user input with
- * `parseAtomic`, never with a float multiply. `decimals` is the deployment's
- * settlement token decimals.
+ * The fee split depends on which way the fill moves the book's token skew.
+ * This needs the live `market` and `price`; it is not a function of size
+ * alone.
  *
- * The fee split depends on which way the fill moves the book's token skew, so
- * this needs the live `market` and `price`; it is not a function of size alone.
+ * @param notional Exact token-dec bigint. Parse user input with
+ * `parseAtomic`, never with a float multiply.
+ * @param margin Exact token-dec bigint. Parse user input with
+ * `parseAtomic`, never with a float multiply.
+ * @param decimals The deployment's settlement token decimals.
  */
 export function orderCostPreview(
     market: MarketData,
@@ -76,12 +68,19 @@ export function orderCostPreview(
 }
 
 /**
- * Preview the cost of closing (or reducing) a position.
+ * Previews the cost of closing, or reducing, a position. Approximate,
+ * for display only.
  *
- * A decrease escrows only the `execFee`; the trade fee is debited from the
- * settled margin at fill. `tokens` is the position's base size being closed,
- * which the caller has from the stored position — it is not re-derived from
- * the price, so the split matches the size actually leaving the book.
+ * A decrease escrows only the `execFee`. The trade fee is debited from the
+ * settled margin at fill.
+ *
+ * @param notional Exact token-dec bigint. Parse user input with
+ * `parseAtomic`, never with a float multiply.
+ * @param tokens The position's exact base size being closed, from the
+ * stored position. Settlement-token decimals, not `SCALAR_18`, even though
+ * prices are. Not re-derived from the price, so the fee split matches the
+ * size actually leaving the book.
+ * @param decimals The deployment's settlement token decimals.
  */
 export function closeCostPreview(
     market: MarketData,
