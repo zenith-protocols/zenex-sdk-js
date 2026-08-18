@@ -20,17 +20,8 @@ export interface VaultConstructorArgs {
 }
 
 /**
- * Operation builder for the Zenex Strategy Vault contract.
- *
- * Collateral vault for a single trading market. Shares are an
- * OpenZeppelin fungible token; asset amounts are in the settlement token's
- * decimals while share amounts are in share decimals (asset decimals plus
- * the constructor's `decimals_offset`) — the two are never the same scale.
- * Share pricing marks the backing with the strategy-supplied net pending
- * trader PnL (`net_pnl`), so mints and redemptions settle at the market's
- * uPnL-inclusive value. All mutations (`strategyDeposit` / `strategyRedeem`
- * / `strategyWithdraw`) require the registered strategy (trading contract)
- * to authorize the call; LPs route through trading vault orders.
+ * Operation builder for the Zenex Strategy Vault contract (collateral vault
+ * for one market; shares are an OpenZeppelin fungible token).
  *
  * All methods return base64-encoded XDR operations for transaction building.
  */

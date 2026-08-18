@@ -45,23 +45,8 @@ function feedIdToScVal(feedId: Buffer | Uint8Array): xdr.ScVal {
 }
 
 /**
- * OracleContract - Operation builder for the Zenex Oracle contract
- *
- * Adapts Chainlink Data Streams on-chain: DON signature verification is
- * delegated to Chainlink's deployed verifier contract (pinned at
- * construction), then the V3 report body is decoded and every protocol
- * gate — feed identity, validity window, two-sided staleness, price
- * sanity, spread reduction — is enforced before the price is exposed.
- * Used by the trading contract to determine entry/exit prices and
- * compute PnL.
- *
- * Staleness is two-tier: each `verify_price` call selects between the strict
- * `trade_staleness` window (order fills) and the wider `close_staleness`
- * window (gap-closing calls — liquidation, ADL, accrual), so a report gap
- * that outlasts the fill window never freezes the calls that protect vault
- * solvency. Only the past side widens; the forward allowance stays pinned to
- * `trade_staleness` for both classes. The trading contract hardcodes the
- * class per route, so SDK callers never choose it for a trading call.
+ * Operation builder for the Zenex Oracle contract (Chainlink Data Streams V3
+ * reports, verified through a Chainlink verifier pinned at construction).
  *
  * All methods return base64-encoded XDR operations for transaction building.
  */

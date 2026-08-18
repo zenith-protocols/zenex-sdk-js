@@ -25,14 +25,10 @@ export interface GovernanceConstructorArgs {
 }
 
 /**
- * GovernanceContract - Operation builder for the Zenex Governance contract
+ * Operation builder for the Zenex Governance contract (a generic timelock over
+ * arbitrary `target.fn_name(args)` calls).
  *
- * A generic timelock: `queue` schedules an arbitrary `target.fn_name(args)`
- * call, executable via `execute` once the configured delay elapses. `setStatus`
- * is the one carve-out that bypasses the delay entirely; changing the delay
- * itself (`setDelay`/`applyDelay`) goes through the *current* delay, so it
- * can't be shortened instantly. All methods return base64-encoded XDR
- * operations for transaction building.
+ * All methods return base64-encoded XDR operations for transaction building.
  */
 export class GovernanceContract extends Contract {
     static spec: contract.Spec = new contract.Spec(governanceSpec);
