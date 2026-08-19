@@ -381,7 +381,7 @@ describe('previewOrder', () => {
             1n,
         );
         expect(preview.outcome).toBe('gate');
-        expect(preview.gateCode).toBeGreaterThan(0);
+        expect(preview.gate?.code).toBeGreaterThan(0);
     });
 
     it('is reachable as position.preview with identical output', () => {

@@ -15,7 +15,7 @@ import {
 import { tokenBalanceLedgerKey } from '../src/token.js';
 import { toFixed, toFloat, mulDivFloor, mulDivCeil, SCALAR_18 } from '../src/math/index.js';
 import { simulateAndParse } from '../src/simulate.js';
-import { ContractError } from '../src/errors.js';
+import { ZenexError } from '../src/errors.js';
 import { TreasuryContract } from '../src/contracts/treasury/contract.js';
 import { Network } from '../src/index.js';
 
@@ -83,9 +83,9 @@ describe('math extras', () => {
     });
 });
 
-describe('ContractError fallback message', () => {
+describe('ZenexError fallback message', () => {
     it('uses the generic message for unmapped codes', () => {
-        const err = new ContractError(424242 as never);
+        const err = new ZenexError(424242 as never);
         expect(err.message).toBe('Contract error 424242');
     });
 });

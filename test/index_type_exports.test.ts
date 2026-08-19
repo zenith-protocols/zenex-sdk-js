@@ -16,7 +16,6 @@ describe('package root type exports', () => {
                 PositionEstimate,
                 PriceInput,
                 SideRatesEstimate,
-                VaultOrderBlock,
             } from '../src/index.js';
             import { Price } from '../src/index.js';
 
@@ -31,7 +30,7 @@ describe('package root type exports', () => {
             export const market: MarketEstimate = {} as MarketEstimate;
             export const position: PositionEstimate = {} as PositionEstimate;
             export const order: OrderEstimate = {} as OrderEstimate;
-            export const block: VaultOrderBlock = { code: 714, reason: 'x' };
+            export const gateCode: number | undefined = order.gate?.code;
             export const pending: PendingOrder = {} as PendingOrder;
             // Estimates are plain data: spreading must type-check.
             export const spread = { ...market, ...position };

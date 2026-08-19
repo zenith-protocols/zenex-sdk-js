@@ -1,5 +1,5 @@
 import type { OrderParams } from '../contracts/router/types.js';
-import type { ContractErrorType } from '../errors.js';
+import { ZenexError, zenexErrorFromGate } from '../errors.js';
 import { OrderKind } from '../contracts/market/types.js';
 import { SCALAR_18, mulDivFloor } from '../math/fixed.js';
 import { formatPrice, formatToken, formatTokenFloor } from '../float.js';
@@ -227,13 +227,13 @@ export interface OrderEstimate {
     /** `fills`: exact transition below. `rests`: creates but does not fill at this price. `gate`: can never fill. */
     outcome: 'fills' | 'rests' | 'gate';
     /**
-     * The gate when `outcome === 'gate'`, else `undefined`: the mirrored
-     * contract error code (e.g. 713), or an SDK sentinel
+     * The gate when `outcome === 'gate'`, else `undefined`: `code` is the
+     * mirrored contract error (e.g. 713), or an SDK sentinel
      * (`QuoteInvalidInput`, `QuoteOverflow`) for a failure the contract
      * never sees.
      */
-    gateCode: ContractErrorType | undefined;
-    /** Human-readable reason for a `rests` or `gate` outcome. */
+    gate: ZenexError | undefined;
+    /** Why a `rests` outcome rests at this price, else `undefined`. */
     reason: string | undefined;
     /** Skew-split base fee, token units. */
     baseFee: number;
@@ -325,7 +325,7 @@ export function previewOrder(
     if (applied.kind === 'rests') {
         return {
             outcome: 'rests',
-            gateCode: undefined,
+            gate: undefined,
             reason: applied.reason,
             ...empty,
         };
@@ -333,8 +333,8 @@ export function previewOrder(
     if (applied.kind === 'gate') {
         return {
             outcome: 'gate',
-            gateCode: applied.code as ContractErrorType,
-            reason: applied.reason,
+            gate: zenexErrorFromGate(applied.code, applied.reason),
+            reason: undefined,
             ...empty,
         };
     }
@@ -344,7 +344,7 @@ export function previewOrder(
     const post = MarketPosition.from(outcome.postPosition, position.isLong);
     return {
         outcome: 'fills',
-        gateCode: undefined,
+        gate: undefined,
         reason: undefined,
         baseFee: formatToken(fees.base, decimals),
         impactFee: formatToken(fees.impact, decimals),

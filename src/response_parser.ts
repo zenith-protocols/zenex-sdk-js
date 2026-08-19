@@ -1,17 +1,17 @@
 import { rpc } from '@stellar/stellar-sdk';
 import {
-    ContractError,
-    ContractErrorType,
-    contractErrorFromCode,
+    ZenexError,
+    ZenexErrorCode,
+    zenexErrorFromCode,
 } from './errors.js';
 
-export { ContractError, ContractErrorType, contractErrorFromCode } from './errors.js';
+export { ZenexError, ZenexErrorCode, zenexErrorFromCode } from './errors.js';
 
 /**
  * Parse a failed simulation, send-transaction, or get-transaction response
- * into a ContractError.
+ * into a ZenexError.
  *
- * Never throws. Returns a ContractError with type `UnknownError` when the
+ * Never throws. Returns a ZenexError with type `UnknownError` when the
  * response carries no recognizable contract error code.
  */
 export function parseError(
@@ -19,10 +19,10 @@ export function parseError(
         | rpc.Api.GetFailedTransactionResponse
         | rpc.Api.SendTransactionResponse
         | rpc.Api.SimulateTransactionErrorResponse
-): ContractError {
-    const resolve = (code: number): ContractError | undefined => {
-        const resolved = contractErrorFromCode(code);
-        return resolved.type === ContractErrorType.UnknownError ? undefined : resolved;
+): ZenexError {
+    const resolve = (code: number): ZenexError | undefined => {
+        const resolved = zenexErrorFromCode(code);
+        return resolved.code === ZenexErrorCode.UnknownError ? undefined : resolved;
     };
 
     // Simulation Error
@@ -32,7 +32,7 @@ export function parseError(
             const resolved = resolve(parseInt(match[1], 10));
             if (resolved) return resolved;
         }
-        return new ContractError(ContractErrorType.UnknownError);
+        return new ZenexError(ZenexErrorCode.UnknownError);
     }
 
     // Send Transaction Error
@@ -78,7 +78,7 @@ export function parseError(
         }
     }
 
-    return new ContractError(ContractErrorType.UnknownError);
+    return new ZenexError(ZenexErrorCode.UnknownError);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { ContractErrorType } from '../../errors.js';
+import { ZenexErrorCode } from '../../errors.js';
 import type { OrderParams } from '../../contracts/router/types.js';
 import { FULL_CLOSE, OrderKind, Status } from '../../contracts/market/types.js';
 import type { AdlState, MarketData, Position, MarketConfig } from '../../contracts/market/types.js';
@@ -78,7 +78,7 @@ export type SubjectBoundMarketContext = MarketContext & {
  * market order whose price bound is not crossed at this price). `gate`
  * means the order can never fill as constructed. The gate code says why:
  * the mirrored contract error (for example #713 when a decrease would break
- * margin), or an SDK sentinel (`ContractErrorType.QuoteInvalidInput` /
+ * margin), or an SDK sentinel (`ZenexErrorCode.QuoteInvalidInput` /
  * `QuoteOverflow`) for a failure the contract never sees.
  */
 export type OrderApplication =
@@ -145,7 +145,7 @@ export function applyOrder(
     if (snapshot.subject && order.isLong !== snapshot.subject.isLong) {
         return {
             kind: 'gate',
-            code: ContractErrorType.QuoteInvalidInput,
+            code: ZenexErrorCode.QuoteInvalidInput,
             reason: 'order side does not match the snapshot subject',
             ledger,
         };
@@ -221,13 +221,13 @@ export function applyOrder(
         const code =
             quote.contractCode ??
             (quote.code === 'CONTRACT_OVERFLOW'
-                ? ContractErrorType.QuoteOverflow
-                : ContractErrorType.QuoteInvalidInput);
+                ? ZenexErrorCode.QuoteOverflow
+                : ZenexErrorCode.QuoteInvalidInput);
         return { kind: 'gate', code, reason: quote.reason, ledger };
     }
     return {
         kind: 'gate',
-        code: ContractErrorType.QuoteInvalidInput,
+        code: ZenexErrorCode.QuoteInvalidInput,
         reason: 'exact transition is unavailable',
         ledger,
     };

@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
-    ContractError,
-    ContractErrorType,
-    contractErrorFromCode,
+    ZenexError,
+    ZenexErrorCode,
+    zenexErrorFromCode,
     parseContractErrorCode,
 } from '../src/errors.js';
 
@@ -17,64 +17,64 @@ import {
 //   treasury/src/lib.rs            (TreasuryError, 900)
 //   OpenZeppelin ownable           (OwnableError 2100-2102, RoleTransferError 2200-2203)
 //   OpenZeppelin fee-abstraction   (FeeAbstractionError, 5000-5006)
-// The namespaces are disjoint, so contractErrorFromCode takes no hint and
-// every code lives in the one flat ContractErrorType enum. UpgradeNotOwner
+// The namespaces are disjoint, so zenexErrorFromCode takes no hint and
+// every code lives in the one flat ZenexErrorCode enum. UpgradeNotOwner
 // (600) is one shared code raised identically by market, oracle and factory,
 // so the bare code still names one condition.
 // =============================================================================
 
-describe('market codes inside ContractErrorType (market/src/errors.rs)', () => {
+describe('market codes inside ZenexErrorCode (market/src/errors.rs)', () => {
     it('matches every v2 market error code exactly', () => {
         // config / construction
-        expect(ContractErrorType.InvalidConfig).toBe(700);
-        expect(ContractErrorType.InvalidPrice).toBe(701);
-        expect(ContractErrorType.InvalidStatus).toBe(702);
-        expect(ContractErrorType.MarketNotAccrued).toBe(703);
-        expect(ContractErrorType.MarketFrozen).toBe(704);
-        expect(ContractErrorType.IncreaseHalted).toBe(705);
-        expect(ContractErrorType.MarketNotCleared).toBe(706);
+        expect(ZenexErrorCode.InvalidConfig).toBe(700);
+        expect(ZenexErrorCode.InvalidPrice).toBe(701);
+        expect(ZenexErrorCode.InvalidStatus).toBe(702);
+        expect(ZenexErrorCode.MarketNotAccrued).toBe(703);
+        expect(ZenexErrorCode.MarketFrozen).toBe(704);
+        expect(ZenexErrorCode.IncreaseHalted).toBe(705);
+        expect(ZenexErrorCode.MarketNotCleared).toBe(706);
         // general
-        expect(ContractErrorType.NegativeValueNotAllowed).toBe(710);
+        expect(ZenexErrorCode.NegativeValueNotAllowed).toBe(710);
         // position sizing / margin
-        expect(ContractErrorType.NotionalBelowMinimum).toBe(711);
-        expect(ContractErrorType.NotionalAboveMaximum).toBe(712);
-        expect(ContractErrorType.InsufficientMargin).toBe(713);
-        expect(ContractErrorType.UtilizationExceeded).toBe(714);
-        expect(ContractErrorType.OpenInterestExceeded).toBe(715);
+        expect(ZenexErrorCode.NotionalBelowMinimum).toBe(711);
+        expect(ZenexErrorCode.NotionalAboveMaximum).toBe(712);
+        expect(ZenexErrorCode.InsufficientMargin).toBe(713);
+        expect(ZenexErrorCode.UtilizationExceeded).toBe(714);
+        expect(ZenexErrorCode.OpenInterestExceeded).toBe(715);
         // position lifecycle
-        expect(ContractErrorType.PositionNotFound).toBe(720);
-        expect(ContractErrorType.NotionalLocked).toBe(721);
-        expect(ContractErrorType.NotLiquidatable).toBe(722);
-        expect(ContractErrorType.PositionLiquidatable).toBe(723);
+        expect(ZenexErrorCode.PositionNotFound).toBe(720);
+        expect(ZenexErrorCode.NotionalLocked).toBe(721);
+        expect(ZenexErrorCode.NotLiquidatable).toBe(722);
+        expect(ZenexErrorCode.PositionLiquidatable).toBe(723);
         // orders / price
-        expect(ContractErrorType.OrderNotFound).toBe(730);
-        expect(ContractErrorType.OrderExpired).toBe(731);
-        expect(ContractErrorType.InvalidOrder).toBe(732);
-        expect(ContractErrorType.TooManyOrders).toBe(733);
-        expect(ContractErrorType.UnknownKind).toBe(734);
-        expect(ContractErrorType.StalePrice).toBe(740);
-        expect(ContractErrorType.PriceBoundExceeded).toBe(741);
-        expect(ContractErrorType.TriggerNotMet).toBe(742);
+        expect(ZenexErrorCode.OrderNotFound).toBe(730);
+        expect(ZenexErrorCode.OrderExpired).toBe(731);
+        expect(ZenexErrorCode.InvalidOrder).toBe(732);
+        expect(ZenexErrorCode.TooManyOrders).toBe(733);
+        expect(ZenexErrorCode.UnknownKind).toBe(734);
+        expect(ZenexErrorCode.StalePrice).toBe(740);
+        expect(ZenexErrorCode.PriceBoundExceeded).toBe(741);
+        expect(ZenexErrorCode.TriggerNotMet).toBe(742);
         // vault orders
-        expect(ContractErrorType.VaultOrderNotFound).toBe(750);
-        expect(ContractErrorType.VaultOrderLocked).toBe(751);
-        expect(ContractErrorType.MinOutNotMet).toBe(752);
-        expect(ContractErrorType.VaultBalanceExceeded).toBe(753);
-        expect(ContractErrorType.PendingPnlExceeded).toBe(754);
-        expect(ContractErrorType.VaultInsolvent).toBe(755);
+        expect(ZenexErrorCode.VaultOrderNotFound).toBe(750);
+        expect(ZenexErrorCode.VaultOrderLocked).toBe(751);
+        expect(ZenexErrorCode.MinOutNotMet).toBe(752);
+        expect(ZenexErrorCode.VaultBalanceExceeded).toBe(753);
+        expect(ZenexErrorCode.PendingPnlExceeded).toBe(754);
+        expect(ZenexErrorCode.VaultInsolvent).toBe(755);
         // funding
-        expect(ContractErrorType.NothingToClaim).toBe(760);
+        expect(ZenexErrorCode.NothingToClaim).toBe(760);
         // ADL
-        expect(ContractErrorType.AdlNotTriggered).toBe(770);
-        expect(ContractErrorType.AdlOvershoot).toBe(771);
-        expect(ContractErrorType.AdlNotEligible).toBe(772);
+        expect(ZenexErrorCode.AdlNotTriggered).toBe(770);
+        expect(ZenexErrorCode.AdlOvershoot).toBe(771);
+        expect(ZenexErrorCode.AdlNotEligible).toBe(772);
     });
 
     it('carries exactly 35 market members (the full errors.rs surface, no stale codes)', () => {
         // Hand count from errors.rs: 700-706 (7) + 710 (1) + 711-715 (5)
         // + 720-723 (4) + 730-734 (5) + 740-742 (3) + 750-755 (6) + 760 (1)
         // + 770-772 (3) = 35.
-        const marketCodes = Object.values(ContractErrorType).filter(
+        const marketCodes = Object.values(ZenexErrorCode).filter(
             (value): value is number =>
                 typeof value === 'number' && value >= 700 && value <= 772,
         );
@@ -82,209 +82,209 @@ describe('market codes inside ContractErrorType (market/src/errors.rs)', () => {
     });
 
     it('752 means MinOutNotMet, and PendingPnlExceeded moved to 754', () => {
-        expect(ContractErrorType[752]).toBe('MinOutNotMet');
-        expect(ContractErrorType[754]).toBe('PendingPnlExceeded');
+        expect(ZenexErrorCode[752]).toBe('MinOutNotMet');
+        expect(ZenexErrorCode[754]).toBe('PendingPnlExceeded');
     });
 
     it('723 and 755 are the settlement-rail rejects added on v2 main', () => {
-        expect(ContractErrorType[723]).toBe('PositionLiquidatable');
-        expect(ContractErrorType[755]).toBe('VaultInsolvent');
+        expect(ZenexErrorCode[723]).toBe('PositionLiquidatable');
+        expect(ZenexErrorCode[755]).toBe('VaultInsolvent');
     });
 
     it('every market code resolves with a human-readable message', () => {
-        const marketCodes = Object.values(ContractErrorType).filter(
+        const marketCodes = Object.values(ZenexErrorCode).filter(
             (value): value is number =>
                 typeof value === 'number' && value >= 700 && value <= 772,
         );
         for (const code of marketCodes) {
             expect(
-                contractErrorFromCode(code).message,
+                zenexErrorFromCode(code).message,
                 `message for code ${code}`,
             ).not.toBe(`Contract error ${code}`);
         }
     });
 });
 
-describe('ContractErrorType periphery codes (v2 contracts)', () => {
+describe('ZenexErrorCode periphery codes (v2 contracts)', () => {
     it('oracle covers the OracleError set (780-785, 790, 793)', () => {
-        expect(ContractErrorType.OracleInvalidData).toBe(780);
-        expect(ContractErrorType.OracleInvalidPrice).toBe(781);
-        expect(ContractErrorType.OraclePriceStale).toBe(782);
-        expect(ContractErrorType.OracleInvalidStaleness).toBe(783);
-        expect(ContractErrorType.OracleReportExpired).toBe(784);
-        expect(ContractErrorType.OracleInvalidSpreadReduction).toBe(785);
-        expect(ContractErrorType.OracleFeedMismatch).toBe(790);
-        expect(ContractErrorType.OraclePriceAhead).toBe(793);
+        expect(ZenexErrorCode.OracleInvalidData).toBe(780);
+        expect(ZenexErrorCode.OracleInvalidPrice).toBe(781);
+        expect(ZenexErrorCode.OraclePriceStale).toBe(782);
+        expect(ZenexErrorCode.OracleInvalidStaleness).toBe(783);
+        expect(ZenexErrorCode.OracleReportExpired).toBe(784);
+        expect(ZenexErrorCode.OracleInvalidSpreadReduction).toBe(785);
+        expect(ZenexErrorCode.OracleFeedMismatch).toBe(790);
+        expect(ZenexErrorCode.OraclePriceAhead).toBe(793);
     });
 
     it('the retired Lazer price-verifier codes are gone (786-789, 791, 792)', () => {
-        const memberNames = ContractErrorType as unknown as Record<string, unknown>;
+        const memberNames = ZenexErrorCode as unknown as Record<string, unknown>;
         expect(memberNames.PVInvalidData).toBeUndefined();
         expect(memberNames.PVTruncatedData).toBeUndefined();
         expect(memberNames.PVWrongExponent).toBeUndefined();
         expect(memberNames.PVInvalidConfidence).toBeUndefined();
-        const byCode = ContractErrorType as unknown as Record<number, string>;
+        const byCode = ZenexErrorCode as unknown as Record<number, string>;
         for (const code of [786, 787, 788, 789, 791, 792]) {
             expect(byCode[code], `code ${code}`).toBeUndefined();
-            expect(contractErrorFromCode(code).type).toBe(ContractErrorType.UnknownError);
+            expect(zenexErrorFromCode(code).code).toBe(ZenexErrorCode.UnknownError);
         }
     });
 
     it('fee-abstraction covers the FeeAbstractionError set (5000-5006, OpenZeppelin)', () => {
-        expect(ContractErrorType.FeeTokenNotAllowed).toBe(5000);
-        expect(ContractErrorType.FeeTokenAlreadyAllowed).toBe(5001);
-        expect(ContractErrorType.TokenCountOverflow).toBe(5002);
-        expect(ContractErrorType.FeeAbstractionInvalidFeeBounds).toBe(5003);
-        expect(ContractErrorType.NoTokensToSweep).toBe(5004);
-        expect(ContractErrorType.FeeAbstractionInvalidUser).toBe(5005);
-        expect(ContractErrorType.FeeAbstractionInvalidExpirationLedger).toBe(5006);
+        expect(ZenexErrorCode.FeeTokenNotAllowed).toBe(5000);
+        expect(ZenexErrorCode.FeeTokenAlreadyAllowed).toBe(5001);
+        expect(ZenexErrorCode.TokenCountOverflow).toBe(5002);
+        expect(ZenexErrorCode.FeeAbstractionInvalidFeeBounds).toBe(5003);
+        expect(ZenexErrorCode.NoTokensToSweep).toBe(5004);
+        expect(ZenexErrorCode.FeeAbstractionInvalidUser).toBe(5005);
+        expect(ZenexErrorCode.FeeAbstractionInvalidExpirationLedger).toBe(5006);
     });
 
     it('UpgradeNotOwner is the one shared admin code (600), out of the token 1xx domain', () => {
-        expect(ContractErrorType.UpgradeNotOwner).toBe(600);
-        expect(contractErrorFromCode(600).type).toBe(ContractErrorType.UpgradeNotOwner);
+        expect(ZenexErrorCode.UpgradeNotOwner).toBe(600);
+        expect(zenexErrorFromCode(600).code).toBe(ZenexErrorCode.UpgradeNotOwner);
         // The token domain keeps 100-102; a bare code cannot be ambiguous.
-        expect(contractErrorFromCode(100).type).toBe(ContractErrorType.InsufficientBalance);
-        expect(contractErrorFromCode(102).type).toBe(ContractErrorType.InvalidLiveUntilLedger);
+        expect(zenexErrorFromCode(100).code).toBe(ZenexErrorCode.InsufficientBalance);
+        expect(zenexErrorFromCode(102).code).toBe(ZenexErrorCode.InvalidLiveUntilLedger);
     });
 
     it('ownable and role-transfer cover the OpenZeppelin sets (2100-2102, 2200-2203)', () => {
-        expect(ContractErrorType.OwnerNotSet).toBe(2100);
-        expect(ContractErrorType.OwnershipTransferInProgress).toBe(2101);
-        expect(ContractErrorType.OwnerAlreadySet).toBe(2102);
-        expect(ContractErrorType.NoPendingTransfer).toBe(2200);
-        expect(ContractErrorType.TransferInvalidLiveUntilLedger).toBe(2201);
-        expect(ContractErrorType.InvalidPendingAccount).toBe(2202);
-        expect(ContractErrorType.TransferExpired).toBe(2203);
+        expect(ZenexErrorCode.OwnerNotSet).toBe(2100);
+        expect(ZenexErrorCode.OwnershipTransferInProgress).toBe(2101);
+        expect(ZenexErrorCode.OwnerAlreadySet).toBe(2102);
+        expect(ZenexErrorCode.NoPendingTransfer).toBe(2200);
+        expect(ZenexErrorCode.TransferInvalidLiveUntilLedger).toBe(2201);
+        expect(ZenexErrorCode.InvalidPendingAccount).toBe(2202);
+        expect(ZenexErrorCode.TransferExpired).toBe(2203);
     });
 
     it('strategy-vault is the 800-801 pair from strategy.rs', () => {
-        expect(ContractErrorType.StrategyInvalidAmount).toBe(800);
-        expect(ContractErrorType.StrategyPnlExceedsAssets).toBe(801);
+        expect(ZenexErrorCode.StrategyInvalidAmount).toBe(800);
+        expect(ZenexErrorCode.StrategyPnlExceedsAssets).toBe(801);
     });
 
     it('governance moved to 810-812 per governance/src/errors.rs', () => {
-        expect(ContractErrorType.GovNotQueued).toBe(810);
-        expect(ContractErrorType.GovNotUnlocked).toBe(811);
-        expect(ContractErrorType.GovInvalidDelay).toBe(812);
+        expect(ZenexErrorCode.GovNotQueued).toBe(810);
+        expect(ZenexErrorCode.GovNotUnlocked).toBe(811);
+        expect(ZenexErrorCode.GovInvalidDelay).toBe(812);
     });
 
     it('treasury InvalidRate stays at 900', () => {
-        expect(ContractErrorType.TreasuryInvalidRate).toBe(900);
+        expect(ZenexErrorCode.TreasuryInvalidRate).toBe(900);
     });
 
     it('the market 700-772 range lives inside the one flat enum', () => {
-        expect(ContractErrorType[700]).toBe('InvalidConfig');
-        expect(ContractErrorType[772]).toBe('AdlNotEligible');
+        expect(ZenexErrorCode[700]).toBe('InvalidConfig');
+        expect(ZenexErrorCode[772]).toBe('AdlNotEligible');
     });
 
     it('the stale names are gone (v1 market, old strategy-vault 790-793, governance 770-772 aliases)', () => {
-        const memberNames = ContractErrorType as unknown as Record<string, unknown>;
+        const memberNames = ZenexErrorCode as unknown as Record<string, unknown>;
         expect(memberNames.MarketNotFound).toBeUndefined();
         expect(memberNames.PriceSlippage).toBeUndefined();
         expect(memberNames.LeverageAboveMaximum).toBeUndefined();
         expect(memberNames.ContractFrozen).toBeUndefined();
         expect(memberNames.SharesLocked).toBeUndefined();
         // 770-772 are the market ADL codes, not the old governance aliases
-        expect(ContractErrorType[770]).toBe('AdlNotTriggered');
-        expect(ContractErrorType[771]).toBe('AdlOvershoot');
-        expect(ContractErrorType[772]).toBe('AdlNotEligible');
+        expect(ZenexErrorCode[770]).toBe('AdlNotTriggered');
+        expect(ZenexErrorCode[771]).toBe('AdlOvershoot');
+        expect(ZenexErrorCode[772]).toBe('AdlNotEligible');
     });
 });
 
-describe('contractErrorFromCode (hint-free resolution)', () => {
+describe('zenexErrorFromCode (hint-free resolution)', () => {
     it('takes only the code (collision-hint parameter deleted)', () => {
-        expect(contractErrorFromCode.length).toBe(1);
+        expect(zenexErrorFromCode.length).toBe(1);
     });
 
     it('resolves the new market codes', () => {
-        expect(contractErrorFromCode(723).type).toBe(ContractErrorType.PositionLiquidatable);
-        expect(contractErrorFromCode(733).type).toBe(ContractErrorType.TooManyOrders);
-        expect(contractErrorFromCode(734).type).toBe(ContractErrorType.UnknownKind);
-        expect(contractErrorFromCode(742).type).toBe(ContractErrorType.TriggerNotMet);
-        expect(contractErrorFromCode(752).type).toBe(ContractErrorType.MinOutNotMet);
-        expect(contractErrorFromCode(754).type).toBe(ContractErrorType.PendingPnlExceeded);
-        expect(contractErrorFromCode(755).type).toBe(ContractErrorType.VaultInsolvent);
-        expect(contractErrorFromCode(760).type).toBe(ContractErrorType.NothingToClaim);
+        expect(zenexErrorFromCode(723).code).toBe(ZenexErrorCode.PositionLiquidatable);
+        expect(zenexErrorFromCode(733).code).toBe(ZenexErrorCode.TooManyOrders);
+        expect(zenexErrorFromCode(734).code).toBe(ZenexErrorCode.UnknownKind);
+        expect(zenexErrorFromCode(742).code).toBe(ZenexErrorCode.TriggerNotMet);
+        expect(zenexErrorFromCode(752).code).toBe(ZenexErrorCode.MinOutNotMet);
+        expect(zenexErrorFromCode(754).code).toBe(ZenexErrorCode.PendingPnlExceeded);
+        expect(zenexErrorFromCode(755).code).toBe(ZenexErrorCode.VaultInsolvent);
+        expect(zenexErrorFromCode(760).code).toBe(ZenexErrorCode.NothingToClaim);
     });
 
     it('resolves 770-772 unhinted to the market ADL errors with ADL messages', () => {
-        const adlNotTriggered = contractErrorFromCode(770);
-        expect(adlNotTriggered.type).toBe(ContractErrorType.AdlNotTriggered);
+        const adlNotTriggered = zenexErrorFromCode(770);
+        expect(adlNotTriggered.code).toBe(ZenexErrorCode.AdlNotTriggered);
         expect(adlNotTriggered.message).toMatch(/ADL/);
         expect(adlNotTriggered.message).not.toMatch(/queued/i);
 
-        expect(contractErrorFromCode(771).type).toBe(ContractErrorType.AdlOvershoot);
-        expect(contractErrorFromCode(772).type).toBe(ContractErrorType.AdlNotEligible);
+        expect(zenexErrorFromCode(771).code).toBe(ZenexErrorCode.AdlOvershoot);
+        expect(zenexErrorFromCode(772).code).toBe(ZenexErrorCode.AdlNotEligible);
     });
 
     it('resolves governance 810-812 with the queue/timelock messages', () => {
-        const notQueued = contractErrorFromCode(810);
-        expect(notQueued.type).toBe(ContractErrorType.GovNotQueued);
+        const notQueued = zenexErrorFromCode(810);
+        expect(notQueued.code).toBe(ZenexErrorCode.GovNotQueued);
         expect(notQueued.message).toMatch(/queued/i);
         expect(notQueued.message).not.toMatch(/ADL/);
 
-        expect(contractErrorFromCode(811).type).toBe(ContractErrorType.GovNotUnlocked);
-        expect(contractErrorFromCode(812).type).toBe(ContractErrorType.GovInvalidDelay);
+        expect(zenexErrorFromCode(811).code).toBe(ZenexErrorCode.GovNotUnlocked);
+        expect(zenexErrorFromCode(812).code).toBe(ZenexErrorCode.GovInvalidDelay);
     });
 
     it('resolves strategy-vault 800-801 and the oracle feed/clock pair 790/793', () => {
-        expect(contractErrorFromCode(800).type).toBe(ContractErrorType.StrategyInvalidAmount);
-        expect(contractErrorFromCode(801).type).toBe(ContractErrorType.StrategyPnlExceedsAssets);
-        expect(contractErrorFromCode(790).type).toBe(ContractErrorType.OracleFeedMismatch);
-        expect(contractErrorFromCode(790).message).toBe(
+        expect(zenexErrorFromCode(800).code).toBe(ZenexErrorCode.StrategyInvalidAmount);
+        expect(zenexErrorFromCode(801).code).toBe(ZenexErrorCode.StrategyPnlExceedsAssets);
+        expect(zenexErrorFromCode(790).code).toBe(ZenexErrorCode.OracleFeedMismatch);
+        expect(zenexErrorFromCode(790).message).toBe(
             'Report prices a different stream than the feed anchor'
         );
-        expect(contractErrorFromCode(793).type).toBe(ContractErrorType.OraclePriceAhead);
+        expect(zenexErrorFromCode(793).code).toBe(ZenexErrorCode.OraclePriceAhead);
     });
 
     it('describes 782/783/793 in two-tier staleness terms (contracts #169)', () => {
         // 782 fires against whichever window the call selected, so the message
         // must not imply a single global threshold.
-        const stale = contractErrorFromCode(782).message;
+        const stale = zenexErrorFromCode(782).message;
         expect(stale).toMatch(/trade_staleness/);
         expect(stale).toMatch(/close_staleness/);
 
         // 783 pins both halves of the validity rule: the trade window's own
         // bounds and the ordering against the close window.
-        const bounds = contractErrorFromCode(783).message;
+        const bounds = zenexErrorFromCode(783).message;
         expect(bounds).toMatch(/3 <= trade_staleness <= 15/);
         expect(bounds).toMatch(/trade_staleness <= close_staleness <= 120/);
 
         // The forward allowance never widens with the call class — quoting the
         // close window here would misdescribe the gate.
-        const ahead = contractErrorFromCode(793).message;
+        const ahead = zenexErrorFromCode(793).message;
         expect(ahead).toMatch(/trade_staleness ahead/);
         expect(ahead).not.toMatch(/close_staleness ahead/);
     });
 
     it('resolves the Chainlink report rejects 784/785 with their new meanings', () => {
-        expect(contractErrorFromCode(784).type).toBe(ContractErrorType.OracleReportExpired);
-        expect(contractErrorFromCode(784).message).toBe(
+        expect(zenexErrorFromCode(784).code).toBe(ZenexErrorCode.OracleReportExpired);
+        expect(zenexErrorFromCode(784).message).toBe(
             'Ledger clock has passed the report expiresAt'
         );
-        expect(contractErrorFromCode(785).type).toBe(
-            ContractErrorType.OracleInvalidSpreadReduction
+        expect(zenexErrorFromCode(785).code).toBe(
+            ZenexErrorCode.OracleInvalidSpreadReduction
         );
-        expect(contractErrorFromCode(785).message).not.toMatch(/payload|trailing/i);
+        expect(zenexErrorFromCode(785).message).not.toMatch(/payload|trailing/i);
     });
 
     it('resolves fee-abstraction 5003 with the relay fee-bounds message', () => {
-        const error = contractErrorFromCode(5003);
-        expect(error.type).toBe(ContractErrorType.FeeAbstractionInvalidFeeBounds);
+        const error = zenexErrorFromCode(5003);
+        expect(error.code).toBe(ZenexErrorCode.FeeAbstractionInvalidFeeBounds);
         expect(error.message).toBe('Relayer fee is outside the signed fee bounds');
     });
 
     it('falls back to UnknownError for codes in no namespace', () => {
-        expect(contractErrorFromCode(999).type).toBe(ContractErrorType.UnknownError);
-        expect(contractErrorFromCode(0).type).toBe(ContractErrorType.UnknownError);
-        expect(contractErrorFromCode(707).type).toBe(ContractErrorType.UnknownError);
+        expect(zenexErrorFromCode(999).code).toBe(ZenexErrorCode.UnknownError);
+        expect(zenexErrorFromCode(0).code).toBe(ZenexErrorCode.UnknownError);
+        expect(zenexErrorFromCode(707).code).toBe(ZenexErrorCode.UnknownError);
     });
 
-    it('returns ContractError instances carrying the numeric code', () => {
-        const error = contractErrorFromCode(741);
-        expect(error).toBeInstanceOf(ContractError);
-        expect(error.type).toBe(741);
+    it('returns ZenexError instances carrying the numeric code', () => {
+        const error = zenexErrorFromCode(741);
+        expect(error).toBeInstanceOf(ZenexError);
+        expect(error.code).toBe(741);
     });
 });
 

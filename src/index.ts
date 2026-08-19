@@ -216,9 +216,9 @@ export type {
 // =============================================================================
 
 export {
-    ContractError,
-    ContractErrorType,
-    contractErrorFromCode,
+    ZenexError,
+    ZenexErrorCode,
+    zenexErrorFromCode,
     parseError,
     parseResult,
 } from './response_parser.js';

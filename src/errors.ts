@@ -7,9 +7,9 @@
  * across contracts; where two contracts reuse a name for different meanings
  * (the oracle also has an `InvalidPrice`), the smaller domain carries a
  * prefix naming its meaning. Resolve a raw code with
- * `contractErrorFromCode`.
+ * `zenexErrorFromCode`.
  */
-export enum ContractErrorType {
+export enum ZenexErrorCode {
     // SDK-side sentinels: negative, never emitted by a contract.
     UnknownError = -1000,
     /** Quote/preview math rejected an input before any contract rule ran. */
@@ -394,21 +394,22 @@ const errorMessages: Record<number, string> = {
 };
 
 /**
- * An error decoded from a failed contract call or RPC response. `type`
- * carries the numeric code. The message defaults to the code's entry in
+ * The one error shape the SDK reports, from a failed contract call, an RPC
+ * response, or the SDK's own quote/preview gates. `code` carries the
+ * numeric code. The message defaults to the code's entry in
  * `errorMessages`, or a fallback string when the code is not recognized.
  */
-export class ContractError extends Error {
-    public type: ContractErrorType;
+export class ZenexError extends Error {
+    public code: ZenexErrorCode;
 
-    constructor(type: ContractErrorType, message?: string) {
-        super(message ?? errorMessages[type] ?? `Contract error ${type}`);
-        this.type = type;
+    constructor(code: ZenexErrorCode, message?: string) {
+        super(message ?? errorMessages[code] ?? `Contract error ${code}`);
+        this.code = code;
     }
 }
 
 /**
- * Resolve a raw on-chain error code to a ContractError.
+ * Resolve a raw on-chain error code to a ZenexError.
  *
  * The per-contract code namespaces are disjoint (shared admin 600,
  * market 700-772, oracle 780-793, strategy-vault 800-801,
@@ -416,11 +417,27 @@ export class ContractError extends Error {
  * 2200-2203, fee-abstraction 5000-5006), so every code resolves without a
  * hint.
  */
-export function contractErrorFromCode(code: number): ContractError {
-    if (code in ContractErrorType) {
-        return new ContractError(code as ContractErrorType);
+export function zenexErrorFromCode(code: number): ZenexError {
+    if (code in ZenexErrorCode) {
+        return new ZenexError(code as ZenexErrorCode);
     }
-    return new ContractError(ContractErrorType.UnknownError);
+    return new ZenexError(ZenexErrorCode.UnknownError);
+}
+
+/**
+ * Resolve a quote/preview gate to a `ZenexError`: the canonical message for
+ * a contract code, the gate's own `reason` for an SDK sentinel — sentinel
+ * reasons are built in place and carry more context than the generic
+ * sentinel message.
+ */
+export function zenexErrorFromGate(code: number, reason: string): ZenexError {
+    if (
+        code === ZenexErrorCode.QuoteInvalidInput ||
+        code === ZenexErrorCode.QuoteOverflow
+    ) {
+        return new ZenexError(code, reason);
+    }
+    return zenexErrorFromCode(code);
 }
 
 // Soroban contract error codes are u32; anything larger is not a real code.
@@ -433,7 +450,7 @@ const CONTRACT_ERROR_PATTERN = /Error\(Contract, #(\d{1,10})\)/;
 /**
  * The contract error code inside a raw RPC simulation or diagnostic string,
  * or `undefined` when the strict `Error(Contract, #N)` shape is absent or the
- * number is not a valid u32. Feed the result to `contractErrorFromCode`.
+ * number is not a valid u32. Feed the result to `zenexErrorFromCode`.
  */
 export function parseContractErrorCode(rpcError: string): number | undefined {
     const match = CONTRACT_ERROR_PATTERN.exec(rpcError);

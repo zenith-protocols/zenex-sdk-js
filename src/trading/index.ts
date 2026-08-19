@@ -28,4 +28,3 @@ export type { MarketEstimate, SideRatesEstimate } from './market_est.js';
 export { estimatePosition } from './position_est.js';
 export type { PositionEstimate } from './position_est.js';
 export { VaultOrderIntent } from './vault_order.js';
-export type { VaultOrderBlock } from './vault_order.js';
