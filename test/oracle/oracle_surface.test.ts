@@ -19,7 +19,6 @@ function decodeInvoke(op: string) {
 const priceDataScVal = () => xdr.ScVal.scvMap([
     new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol('ask'), val: nativeToScVal(101n, { type: 'i128' }) }),
     new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol('bid'), val: nativeToScVal(99n, { type: 'i128' }) }),
-    new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol('feed_id'), val: xdr.ScVal.scvBytes(FEED_ID) }),
     new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol('publish_time'), val: nativeToScVal(1234n, { type: 'u64' }) }),
 ]);
 
@@ -72,7 +71,6 @@ describe('OracleContract surface', () => {
     it('parses results', () => {
         const p = OracleContract.parsers;
         const pd = p.verifyPrice(priceDataScVal().toXDR('base64'));
-        expect(pd.feed_id).toEqual(FEED_ID);
         expect(pd.bid).toBe(99n);
         expect(pd.ask).toBe(101n);
         expect(pd.publish_time).toBe(1234n);
