@@ -81,20 +81,18 @@ describe('OracleContract', () => {
         expect(args).toEqual([]);
     });
 
-    it('parsers.verifyPrice decodes ask/bid/feed_id/publish_time (no exponent)', () => {
+    it('parsers.verifyPrice decodes ask/bid/publish_time (no feed_id echo, no exponent)', () => {
         const entry = (key: string, val: xdr.ScVal) =>
             new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
         const priceData = xdr.ScVal.scvMap([
             entry('ask', nativeToScVal(200n, { type: 'i128' })),
             entry('bid', nativeToScVal(100n, { type: 'i128' })),
-            entry('feed_id', xdr.ScVal.scvBytes(FEED_ID)),
             entry('publish_time', nativeToScVal(1234n, { type: 'u64' })),
         ]);
         const result = OracleContract.parsers.verifyPrice(priceData.toXDR('base64'));
         expect(result).toEqual({
             ask: 200n,
             bid: 100n,
-            feed_id: FEED_ID,
             publish_time: 1234n,
         });
     });
@@ -123,7 +121,7 @@ describe('OracleContract', () => {
         );
         expect(structEntry).toBeDefined();
         const fields = structEntry!.udtStructV0().fields().map((f) => f.name().toString());
-        expect(fields).toEqual(['ask', 'bid', 'feed_id', 'publish_time']);
+        expect(fields).toEqual(['ask', 'bid', 'publish_time']);
     });
 
     it('upgrade builds with the wasm hash first, then the operator', () => {

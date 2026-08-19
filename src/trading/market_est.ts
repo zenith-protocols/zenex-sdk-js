@@ -1,7 +1,8 @@
 import { SCALAR_18 } from '../math/fixed.js';
 import {
-    formatAnnualPercent,
+    formatHourlyPercent,
     formatPercent,
+    formatPrice,
     formatToken,
     formatTokenFloor,
 } from '../float.js';
@@ -10,7 +11,12 @@ import type { PriceInput } from './price.js';
 import { resolvePrice } from './price.js';
 import type { PriceData } from './internal/math.js';
 import { mulDivFloor } from '../math/fixed.js';
-import { borrowingRate, exitPrice, marketSidePnl } from './internal/math.js';
+import {
+    borrowingRate,
+    exitPrice,
+    marketFundingRatesPerSide,
+    marketSidePnl,
+} from './internal/math.js';
 import {
     cappedNetPnl,
     convertVaultAssetsToShares,
@@ -22,10 +28,20 @@ import {
 export interface SideRatesEstimate {
     /** Reserve utilization of the side's own half of the vault, percent. */
     utilizationPercent: number;
-    /** Borrowing rate the side would pay, annualized percent. */
-    borrowAprPercent: number;
+    /** Borrowing rate the side would pay, percent of notional per hour. */
+    borrowRatePercent1h: number;
+    /**
+     * Funding rate this side's trader pays, percent of notional per hour.
+     * Positive: the side pays; negative: it receives (the payer's charge
+     * re-spread over this side's notional). Zero when the stored rate is 0.
+     */
+    fundingRatePercent1h: number;
     /** Whether this side is charged borrowing now (dominant side pays; a tie charges both). */
     charged: boolean;
+    /** Entry notional held by the side, settlement-token units. */
+    notional: number;
+    /** Margin posted by the side, settlement-token units. */
+    margin: number;
     /** Open interest, base-token units. */
     openInterestTokens: number;
     /** Open interest valued at the estimate price, settlement-token units. */
@@ -38,11 +54,9 @@ export interface SideRatesEstimate {
      */
     openCapacity: number;
     /**
-     * Net rate this side's trader pays per hour, percent of notional.
-     * Positive: the trader pays; negative: the trader earns. Combines the
-     * floored funding charge (with the receiver side credited at the payer
-     * magnitude re-spread over the receiver's notional) and the borrowing
-     * rate when this side is charged it.
+     * Net rate this side's trader pays per hour, percent of notional:
+     * `fundingRatePercent1h` plus `borrowRatePercent1h` when the side is
+     * charged borrowing. Positive: the trader pays; negative: it earns.
      */
     netRatePercent1h: number;
 }
@@ -53,10 +67,20 @@ export interface SideRatesEstimate {
  * any of it back into a transaction.
  */
 export interface MarketEstimate {
-    /** Stored funding rate, annualized percent. Positive: longs pay shorts. Not floored. */
-    fundingAprPercent: number;
-    /** Funding rate a payer is actually charged: unsigned, floored at `fundingMin`, zero at zero. */
-    fundingChargeAprPercent: number;
+    /** Stored funding rate, percent per hour. Positive: longs pay shorts. Not floored. */
+    fundingRatePercent1h: number;
+    /** Funding rate a payer is actually charged, percent per hour: unsigned, floored at `fundingMin`, zero at zero. */
+    fundingChargeRatePercent1h: number;
+    /** Best bid the estimate was priced at (18-dec scalar, as a float). */
+    bid: number;
+    /** Best ask the estimate was priced at (18-dec scalar, as a float). */
+    ask: number;
+    /** Unix seconds the estimate's price was observed by the oracle. */
+    publishTime: number;
+    /** Vault margin balance, settlement-token units. */
+    vaultAssets: number;
+    /** Vault shares in circulation, share units. */
+    vaultSupply: number;
     /** Max leverage the initial-margin requirement allows (`1 / initMargin`). */
     maxLeverage: number;
     /** Long-side utilization and borrow APR at the current book. */
@@ -80,18 +104,6 @@ export interface MarketEstimate {
     maxRedeemableShares: number;
 }
 
-/**
- * Compute the market's display estimate at `price` (bare bigint =
- * zero-spread), against the market as passed — pass `market.accrue(price)`
- * for numbers advanced to now. Every figure is computed by the exact
- * mirrors and converted to `number` at this boundary only; a keeper reads
- * the same {@link Market} methods directly for exact bigints.
- */
-/** Per-hour percent of a per-second SCALAR_18 rate. */
-function percentPerHour(perSecondRate: bigint): number {
-    return (Number(perSecondRate) / Number(SCALAR_18)) * 3600 * 100;
-}
-
 function sideEstimate(
     market: Market,
     p: PriceData,
@@ -107,45 +119,26 @@ function sideEstimate(
     const charged = own >= other;
     const utilization = market.utilization(isLong, price);
     const borrowPerSec = borrowingRate(config, utilization);
+    const fundingSplit = marketFundingRatesPerSide(data, config);
+    const fundingPerSec = isLong ? fundingSplit.long : fundingSplit.short;
 
-    // Funding leg, signed toward what THIS side's trader pays: the payer
-    // side is charged the floored magnitude; the receiver side is credited
-    // the payer's charge re-spread over the receiver's notional.
-    let fundingPerSec = 0n;
-    if (data.fundingRate !== 0n) {
-        const longsPay = data.fundingRate > 0n;
-        const magnitude =
-            data.fundingRate < 0n ? -data.fundingRate : data.fundingRate;
-        const chargedMagnitude =
-            magnitude > config.fundingMin ? magnitude : config.fundingMin;
-        if (isLong === longsPay) {
-            fundingPerSec = chargedMagnitude;
-        } else {
-            const payerNotional = longsPay
-                ? data.notional.long
-                : data.notional.short;
-            const receiverNotional = longsPay
-                ? data.notional.short
-                : data.notional.long;
-            fundingPerSec =
-                receiverNotional > 0n
-                    ? -mulDivFloor(
-                          chargedMagnitude,
-                          payerNotional,
-                          receiverNotional,
-                      )
-                    : 0n;
-        }
-    }
-    const netPerHour =
-        percentPerHour(fundingPerSec) +
-        (charged ? percentPerHour(borrowPerSec) : 0);
+    const borrow1h = formatHourlyPercent(borrowPerSec);
+    const funding1h = formatHourlyPercent(fundingPerSec);
 
     const mark = exitPrice(p, isLong);
     return {
         utilizationPercent: formatPercent(utilization),
-        borrowAprPercent: formatAnnualPercent(borrowPerSec),
+        borrowRatePercent1h: borrow1h,
+        fundingRatePercent1h: funding1h,
         charged,
+        notional: formatToken(
+            isLong ? data.notional.long : data.notional.short,
+            decimals,
+        ),
+        margin: formatToken(
+            isLong ? data.margin.long : data.margin.short,
+            decimals,
+        ),
         openInterestTokens: formatToken(own, decimals),
         openInterestValue: formatToken(
             mulDivFloor(own, mark, SCALAR_18),
@@ -155,7 +148,7 @@ function sideEstimate(
             market.openCapacity(isLong, price),
             decimals,
         ),
-        netRatePercent1h: netPerHour,
+        netRatePercent1h: funding1h + (charged ? borrow1h : 0),
     };
 }
 
@@ -185,6 +178,13 @@ function maxWithdrawableAssets(market: Market, p: PriceData): bigint {
     return low;
 }
 
+/**
+ * Compute the market's display estimate at `price` (bare bigint =
+ * zero-spread), against the market as passed — pass `market.accrue(price)`
+ * for numbers advanced to now. Every figure is computed by the exact
+ * mirrors and converted to `number` at this boundary only; a keeper reads
+ * the same {@link Market} methods directly for exact bigints.
+ */
 export function estimateMarket(
     market: Market,
     price: PriceInput,
@@ -228,8 +228,13 @@ export function estimateMarket(
     const shortPnl = marketSidePnl(data, p, false, true);
 
     return {
-        fundingAprPercent: formatAnnualPercent(data.fundingRate),
-        fundingChargeAprPercent: formatAnnualPercent(chargedMagnitude),
+        fundingRatePercent1h: formatHourlyPercent(data.fundingRate),
+        fundingChargeRatePercent1h: formatHourlyPercent(chargedMagnitude),
+        bid: formatPrice(p.bid),
+        ask: formatPrice(p.ask),
+        publishTime: Number(p.publishTime),
+        vaultAssets: formatToken(market.vaultAssets, decimals),
+        vaultSupply: formatToken(market.vaultShares, shareDecimals),
         maxLeverage:
             config.initMargin === 0n
                 ? Infinity

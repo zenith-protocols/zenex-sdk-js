@@ -9,8 +9,6 @@ import { u32, u64, i128 } from '../../index.js';
  * at the same scale.
  */
 export interface OraclePriceData {
-    /** Data Streams stream id, 32 bytes. Equals the request's feedId. */
-    feed_id: Buffer;
     /** Best bid, after spread reduction. The market fills the adverse close side here. */
     bid: i128;
     /** Best ask, same precision as bid. The market fills the adverse open side here. */

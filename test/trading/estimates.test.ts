@@ -22,6 +22,7 @@ import { VaultOrderIntent } from '../../src/trading/vault_order.js';
 import {
     SECONDS_PER_YEAR,
     formatAnnualPercent,
+    formatHourlyPercent,
     formatPercent,
     formatPrice,
     formatRatio,
@@ -166,7 +167,7 @@ describe('estimateMarket', () => {
         );
 
         expect(est.long.utilizationPercent).toBeGreaterThan(0);
-        expect(est.long.borrowAprPercent).toBeGreaterThan(0);
+        expect(est.long.borrowRatePercent1h).toBeGreaterThan(0);
         // Longs dominate on tokens, so longs are the side actually charged.
         expect(est.long.charged).toBe(true);
         expect(est.short.charged).toBe(false);
@@ -184,9 +185,9 @@ describe('estimateMarket', () => {
     it('signs funding by who pays', () => {
         const at = (rate: bigint) =>
             estimateMarket(loadedMarket({ fundingRate: rate }), px(10));
-        expect(at(500n).fundingAprPercent).toBeGreaterThan(0);
-        expect(at(-500n).fundingAprPercent).toBeLessThan(0);
-        expect(at(0n).fundingAprPercent).toBe(0);
+        expect(at(500n).fundingRatePercent1h).toBeGreaterThan(0);
+        expect(at(-500n).fundingRatePercent1h).toBeLessThan(0);
+        expect(at(0n).fundingRatePercent1h).toBe(0);
     });
 
     it('floors the charged funding rate but not the stored one', () => {
@@ -194,13 +195,13 @@ describe('estimateMarket', () => {
             loadedMarket({ fundingRate: 1n }, { fundingMin: 100n }),
             px(10),
         );
-        expect(tiny.fundingChargeAprPercent).toBe(formatAnnualPercent(100n));
-        expect(tiny.fundingAprPercent).toBe(formatAnnualPercent(1n));
+        expect(tiny.fundingChargeRatePercent1h).toBe(formatHourlyPercent(100n));
+        expect(tiny.fundingRatePercent1h).toBe(formatHourlyPercent(1n));
         const zero = estimateMarket(
             loadedMarket({ fundingRate: 0n }, { fundingMin: 100n }),
             px(10),
         );
-        expect(zero.fundingChargeAprPercent).toBe(0);
+        expect(zero.fundingChargeRatePercent1h).toBe(0);
     });
 
     it('derives max leverage from the initial margin', () => {
@@ -228,13 +229,31 @@ describe('estimateMarket', () => {
             px(10),
         );
         const fundingPct1h = (1_000_000 / 1e18) * 3600 * 100;
-        const hours = SECONDS_PER_YEAR / 3600;
         const fundingLeg = (side: typeof est.long): number =>
-            side.netRatePercent1h -
-            (side.charged ? side.borrowAprPercent / hours : 0);
+            side.fundingRatePercent1h;
         expect(est.long.netRatePercent1h).toBeGreaterThan(0);
         expect(fundingLeg(est.long)).toBeCloseTo(fundingPct1h, 12);
         expect(fundingLeg(est.short)).toBeCloseTo(-fundingPct1h / 2, 12);
+    });
+
+    it('carries the snapshot facts: raws, vault totals, and the price echo', () => {
+        const est = estimateMarket(
+            loadedMarket({
+                notional: pair(unit(100), unit(50)),
+                margin: pair(unit(10), unit(5)),
+                tokens: pair(unit(10), unit(5)),
+            }),
+            px(10),
+        );
+        expect(est.long.notional).toBeCloseTo(100, 6);
+        expect(est.short.notional).toBeCloseTo(50, 6);
+        expect(est.long.margin).toBeCloseTo(10, 6);
+        expect(est.short.margin).toBeCloseTo(5, 6);
+        expect(est.vaultAssets).toBeGreaterThan(0);
+        expect(est.vaultSupply).toBeGreaterThan(0);
+        expect(est.bid).toBeCloseTo(10, 6);
+        expect(est.ask).toBeCloseTo(10, 6);
+        expect(est.publishTime).toBeGreaterThanOrEqual(0);
     });
 
     it('reports open interest and capacity per side', () => {
