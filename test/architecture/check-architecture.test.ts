@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -114,5 +114,28 @@ describe('SDK architecture checker mutation fixtures', () => {
                 expect.objectContaining({ rule: 'frontend-dependency' }),
             ]),
         );
+    });
+
+    it('fails loudly when the src root is missing instead of verifying nothing', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'zenex-sdk-architecture-'));
+        roots.push(root);
+        await expect(checkArchitecture(root)).rejects.toThrow(/ENOENT/);
+    });
+
+    it('propagates a permission failure on a nested directory', async () => {
+        // Root ignores file modes, so the probe is meaningless there (CI
+        // containers often run as uid 0).
+        if (process.getuid?.() === 0) return;
+        const root = await fixture({
+            'src/math/fixed.ts': 'export const ok = 1n;\n',
+        });
+        const blocked = join(root, 'src', 'blocked');
+        await mkdir(blocked);
+        await chmod(blocked, 0o000);
+        try {
+            await expect(checkArchitecture(root)).rejects.toThrow(/EACCES/);
+        } finally {
+            await chmod(blocked, 0o755);
+        }
     });
 });

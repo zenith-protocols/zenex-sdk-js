@@ -25,11 +25,14 @@ const FORBIDDEN_CONTRACT_FUNCTIONS = new Set([
 ]);
 
 async function sourceFiles(directory, { required = false } = {}) {
-    // A vanished nested directory is a race worth tolerating; an unreadable
-    // root would let the gate pass without inspecting anything.
+    // A nested directory vanishing mid-walk (ENOENT/ENOTDIR) is a race worth
+    // tolerating. Anything else — an unreadable root, EACCES on a subtree —
+    // would let the gate pass without inspecting everything, so it throws.
     const entries = await readdir(directory, { withFileTypes: true }).catch(
         (error) => {
-            if (required) throw error;
+            if (required || (error.code !== 'ENOENT' && error.code !== 'ENOTDIR')) {
+                throw error;
+            }
             return [];
         },
     );
