@@ -1,8 +1,8 @@
-import { contractInstanceLedgerKey } from './contracts/keys.js';
-import { parseTreasuryInstance, parseTreasuryRate } from './contracts/treasury/instance.js';
-import type { TreasuryInstanceState } from './contracts/treasury/instance.js';
-import { readEntries } from './entries.js';
-import type { Network } from './index.js';
+import { contractInstanceLedgerKey } from '../contracts/keys.js';
+import { parseTreasuryInstance, parseTreasuryRate } from '../contracts/treasury/instance.js';
+import type { TreasuryInstanceState } from '../contracts/treasury/instance.js';
+import { readEntries } from '../entries.js';
+import type { Network } from '../index.js';
 
 /**
  * Read the protocol fee rate (a SCALAR_18 fraction) from a treasury contract.

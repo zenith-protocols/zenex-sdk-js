@@ -114,7 +114,6 @@ export {
 
 export { MarketStateError } from './entries.js';
 export type { MarketStateFailureCode } from './entries.js';
-export { loadTreasuryInstance, loadTreasuryRate } from './treasury.js';
 
 // =============================================================================
 // Market Router Module (stateless batching + create-and-fill flows)

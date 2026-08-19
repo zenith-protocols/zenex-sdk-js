@@ -5,7 +5,7 @@ import { Market } from '../../src/trading/market.js';
 import { marketContext } from '../../src/trading/order.js';
 import { Price } from '../../src/trading/price.js';
 import { loadTokenBalance, loadTokenBalances } from '../../src/token.js';
-import { loadTreasuryInstance, loadTreasuryRate } from '../../src/treasury.js';
+import { loadTreasuryInstance, loadTreasuryRate } from '../../src/trading/treasury.js';
 import { contractInstanceLedgerKey } from '../../src/contracts/keys.js';
 import {
     marketClaimableFundingLedgerKey,

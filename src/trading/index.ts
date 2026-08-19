@@ -4,6 +4,7 @@
 // re-exported here; it is reachable for advanced callers but carries no
 // API promises.
 
+export { loadTreasuryInstance, loadTreasuryRate } from './treasury.js';
 export { Price } from './price.js';
 export type { PriceInput } from './price.js';
 export { Market } from './market.js';

@@ -36,8 +36,9 @@ export { MarketEventType } from './events.js';
 export { parseMarketInstance } from './instance.js';
 export type { MarketInstanceState } from './instance.js';
 
-// State loaders live in `src/state/`: `Market.load`, `MarketUser.load`,
-// `loadTokenBalance`, `loadTreasuryRate`.
+// State loaders live in the trading tier (`src/trading/`): `Market.load`,
+// `MarketUser.load`, `loadTreasuryRate` — plus `loadTokenBalance` in
+// `src/token.ts`.
 
 export type {
     BaseMarketEvent,
