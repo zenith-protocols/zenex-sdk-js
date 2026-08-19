@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { ZenexContractType } from '../src/base_event.js';
 import type { ZenexEvent } from '../src/base_event.js';
 import {
-    TradingEventType,
+    MarketEventType,
 } from '../src/contracts/market/events.js';
 import type {
-    TradingCancelOrderEvent,
-    TradingLiquidationEvent,
+    MarketCancelOrderEvent,
+    MarketLiquidationEvent,
 } from '../src/contracts/market/events.js';
 import { VaultEventType } from '../src/contracts/vault/events.js';
 import type { VaultDepositEvent, VaultWithdrawEvent } from '../src/contracts/vault/events.js';
@@ -16,7 +16,7 @@ import type { FactoryDeployEvent } from '../src/contracts/factory/events.js';
 
 // =============================================================================
 // Event-type enums are hand-checked against the contract sources on v2 main:
-//   trading/src/events.rs, strategy-vault/src/strategy.rs (+ OZ stellar-tokens
+//   market/src/events.rs, strategy-vault/src/strategy.rs (+ OZ stellar-tokens
 //   v0.7.0 vault/mod.rs Deposit/Withdraw), governance/src/events.rs,
 //   factory/src/events.rs.
 // Every workspace event uses bare #[contractevent], so each name topic is the
@@ -32,12 +32,12 @@ const base = {
     txHash: 't',
 } as const;
 
-describe('trading event surface', () => {
+describe('market event surface', () => {
     it('cancel_order carries the escrow refund (owner cancel and closure sweep)', () => {
-        const event: TradingCancelOrderEvent = {
+        const event: MarketCancelOrderEvent = {
             ...base,
-            contractType: ZenexContractType.Trading,
-            eventType: TradingEventType.CancelOrder,
+            contractType: ZenexContractType.Market,
+            eventType: MarketEventType.CancelOrder,
             user: 'G',
             orderId: 1,
             refund: 500n,
@@ -46,7 +46,7 @@ describe('trading event surface', () => {
     });
 
     it('liquidation itemizes liqFee; forfeit is gone', () => {
-        type LiquidationKeys = keyof TradingLiquidationEvent;
+        type LiquidationKeys = keyof MarketLiquidationEvent;
         // Compile-time: 'forfeit' is not a member of the payload.
         const notAKey: Exclude<'forfeit', LiquidationKeys> = 'forfeit';
         expect(notAKey).toBe('forfeit');
@@ -68,7 +68,7 @@ describe('vault event surface', () => {
             ...base,
             contractType: ZenexContractType.Vault,
             eventType: VaultEventType.Deposit,
-            operator: 'C-trading',
+            operator: 'C-market',
             from: 'G-payer',
             receiver: 'G-holder',
             assets: 100n,
@@ -78,7 +78,7 @@ describe('vault event surface', () => {
             ...base,
             contractType: ZenexContractType.Vault,
             eventType: VaultEventType.Withdraw,
-            operator: 'C-trading',
+            operator: 'C-market',
             receiver: 'G-payee',
             owner: 'G-holder',
             assets: 100n,
@@ -106,7 +106,7 @@ describe('factory event surface', () => {
             ...base,
             contractType: ZenexContractType.Factory,
             eventType: FactoryEventType.Deploy,
-            trading: 'C-trading',
+            market: 'C-trading',
             vault: 'C-vault',
         };
         // Compile-time: the factory event is assignable to the union.

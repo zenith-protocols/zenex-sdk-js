@@ -1,4 +1,4 @@
-import type { MarketData, Position, SidePair, TradingConfig } from '../../contracts/market/types.js';
+import type { MarketData, Position, SidePair, MarketConfig } from '../../contracts/market/types.js';
 import { SCALAR_18, addI128, checkedI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
 import { advanceMarketAccruals, entryPrice, exactPositionPnl, exitPrice, marketSidePnl, quoteTradeFees, sideCapacity, sideReserved } from './math.js';
 import type { PriceData } from './math.js';
@@ -233,7 +233,7 @@ export interface PositionQuoteContext {
     /** The market's current stored aggregates. */
     market: MarketData;
     /** The market's current owner-set parameters. */
-    config: TradingConfig;
+    config: MarketConfig;
     /** The oracle price to fill against, price_scalar (18-dec). */
     price: PriceData;
     /**
@@ -347,7 +347,7 @@ function cloneAction(action: PositionAction): PositionAction {
 function settleFees(
     position: Position,
     market: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     isLong: boolean,
     signedNotional: bigint,
     signedTokens: bigint,
@@ -381,7 +381,7 @@ function settleFees(
 
 function feeVaultLeg(
     fees: FeeBreakdown,
-    config: TradingConfig,
+    config: MarketConfig,
     treasuryRate: bigint,
 ): bigint {
     const tradeFee = addI128(fees.base, fees.impact);
@@ -398,7 +398,7 @@ function feeVaultLeg(
 
 function haircutPnl(
     market: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     price: PriceData,
     vaultAssets: bigint,
     isLong: boolean,
@@ -419,7 +419,7 @@ function haircutPnl(
 function settledEquity(
     position: Position,
     market: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     price: PriceData,
     vaultAssets: bigint,
     isLong: boolean,
@@ -448,7 +448,7 @@ function settledEquity(
 function marginState(
     position: Position,
     market: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     price: PriceData,
     vaultAssets: bigint,
     isLong: boolean,
@@ -492,7 +492,7 @@ function marginState(
 function requireValidPosition(
     position: Position,
     market: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     price: PriceData,
     vaultAssets: bigint,
     isLong: boolean,

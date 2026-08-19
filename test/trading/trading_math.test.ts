@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SCALAR_18 } from '../../src/math/index.js';
-import { Position, MarketData, SidePair, TradingConfig } from '../../src/contracts/market/types.js';
+import { Position, MarketData, SidePair, MarketConfig } from '../../src/contracts/market/types.js';
 import {
     positionPnl,
     pendingFunding,
@@ -80,7 +80,7 @@ function makeMarket(overrides: Partial<MarketData> = {}): MarketData {
 }
 
 // A valid baseline mirroring `zenex-contracts/market/src/trading/config.rs::test_config`.
-function baselineConfig(): TradingConfig {
+function baselineConfig(): MarketConfig {
     return {
         keeperRate: SCALAR_18 / 10n, // 10%
         minPositionNotional: 10_000_000n,

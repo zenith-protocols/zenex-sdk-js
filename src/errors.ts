@@ -1,8 +1,8 @@
 /**
- * Non-trading contract error codes: Soroban host and transaction codes, plus
+ * Non-market contract error codes: Soroban host and transaction codes, plus
  * the shared, token, vault, oracle, strategy-vault, governance, treasury and
  * fee-abstraction domains, plus the shared admin and OpenZeppelin
- * ownable/role-transfer domains. Trading codes (700-772) live in `TradingError`
+ * ownable/role-transfer domains. Market codes (700-772) live in `MarketError`
  * instead. Resolve a raw code with `contractErrorFromCode`. Do not match on
  * codes in this enum directly.
  */
@@ -79,9 +79,9 @@ export enum ContractErrorType {
     VaultMaxDecimalsOffsetExceeded = 409,
     VaultMathOverflow = 410,
 
-    // Trading Errors (700-772): kept out of this flat enum. Decode trading
-    // errors with the dedicated `TradingError` enum instead (it mirrors
-    // the contract's `TradingError` exactly; see below). `contractErrorFromCode` falls
+    // Market Errors (700-772): kept out of this flat enum. Decode market
+    // errors with the dedicated `MarketError` enum instead (it mirrors
+    // the contract's `MarketError` exactly; see below). `contractErrorFromCode` falls
     // through to it automatically.
 
     // Shared admin (600): raised with the same name and meaning by every
@@ -214,8 +214,8 @@ const errorMessages: Record<number, string> = {
     [409]: 'Decimals offset exceeds maximum (10)',
     [410]: 'Vault math overflow',
 
-    // Trading: the trading messages live in `tradingErrorMessages` below
-    // and resolve through the dedicated `TradingError` enum (see the note in
+    // Market: the market messages live in `marketErrorMessages` below
+    // and resolve through the dedicated `MarketError` enum (see the note in
     // ContractErrorType above).
 
     // Oracle
@@ -267,13 +267,13 @@ const errorMessages: Record<number, string> = {
 /**
  * An error decoded from a failed contract call or RPC response. `type`
  * carries the numeric code. The message defaults to the code's entry in
- * `errorMessages` or `tradingErrorMessages`, or a fallback string when the
+ * `errorMessages` or `marketErrorMessages`, or a fallback string when the
  * code is not recognized.
  */
 export class ContractError extends Error {
-    public type: ContractErrorType | TradingError;
+    public type: ContractErrorType | MarketError;
 
-    constructor(type: ContractErrorType | TradingError, message?: string) {
+    constructor(type: ContractErrorType | MarketError, message?: string) {
         super(message ?? errorMessages[type] ?? `Contract error ${type}`);
         this.type = type;
     }
@@ -283,18 +283,18 @@ export class ContractError extends Error {
  * Resolve a raw on-chain error code to a ContractError.
  *
  * The per-contract code namespaces are disjoint (shared admin 600,
- * trading 700-772, oracle 780-793, strategy-vault 800-801,
+ * market 700-772, oracle 780-793, strategy-vault 800-801,
  * governance 810-812, treasury 900, ownable 2100-2102, role transfer
  * 2200-2203, fee-abstraction 5000-5006), so every code resolves without a
  * hint: from the merged `ContractErrorType` first, then the standalone
- * `TradingError` enum.
+ * `MarketError` enum.
  */
 export function contractErrorFromCode(code: number): ContractError {
     if (code in ContractErrorType) {
         return new ContractError(code as ContractErrorType);
     }
-    if (code in TradingError) {
-        return new ContractError(code as TradingError, tradingErrorMessages[code]);
+    if (code in MarketError) {
+        return new ContractError(code as MarketError, marketErrorMessages[code]);
     }
     return new ContractError(ContractErrorType.UnknownError);
 }
@@ -319,13 +319,13 @@ export function parseContractErrorCode(rpcError: string): number | undefined {
 }
 
 /**
- * TradingError - exact mirror of the contract's `TradingError` enum.
+ * MarketError - exact mirror of the contract's `MarketError` enum.
  *
- * Kept as its own enum so the trading domain (the largest error surface)
- * mirrors it one-to-one; `contractErrorFromCode` resolves trading
+ * Kept as its own enum so the market domain (the largest error surface)
+ * mirrors it one-to-one; `contractErrorFromCode` resolves market
  * codes through it automatically.
  */
-export enum TradingError {
+export enum MarketError {
     // --- config / construction ---
     /** A config value is out of bounds, or a range/ordering invariant is violated. */
     InvalidConfig = 700,
@@ -335,7 +335,7 @@ export enum TradingError {
     InvalidStatus = 702,
     /** An accrual-rate parameter (borrowing or funding) changed without a same-ledger `accrue`. */
     MarketNotAccrued = 703,
-    /** Action halted by the operational status: `Frozen`, or `Retired` on trading paths. */
+    /** Action halted by the operational status: `Frozen`, or `Retired` on the market paths. */
     MarketFrozen = 704,
     /** An `Increase` was executed while the market does not accept opens. */
     IncreaseHalted = 705,
@@ -417,13 +417,13 @@ export enum TradingError {
     AdlNotEligible = 772,
 }
 
-/** Human-readable messages for the TradingError codes. */
-export const tradingErrorMessages: Record<number, string> = {
-    [700]: 'Trading config value out of bounds or invariant violated',
+/** Human-readable messages for the MarketError codes. */
+export const marketErrorMessages: Record<number, string> = {
+    [700]: 'Market config value out of bounds or invariant violated',
     [701]: 'Flat settlement price is not strictly positive',
     [702]: 'Illegal status transition or action requires a different status',
     [703]: 'Borrowing or funding rate changed without a same-ledger accrue',
-    [704]: 'Action halted by operational status (Frozen, or Retired on trading paths)',
+    [704]: 'Action halted by operational status (Frozen, or Retired on the market paths)',
     [705]: 'Increase executed while the market does not accept opens',
     [706]: 'Retirement attempted while positions remain open',
     [710]: 'A number that must be non-negative is negative',

@@ -1,4 +1,4 @@
-export { TradingRouterContract } from './contract.js';
+export { MarketRouterContract } from './contract.js';
 export type { CreateAndFillWithFeeArgs, MulticallWithFeeArgs } from './contract.js';
 
 // Core types, converters, and parsers

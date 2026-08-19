@@ -10,7 +10,7 @@ import type {
     MarketData,
     Position,
     SidePair,
-    TradingConfig,
+    MarketConfig,
 } from '../../src/contracts/market/types.js';
 
 interface ContractCase {
@@ -128,7 +128,7 @@ function emptyMarket(overrides: Partial<MarketData> = {}): MarketData {
     };
 }
 
-function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
+function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
     return {
         keeperRate: 0n,
         minPositionNotional: 1n,

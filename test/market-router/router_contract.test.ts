@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, Address } from '@stellar/stellar-sdk';
-import { TradingRouterContract } from '../../src/contracts/router/contract.js';
+import { MarketRouterContract } from '../../src/contracts/router/contract.js';
 import { Call, createOrderCall, parseCallOutcome } from '../../src/contracts/router/types.js';
-import { TradingContract } from '../../src/contracts/market/contract.js';
+import { MarketContract } from '../../src/contracts/market/contract.js';
 import { OrderKind } from '../../src/contracts/market/types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
@@ -22,14 +22,14 @@ function decodeInvoke(op: string) {
 
 /** A `create_order`-shaped fill call for the first slot of a batch. */
 function fillCall(): Call {
-    return TradingRouterContract.createOrderCall({
-        trading: TRADING, user: USER, isLong: true, kind: OrderKind.MarketIncrease,
+    return MarketRouterContract.createOrderCall({
+        market: TRADING, user: USER, isLong: true, kind: OrderKind.MarketIncrease,
         notional: 100n, margin: 10n, triggerPrice: 0n, priceBound: 200n, expiration: 12345,
     });
 }
 
-describe('TradingRouterContract', () => {
-    const contract = new TradingRouterContract(CONTRACT_ID);
+describe('MarketRouterContract', () => {
+    const contract = new MarketRouterContract(CONTRACT_ID);
 
     it('createAndFill builds create_and_fill with the (calls, user, keeper, price) order', () => {
         const price = Buffer.from([9, 9, 9]);
@@ -59,8 +59,8 @@ describe('TradingRouterContract', () => {
     });
 
     it('createAndFill carries a multi-call batch: fill first, trigger resting', () => {
-        const trigger = TradingRouterContract.createOrderCall({
-            trading: TRADING, user: USER, isLong: true, kind: OrderKind.LimitDecrease,
+        const trigger = MarketRouterContract.createOrderCall({
+            market: TRADING, user: USER, isLong: true, kind: OrderKind.LimitDecrease,
             notional: 50n, margin: 0n, triggerPrice: 300n, priceBound: 0n, expiration: 12345,
         });
         const op = contract.createAndFill([fillCall(), trigger], USER, KEEPER, Buffer.from([0]));
@@ -103,14 +103,14 @@ describe('TradingRouterContract', () => {
         expect(Buffer.from(args[8] as Uint8Array)).toEqual(price);
     });
 
-    it('createOrderCall mirrors TradingContract.createOrderCall byte-for-byte and crosses kind as u32', () => {
+    it('createOrderCall mirrors MarketContract.createOrderCall byte-for-byte and crosses kind as u32', () => {
         const params = {
-            trading: TRADING, user: USER, isLong: false, kind: OrderKind.StopDecrease,
+            market: TRADING, user: USER, isLong: false, kind: OrderKind.StopDecrease,
             notional: 77n, margin: 3n, triggerPrice: 250n, priceBound: 9n, expiration: 42,
         };
-        const routerCall = TradingRouterContract.createOrderCall(params);
+        const routerCall = MarketRouterContract.createOrderCall(params);
         const helperCall = createOrderCall(params);
-        const direct = new TradingContract(TRADING).createOrderCall(
+        const direct = new MarketContract(TRADING).createOrderCall(
             USER, false, OrderKind.StopDecrease, 77n, 3n, 250n, 9n, 42,
         );
         expect(routerCall).toEqual(helperCall);
@@ -125,7 +125,7 @@ describe('TradingRouterContract', () => {
     it('multicallWithFee builds the exact 7-arg order (calls, user, fee_token, max_fee, fee_expiration, fee_amount, fee_recipient)', () => {
         const feeToken = StrKey.encodeContract(Buffer.alloc(32, 5));
         const feeRecipient = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6));
-        const cancel = TradingRouterContract.buildCall(TRADING, 'cancel_order', [
+        const cancel = MarketRouterContract.buildCall(TRADING, 'cancel_order', [
             Address.fromString(USER).toScVal(),
             xdr.ScVal.scvU32(7),
         ]);
@@ -145,7 +145,7 @@ describe('TradingRouterContract', () => {
     it('parsers.multicallWithFee passes through raw scValToNative array', () => {
         const inner = xdr.ScVal.scvVec([nativeI128(3n), nativeI128(4n)]);
         const raw = inner.toXDR('base64');
-        expect(TradingRouterContract.parsers.multicallWithFee(raw)).toEqual([3n, 4n]);
+        expect(MarketRouterContract.parsers.multicallWithFee(raw)).toEqual([3n, 4n]);
     });
 
     it('buildCall + multicall round-trip: decode op, assert nested call vec', () => {
@@ -154,7 +154,7 @@ describe('TradingRouterContract', () => {
             func: 'get_status',
             args: [],
         };
-        const built = TradingRouterContract.buildCall(TRADING, 'get_status', []);
+        const built = MarketRouterContract.buildCall(TRADING, 'get_status', []);
         expect(built).toEqual(inner);
 
         const op = contract.multicall([built]);
@@ -169,11 +169,11 @@ describe('TradingRouterContract', () => {
 
     it('multicall round-trips a nested Call whose own args carry a nested vec', () => {
         const nestedArg = xdr.ScVal.scvVec([xdr.ScVal.scvU32(1), xdr.ScVal.scvU32(2)]);
-        const inner = TradingRouterContract.buildCall(TRADING, 'get_order', [
+        const inner = MarketRouterContract.buildCall(TRADING, 'get_order', [
             Address.fromString(USER).toScVal(),
             nestedArg,
         ]);
-        const op = contract.multicall([inner, TradingRouterContract.buildCall(TRADING, 'get_status', [])]);
+        const op = contract.multicall([inner, MarketRouterContract.buildCall(TRADING, 'get_status', [])]);
         const { fn, args } = decodeInvoke(op);
         expect(fn).toBe('multicall');
         const decodedCalls = args[0] as Record<string, unknown>[];
@@ -193,29 +193,29 @@ describe('TradingRouterContract', () => {
     it('parsers.multicall passes through raw scValToNative array', () => {
         const inner = xdr.ScVal.scvVec([xdr.ScVal.scvU32(1), xdr.ScVal.scvU32(2)]);
         const raw = inner.toXDR('base64');
-        expect(TradingRouterContract.parsers.multicall(raw)).toEqual([1, 2]);
+        expect(MarketRouterContract.parsers.multicall(raw)).toEqual([1, 2]);
     });
 
     it('parsers.multicallTry splits a vec of raw Vals into CallOutcome[]', () => {
         const raw = xdr.ScVal.scvVec([nativeI128(5n)]).toXDR('base64');
-        expect(TradingRouterContract.parsers.multicallTry(raw)).toEqual([{ ok: true, value: 5n, error: 0 }]);
+        expect(MarketRouterContract.parsers.multicallTry(raw)).toEqual([{ ok: true, value: 5n, error: 0 }]);
     });
 
     it('parsers.createAndFill passes the Vec<Val> through raw: results[0] = order id, last = payout', () => {
         // Single-create batch: [ create_order id (u32), fill payout (i128) ].
         const raw = xdr.ScVal.scvVec([xdr.ScVal.scvU32(3), nativeI128(10n)]).toXDR('base64');
-        const results = TradingRouterContract.parsers.createAndFill(raw);
+        const results = MarketRouterContract.parsers.createAndFill(raw);
         expect(results).toEqual([3, 10n]);
         expect(results[0]).toBe(3);                       // order id
         expect(results[results.length - 1]).toBe(10n);    // fill payout
         // createAndFillWithFee shares the raw passthrough.
-        expect(TradingRouterContract.parsers.createAndFillWithFee(raw)).toEqual([3, 10n]);
+        expect(MarketRouterContract.parsers.createAndFillWithFee(raw)).toEqual([3, 10n]);
     });
 
     it('parsers.createAndTryFill splits into CallOutcome[]: last outcome filled vs rested', () => {
         // Filled: last element is the payout Val.
         const filled = xdr.ScVal.scvVec([xdr.ScVal.scvU32(3), nativeI128(10n)]).toXDR('base64');
-        expect(TradingRouterContract.parsers.createAndTryFill(filled)).toEqual([
+        expect(MarketRouterContract.parsers.createAndTryFill(filled)).toEqual([
             { ok: true, value: 3, error: 0 },
             { ok: true, value: 10n, error: 0 },
         ]);
@@ -223,7 +223,7 @@ describe('TradingRouterContract', () => {
         // Rested: last element is a host Error value (the fill did not land).
         const err = xdr.ScVal.scvError(xdr.ScError.sceContract(731));
         const rested = xdr.ScVal.scvVec([xdr.ScVal.scvU32(3), err]).toXDR('base64');
-        const outcomes = TradingRouterContract.parsers.createAndTryFillWithFee(rested);
+        const outcomes = MarketRouterContract.parsers.createAndTryFillWithFee(rested);
         expect(outcomes[0]).toEqual({ ok: true, value: 3, error: 0 });   // order id created
         expect(outcomes[outcomes.length - 1]).toEqual({ ok: false, value: undefined, error: 731 });
     });

@@ -1,4 +1,4 @@
-import type { MarketData, Position, SidePair, TradingConfig } from '../../contracts/market/types.js';
+import type { MarketData, Position, SidePair, MarketConfig } from '../../contracts/market/types.js';
 import { SCALAR_18, addI128, checkedI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
 /**
  * Verified oracle price consumed by the math mirrors. Ports the oracle
@@ -108,7 +108,7 @@ function magnitude(value: bigint): bigint {
  */
 export function quoteTradeFees(
     data: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     isLong: boolean,
     signedNotional: bigint,
     signedTokens: bigint,
@@ -260,7 +260,7 @@ function set(pair: SidePair, isLong: boolean, value: bigint): void {
  * Exported so display surfaces can annualize the exact rate rather than
  * re-derive the kink curve in floats.
  */
-export function borrowingRate(config: TradingConfig, utilization: bigint): bigint {
+export function borrowingRate(config: MarketConfig, utilization: bigint): bigint {
     const base = mulDivCeil(config.borrowRate, utilization, SCALAR_18);
     if (utilization <= config.targetUtil) return base;
 
@@ -284,7 +284,7 @@ export function borrowingRate(config: TradingConfig, utilization: bigint): bigin
  */
 export function advanceBorrowing(
     data: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     price: PriceData,
     vaultAssets: bigint,
     elapsed: bigint,
@@ -314,7 +314,7 @@ export function advanceBorrowing(
 
 function evolvedFundingRate(
     data: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     elapsed: bigint,
 ): bigint {
     const saved = data.fundingRate;
@@ -367,7 +367,7 @@ function evolvedFundingRate(
  */
 export function advanceFunding(
     data: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     elapsed: bigint,
 ): MarketData {
     if (elapsed < 0n) {
@@ -414,7 +414,7 @@ export function advanceFunding(
  */
 export function advanceMarketAccruals(
     data: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     price: PriceData,
     vaultAssets: bigint,
     now: bigint,

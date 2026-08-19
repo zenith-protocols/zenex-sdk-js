@@ -9,7 +9,7 @@ import type { PriceData } from '../../src/trading/internal/math.js';
 import type {
     MarketData,
     SidePair,
-    TradingConfig,
+    MarketConfig,
 } from '../../src/contracts/market/types.js';
 
 function pair(long = 0n, short = 0n): SidePair {
@@ -31,7 +31,7 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
     };
 }
 
-function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
+function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
     return {
         keeperRate: 0n,
         minPositionNotional: 1n,

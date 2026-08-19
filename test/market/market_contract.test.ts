@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, nativeToScVal } from '@stellar/stellar-sdk';
-import { TradingContract, DeployArgs } from '../../src/contracts/market/contract.js';
-import { OrderKind, VaultOrderKind, TradingConfig } from '../../src/contracts/market/types.js';
+import { MarketContract, DeployArgs } from '../../src/contracts/market/contract.js';
+import { OrderKind, VaultOrderKind, MarketConfig } from '../../src/contracts/market/types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -17,7 +17,7 @@ function decodeInvoke(operation: string) {
     };
 }
 
-function makeConfig(): TradingConfig {
+function makeConfig(): MarketConfig {
     return {
         keeperRate: 1n,
         minPositionNotional: 1n,
@@ -56,8 +56,8 @@ function makeConfig(): TradingConfig {
     };
 }
 
-describe('TradingContract', () => {
-    const contract = new TradingContract(CONTRACT_ID);
+describe('MarketContract', () => {
+    const contract = new MarketContract(CONTRACT_ID);
 
     it('createOrder builds create_order with the exact 8-arg order and types', () => {
         const operation = contract.createOrder(
@@ -135,7 +135,7 @@ describe('TradingContract', () => {
         expect(fn).toBe('get_order_counter');
         expect(args).toEqual([USER]);
         const raw = xdr.ScVal.scvU32(17).toXDR('base64');
-        expect(TradingContract.parsers.getOrderCounter(raw)).toBe(17);
+        expect(MarketContract.parsers.getOrderCounter(raw)).toBe(17);
     });
 
     it('setConfig embeds the alphabetical 34-key config map', () => {
@@ -150,12 +150,12 @@ describe('TradingContract', () => {
 
     it('parsers.createOrder decodes a u32 ScVal', () => {
         const raw = xdr.ScVal.scvU32(42).toXDR('base64');
-        expect(TradingContract.parsers.createOrder(raw)).toBe(42);
+        expect(MarketContract.parsers.createOrder(raw)).toBe(42);
     });
 
     it('parsers.cancelOrder decodes the i128 refund', () => {
         const raw = nativeToScVal(1234n, { type: 'i128' }).toXDR('base64');
-        expect(TradingContract.parsers.cancelOrder(raw)).toBe(1234n);
+        expect(MarketContract.parsers.cancelOrder(raw)).toBe(1234n);
     });
 
     it('parsers.getOrder decodes the stored row (a missing order traps 730 on-chain)', () => {
@@ -173,7 +173,7 @@ describe('TradingContract', () => {
             entry('price_bound', i128Val(5n)),
             entry('trigger_price', i128Val(6n)),
         ]).toXDR('base64');
-        expect(TradingContract.parsers.getOrder(raw).execFee).toBe(7n);
+        expect(MarketContract.parsers.getOrder(raw).execFee).toBe(7n);
     });
 
     it('parsers.getVaultOrder decodes the stored row (a missing vault order traps 750 on-chain)', () => {
@@ -187,7 +187,7 @@ describe('TradingContract', () => {
             entry('kind', xdr.ScVal.scvU32(1)),
             entry('min_out', i128Val(3n)),
         ]).toXDR('base64');
-        expect(TradingContract.parsers.getVaultOrder(raw).minOut).toBe(3n);
+        expect(MarketContract.parsers.getVaultOrder(raw).minOut).toBe(3n);
     });
 
     it('parsers.getPosition returns camelCase fields including pricedAt and decreaseOrders', () => {
@@ -207,7 +207,7 @@ describe('TradingContract', () => {
             entry('tokens', i128Val(8n)),
             entry('unlocks_at', u64Val(9n)),
         ]);
-        const parsed = TradingContract.parsers.getPosition(positionScVal.toXDR('base64'));
+        const parsed = MarketContract.parsers.getPosition(positionScVal.toXDR('base64'));
         expect(parsed).toEqual({
             borrowingIdx: 1n,
             margin: 2n,
@@ -232,7 +232,7 @@ describe('TradingContract', () => {
             feedId,
             config: makeConfig(),
         };
-        const operation = TradingContract.deploy(USER, Buffer.alloc(32, 9), deployArgs, undefined, 'hex');
+        const operation = MarketContract.deploy(USER, Buffer.alloc(32, 9), deployArgs, undefined, 'hex');
         const decoded = xdr.Operation.fromXDR(operation, 'base64');
         const createContract = decoded.body().invokeHostFunctionOp().hostFunction().createContractV2();
         const constructorArgs = createContract.constructorArgs();
@@ -254,12 +254,12 @@ describe('TradingContract', () => {
             config: makeConfig(),
         };
         expect(() =>
-            TradingContract.deploy(USER, Buffer.alloc(32, 9), deployArgs),
+            MarketContract.deploy(USER, Buffer.alloc(32, 9), deployArgs),
         ).toThrow(/32 bytes/);
     });
 
     it('upgrade builds with the wasm hash first, then the operator', () => {
-        const contract = new TradingContract(CONTRACT_ID);
+        const contract = new MarketContract(CONTRACT_ID);
         const { fn, args } = decodeInvoke(contract.upgrade(Buffer.alloc(32, 7), USER));
         expect(fn).toBe('upgrade');
         expect(Buffer.from(args[0])).toEqual(Buffer.alloc(32, 7));

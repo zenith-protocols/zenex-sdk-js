@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { TradingRouterContract } from '../src/contracts/router/contract.js';
+import { MarketRouterContract } from '../src/contracts/router/contract.js';
 import { FactoryContract } from '../src/contracts/factory/contract.js';
 
 const ROUTER_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
@@ -12,18 +12,18 @@ function decodeInvoke(op: string) {
     return { fn: invoke.functionName().toString(), args: invoke.args() };
 }
 
-describe('TradingRouterContract extras', () => {
-    const router = new TradingRouterContract(ROUTER_ID);
+describe('MarketRouterContract extras', () => {
+    const router = new MarketRouterContract(ROUTER_ID);
 
     it('multicallTry builds multicall_try with the call vec', () => {
-        const call = TradingRouterContract.buildCall(TRADING, 'get_status', []);
+        const call = MarketRouterContract.buildCall(TRADING, 'get_status', []);
         const { fn, args } = decodeInvoke(router.multicallTry([call]));
         expect(fn).toBe('multicall_try');
         expect(args[0].vec()!.length).toBe(1);
     });
 
     it('parses multicall, multicallTry, and the create-and-fill results', () => {
-        const p = TradingRouterContract.parsers;
+        const p = MarketRouterContract.parsers;
 
         const rawVec = xdr.ScVal.scvVec([nativeToScVal(1n, { type: 'i128' })]).toXDR('base64');
         expect(p.multicall(rawVec)).toEqual([1n]);

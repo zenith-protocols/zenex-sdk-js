@@ -5,16 +5,16 @@ import * as SDK from '../src/index.js';
 // Consumer-surface test: everything a package consumer should be able to
 // import from the root barrel. A missing name here is a broken public API.
 //
-// Type-only exports (interfaces such as TradingDepositFillEvent or the removed
-// TradingPositionUpdateEvent) have no runtime value, so this file asserts their
-// runtime counterparts instead: the TradingEventType enum members and the
+// Type-only exports (interfaces such as MarketDepositFillEvent or the removed
+// MarketPositionUpdateEvent) have no runtime value, so this file asserts their
+// runtime counterparts instead: the MarketEventType enum members and the
 // decoder functions that produce them.
 // =============================================================================
 
 describe('package root exports', () => {
     it('exports every contract class', () => {
-        expect(SDK.TradingContract).toBeTypeOf('function');
-        expect(SDK.TradingRouterContract).toBeTypeOf('function');
+        expect(SDK.MarketContract).toBeTypeOf('function');
+        expect(SDK.MarketRouterContract).toBeTypeOf('function');
         expect(SDK.FactoryContract).toBeTypeOf('function');
         expect(SDK.VaultContract).toBeTypeOf('function');
         expect(SDK.OracleContract).toBeTypeOf('function');
@@ -22,7 +22,7 @@ describe('package root exports', () => {
         expect(SDK.GovernanceContract).toBeTypeOf('function');
     });
 
-    it('exports the trading enums, sentinels, converters, and parsers', () => {
+    it('exports the market enums, sentinels, converters, and parsers', () => {
         expect(SDK.Status.Active).toBe(0);
         expect(SDK.Status.Retired).toBe(4);
         // v2 order kinds are numeric u32 discriminants (order.rs #[repr(u32)]).
@@ -35,14 +35,14 @@ describe('package root exports', () => {
         expect(SDK.VaultOrderKind.Deposit).toBe(0);
         expect(SDK.VaultOrderKind.Redeem).toBe(1);
         expect(SDK.FULL_CLOSE).toBe(2n ** 127n - 1n);
-        expect(SDK.tradingConfigToScVal).toBeTypeOf('function');
+        expect(SDK.marketConfigToScVal).toBeTypeOf('function');
         expect(SDK.parseSidePair).toBeTypeOf('function');
         expect(SDK.parseOrder).toBeTypeOf('function');
         expect(SDK.parseVaultOrder).toBeTypeOf('function');
         expect(SDK.parsePosition).toBeTypeOf('function');
         expect(SDK.parseMarketData).toBeTypeOf('function');
         expect(SDK.parseAdlState).toBeTypeOf('function');
-        expect(SDK.parseTradingConfig).toBeTypeOf('function');
+        expect(SDK.parseMarketConfig).toBeTypeOf('function');
     });
 
     it('does not export the removed kind-to-ScVal converters', () => {
@@ -82,23 +82,23 @@ describe('package root exports', () => {
     });
 
     it('exports the event enums and decoders', () => {
-        expect(SDK.TradingEventType.CreateOrder).toBe('create_order');
-        expect(SDK.TradingEventType.CancelOrder).toBe('cancel_order');
-        expect(SDK.TradingEventType.CreateVaultOrder).toBe(
+        expect(SDK.MarketEventType.CreateOrder).toBe('create_order');
+        expect(SDK.MarketEventType.CancelOrder).toBe('cancel_order');
+        expect(SDK.MarketEventType.CreateVaultOrder).toBe(
             'create_vault_order',
         );
-        expect(SDK.TradingEventType.CancelVaultOrder).toBe(
+        expect(SDK.MarketEventType.CancelVaultOrder).toBe(
             'cancel_vault_order',
         );
-        expect(SDK.TradingEventType.DepositFill).toBe('deposit_fill');
-        expect(SDK.TradingEventType.RedeemFill).toBe('redeem_fill');
-        expect(SDK.TradingEventType.CloseFill).toBe('close_fill');
-        expect(SDK.TradingEventType.FundingAccrual).toBe('funding_accrual');
-        expect(SDK.TradingEventType.BorrowingAccrual).toBe('borrowing_accrual');
-        expect(SDK.TradingEventType.IncreaseFill).toBe('increase_fill');
-        expect(SDK.TradingEventType.DecreaseFill).toBe('decrease_fill');
-        expect(SDK.TradingEventType.Liquidation).toBe('liquidation');
-        expect(SDK.decodeTradingEvent).toBeUndefined();
+        expect(SDK.MarketEventType.DepositFill).toBe('deposit_fill');
+        expect(SDK.MarketEventType.RedeemFill).toBe('redeem_fill');
+        expect(SDK.MarketEventType.CloseFill).toBe('close_fill');
+        expect(SDK.MarketEventType.FundingAccrual).toBe('funding_accrual');
+        expect(SDK.MarketEventType.BorrowingAccrual).toBe('borrowing_accrual');
+        expect(SDK.MarketEventType.IncreaseFill).toBe('increase_fill');
+        expect(SDK.MarketEventType.DecreaseFill).toBe('decrease_fill');
+        expect(SDK.MarketEventType.Liquidation).toBe('liquidation');
+        expect(SDK.decodeMarketEvent).toBeUndefined();
         // Bare #[contractevent] name topics are snake_case of the struct name.
         expect(SDK.VaultEventType.Deposit).toBe('deposit');
         expect(SDK.VaultEventType.Withdraw).toBe('withdraw');
@@ -108,7 +108,7 @@ describe('package root exports', () => {
         expect(SDK.GovernanceEventType.StatusSet).toBe('status_set');
         expect(SDK.decodeGovernanceEvent).toBeUndefined();
         expect(SDK.FactoryEventType.Deploy).toBe('deploy');
-        expect(SDK.ZenexContractType.Trading).toBe('trading');
+        expect(SDK.ZenexContractType.Market).toBe('market');
         // The event surface is types-only; consumers own their decode path.
         expect(SDK.decodeEvent).toBeUndefined();
         expect(SDK.normalizeRpc).toBeUndefined();
@@ -120,18 +120,18 @@ describe('package root exports', () => {
         // The fill receipts (deposit_fill, redeem_fill, close_fill) are the
         // lifecycle receipts; position_update / execute_vault_order are not
         // contract events.
-        const eventTypes = SDK.TradingEventType as Record<string, unknown>;
+        const eventTypes = SDK.MarketEventType as Record<string, unknown>;
         expect(eventTypes.PositionUpdate).toBeUndefined();
         expect(eventTypes.ExecuteVaultOrder).toBeUndefined();
-        expect(Object.values(SDK.TradingEventType)).not.toContain(
+        expect(Object.values(SDK.MarketEventType)).not.toContain(
             'position_update',
         );
-        expect(Object.values(SDK.TradingEventType)).not.toContain(
+        expect(Object.values(SDK.MarketEventType)).not.toContain(
             'execute_vault_order',
         );
     });
 
-    it('exports the trading-router converters and parsers', () => {
+    it('exports the market-router converters and parsers', () => {
         expect(SDK.callToScVal).toBeTypeOf('function');
         expect(SDK.createOrderCall).toBeTypeOf('function');
         expect(SDK.parseCallOutcome).toBeTypeOf('function');
@@ -147,19 +147,19 @@ describe('package root exports', () => {
     it('exports the errors and response parsing surface', () => {
         expect(SDK.ContractError).toBeTypeOf('function');
         expect(SDK.ContractErrorType.UnknownError).toBe(-1000);
-        expect(SDK.TradingError.InvalidConfig).toBe(700);
-        expect(SDK.TradingError.TooManyOrders).toBe(733);
-        expect(SDK.TradingError.UnknownKind).toBe(734);
-        expect(SDK.TradingError.MinOutNotMet).toBe(752);
-        expect(SDK.TradingError.PendingPnlExceeded).toBe(754);
-        expect(SDK.TradingError.PositionLiquidatable).toBe(723);
-        expect(SDK.TradingError.VaultInsolvent).toBe(755);
-        expect(SDK.TradingError.AdlNotEligible).toBe(772);
+        expect(SDK.MarketError.InvalidConfig).toBe(700);
+        expect(SDK.MarketError.TooManyOrders).toBe(733);
+        expect(SDK.MarketError.UnknownKind).toBe(734);
+        expect(SDK.MarketError.MinOutNotMet).toBe(752);
+        expect(SDK.MarketError.PendingPnlExceeded).toBe(754);
+        expect(SDK.MarketError.PositionLiquidatable).toBe(723);
+        expect(SDK.MarketError.VaultInsolvent).toBe(755);
+        expect(SDK.MarketError.AdlNotEligible).toBe(772);
         expect(SDK.ContractErrorType.OracleFeedMismatch).toBe(790);
         expect(SDK.ContractErrorType.OraclePriceAhead).toBe(793);
         expect(SDK.ContractErrorType.StrategyInvalidAmount).toBe(800);
         expect(SDK.ContractErrorType.GovNotQueued).toBe(810);
-        expect(SDK.tradingErrorMessages[700]).toBeTypeOf('string');
+        expect(SDK.marketErrorMessages[700]).toBeTypeOf('string');
         expect(SDK.contractErrorFromCode).toBeTypeOf('function');
         expect(SDK.parseContractErrorCode).toBeTypeOf('function');
         expect(SDK.parseError).toBeTypeOf('function');
@@ -173,21 +173,21 @@ describe('package root exports', () => {
         expect(SDK.contractInstanceLedgerKey).toBeTypeOf('function');
         expect(SDK.persistentLedgerKey).toBeTypeOf('function');
         expect(SDK.temporaryLedgerKey).toBeTypeOf('function');
-        // The instance-tier ScVal builders are gone: parseTradingInstance
+        // The instance-tier ScVal builders are gone: parseMarketInstance
         // decodes every instance field, so the per-field keys were dead API.
         const sdk = SDK as Record<string, unknown>;
-        expect(sdk.tradingConfigKey).toBeUndefined();
-        expect(sdk.tradingStatusKey).toBeUndefined();
-        expect(sdk.tradingAdlKey).toBeUndefined();
-        expect(sdk.tradingExponentKey).toBeUndefined();
-        expect(sdk.tradingPriceVerifierKey).toBeUndefined();
-        expect(SDK.tradingMarketDataLedgerKey).toBeTypeOf('function');
-        expect(SDK.tradingPriceCacheLedgerKey).toBeTypeOf('function');
-        expect(SDK.tradingPositionLedgerKey).toBeTypeOf('function');
-        expect(SDK.tradingVaultOrderLedgerKey).toBeTypeOf('function');
-        expect(SDK.tradingOrderCounterLedgerKey).toBeTypeOf('function');
-        expect(SDK.tradingClaimableFundingLedgerKey).toBeTypeOf('function');
-        expect(SDK.tradingOrderLedgerKey).toBeTypeOf('function');
+        expect(sdk.marketConfigKey).toBeUndefined();
+        expect(sdk.marketStatusKey).toBeUndefined();
+        expect(sdk.marketAdlKey).toBeUndefined();
+        expect(sdk.marketExponentKey).toBeUndefined();
+        expect(sdk.marketPriceVerifierKey).toBeUndefined();
+        expect(SDK.marketDataLedgerKey).toBeTypeOf('function');
+        expect(SDK.marketPriceCacheLedgerKey).toBeTypeOf('function');
+        expect(SDK.marketPositionLedgerKey).toBeTypeOf('function');
+        expect(SDK.marketVaultOrderLedgerKey).toBeTypeOf('function');
+        expect(SDK.marketOrderCounterLedgerKey).toBeTypeOf('function');
+        expect(SDK.marketClaimableFundingLedgerKey).toBeTypeOf('function');
+        expect(SDK.marketOrderLedgerKey).toBeTypeOf('function');
     });
 
     it('exports the math and simulation helpers', () => {
@@ -277,7 +277,7 @@ describe('package root exports', () => {
         expect(sdk.buildPositionDecreaseIntentExecution).toBeUndefined();
         expect(sdk.buildPositionIncreaseIntentExecution).toBeUndefined();
         expect(sdk.buildMarginAdjustmentExecution).toBeUndefined();
-        expect(sdk.validateTradingConfig).toBeUndefined();
+        expect(sdk.validateMarketConfig).toBeUndefined();
         expect(sdk.validateFillOrKillCalls).toBeUndefined();
         expect(sdk.POSITION_DECREASE_MAX_VALIDITY_LEDGERS).toBeUndefined();
         expect(sdk.POSITION_INCREASE_MAX_VALIDITY_LEDGERS).toBeUndefined();

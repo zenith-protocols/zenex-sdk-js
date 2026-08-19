@@ -2,16 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { scValToNative } from '@stellar/stellar-sdk';
 import {
     OrderKind, VaultOrderKind, Status, FULL_CLOSE, MAX_ORDERS_PER_SIDE,
-    tradingConfigToScVal, parseSidePair,
+    marketConfigToScVal, parseSidePair,
     parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState,
-    parseTradingConfig, TradingConfig,
+    parseMarketConfig, MarketConfig,
 } from '../../src/contracts/market/types.js';
 
 // Each field gets a unique value, numbered in the declaration order of
 // zenex-contracts/market/src/trading/config.rs (101 = keeper_rate, the
 // first field, through 134 = max_vault_balance, the last). Unique values
 // make any key/field misrouting in the converter or parser visible.
-function makeDistinctConfig(): TradingConfig {
+function makeDistinctConfig(): MarketConfig {
     return {
         keeperRate: 101n,
         minPositionNotional: 102n,
@@ -125,15 +125,15 @@ describe('trading_types', () => {
         expect(MAX_ORDERS_PER_SIDE).toBe(8);
     });
 
-    describe('tradingConfigToScVal', () => {
+    describe('marketConfigToScVal', () => {
         it('emits exactly the 34 config.rs keys in alphabetical order', () => {
-            const configScVal = tradingConfigToScVal(makeDistinctConfig());
+            const configScVal = marketConfigToScVal(makeDistinctConfig());
             const keys = configScVal.map()!.map((mapEntry) => mapEntry.key().sym().toString());
             expect(keys).toEqual(EXPECTED_CONFIG_KEYS);
         });
 
         it('drops the retired v1 keys', () => {
-            const configScVal = tradingConfigToScVal(makeDistinctConfig());
+            const configScVal = marketConfigToScVal(makeDistinctConfig());
             const keys = configScVal.map()!.map((mapEntry) => mapEntry.key().sym().toString());
             for (const retiredKey of [
                 'deposit_lock', 'impact_divisor', 'instant_deposit_pnl', 'max_pnl_deposit', 'vault_fee',
@@ -143,7 +143,7 @@ describe('trading_types', () => {
         });
 
         it('encodes the two lock fields as u64 and everything else as i128', () => {
-            const configScVal = tradingConfigToScVal(makeDistinctConfig());
+            const configScVal = marketConfigToScVal(makeDistinctConfig());
             for (const mapEntry of configScVal.map()!) {
                 const key = mapEntry.key().sym().toString();
                 const expectedType = key === 'notional_lock' || key === 'redeem_lock' ? 'scvU64' : 'scvI128';
@@ -152,7 +152,7 @@ describe('trading_types', () => {
         });
 
         it('routes every field to its snake_case key (distinct-value check)', () => {
-            const native = scValToNative(tradingConfigToScVal(makeDistinctConfig()));
+            const native = scValToNative(marketConfigToScVal(makeDistinctConfig()));
             // Spot values follow the declaration-order numbering above.
             expect(native.keeper_rate).toBe(101n);
             expect(native.exec_fee).toBe(107n);
@@ -165,10 +165,10 @@ describe('trading_types', () => {
             expect(native.max_vault_balance).toBe(134n);
         });
 
-        it('round-trips through parseTradingConfig', () => {
+        it('round-trips through parseMarketConfig', () => {
             const config = makeDistinctConfig();
-            const native = scValToNative(tradingConfigToScVal(config));
-            expect(parseTradingConfig(native)).toEqual(config);
+            const native = scValToNative(marketConfigToScVal(config));
+            expect(parseMarketConfig(native)).toEqual(config);
         });
     });
 

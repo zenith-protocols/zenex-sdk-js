@@ -11,7 +11,7 @@ import type {
     MarketData,
     Position,
     SidePair,
-    TradingConfig,
+    MarketConfig,
 } from '../../src/contracts/market/types.js';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -50,7 +50,7 @@ function position(overrides: Partial<Position> = {}): Position {
     };
 }
 
-function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
+function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
     return {
         keeperRate: 0n,
         minPositionNotional: 1n,

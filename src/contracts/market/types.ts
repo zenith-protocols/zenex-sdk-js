@@ -154,7 +154,7 @@ export interface AdlState {
  * Global trading parameters (instance storage singleton), mutable via the
  * owner-only `set_config`. Rates are per second.
  */
-export interface TradingConfig {
+export interface MarketConfig {
     /** Keeper share of trade and vault fill fees, up to 50% (SCALAR_18). */
     keeperRate: i128;
     /** Minimum position notional, token-dec; > 0. */
@@ -225,8 +225,8 @@ export interface TradingConfig {
     maxVaultBalance: i128;
 }
 
-/** Encode a `TradingConfig` for the `deploy` constructor or `set_config` call. */
-export function tradingConfigToScVal(config: TradingConfig): xdr.ScVal {
+/** Encode a `MarketConfig` for the `deploy` constructor or `set_config` call. */
+export function marketConfigToScVal(config: MarketConfig): xdr.ScVal {
     const entry = (key: string, val: xdr.ScVal) =>
         new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val });
     const i128Val = (v: i128) => nativeToScVal(v, { type: 'i128' });
@@ -343,8 +343,8 @@ export function parseAdlState(raw: Record<string, unknown>): AdlState {
     };
 }
 
-/** Parse a `scValToNative`-decoded `Config` into its camelCase `TradingConfig`. */
-export function parseTradingConfig(raw: Record<string, unknown>): TradingConfig {
+/** Parse a `scValToNative`-decoded `Config` into its camelCase `MarketConfig`. */
+export function parseMarketConfig(raw: Record<string, unknown>): MarketConfig {
     return {
         keeperRate: big(raw.keeper_rate),
         minPositionNotional: big(raw.min_position_notional),

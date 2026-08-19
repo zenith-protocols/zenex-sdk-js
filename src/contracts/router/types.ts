@@ -13,15 +13,15 @@ export interface Call {
 }
 
 /**
- * The trading contract's `create_order` arguments, in a shape the router
+ * The market contract's `create_order` arguments, in a shape the router
  * builders can turn into a fillable [`Call`] (see [`createOrderCall`]).
  *
- * Mirrors `create_order` one-for-one, plus the `trading` target the `Call`
+ * Mirrors `create_order` one-for-one, plus the `market` target the `Call`
  * runs against.
  */
 export interface OrderParams {
-    /** The target trading contract the `create_order` runs on. */
-    trading: string;
+    /** The target market contract the `create_order` runs on. */
+    market: string;
     /** The order owner. */
     user: string;
     /** Side the order targets. */
@@ -44,14 +44,14 @@ export interface OrderParams {
  * Build a `create_order`-shaped [`Call`] from [`OrderParams`], for router
  * batches (`multicall`, `create_and_fill`, and their kin).
  *
- * The encoding matches the trading contract's `create_order` exactly, so a
+ * The encoding matches the market contract's `create_order` exactly, so a
  * bundled order is byte-identical to a direct call. Put it at `calls[0]` of
  * a create-and-fill batch: the router treats the first call as the order to
  * fill.
  */
 export function createOrderCall(params: OrderParams): Call {
     return {
-        contract: params.trading,
+        contract: params.market,
         func: 'create_order',
         args: [
             Address.fromString(params.user).toScVal(),

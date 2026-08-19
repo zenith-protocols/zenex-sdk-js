@@ -1,7 +1,7 @@
 import { factorySpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { u32 } from '../../index.js';
-import { TradingConfig, tradingConfigToScVal } from '../market/types.js';
+import { MarketConfig, marketConfigToScVal } from '../market/types.js';
 
 /**
  * Deployment inputs for the markets this factory creates. Replaceable by the
@@ -50,7 +50,7 @@ export interface FactoryConstructorArgs {
 
 /**
  * Operation builder for the Zenex Factory contract (deploys an isolated
- * trading and strategy-vault pair for each market).
+ * market and strategy-vault pair for each market).
  *
  * All methods return base64-encoded XDR operations for transaction building.
  */
@@ -58,7 +58,7 @@ export class FactoryContract extends Contract {
     static spec: contract.Spec = new contract.Spec(factorySpec);
 
     static readonly parsers = {
-        /** Returns the deployed `[trading, vault]` address pair. */
+        /** Returns the deployed `[market, vault]` address pair. */
         deployMarket: (result: string): [string, string] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         /** Returns whether the queried market address was deployed by this factory. */
@@ -110,21 +110,21 @@ export class FactoryContract extends Contract {
     // ============================================================
 
     /**
-     * Deploy a single-market pair (strategy-vault and trading contract)
-     * atomically, and return the `(trading, vault)` address pair.
+     * Deploy a single-market pair (strategy-vault and market contract)
+     * atomically, and return the `(market, vault)` address pair.
      *
-     * The vault becomes the trading contract's collateral vault, and the
-     * trading contract becomes the vault's immutable strategy. Both
+     * The vault becomes the market contract's collateral vault, and the
+     * market contract becomes the vault's immutable strategy. Both
      * addresses derive from `admin` and the salts, so a salt alone cannot
      * be front-run by another deployer. `admin` must authorize the call and
-     * both deployments. It becomes the owner of the new trading contract.
+     * both deployments. It becomes the owner of the new market contract.
      *
-     * @param salt - Salt for the trading address. The vault salt derives from it.
-     * @param token - Collateral token used by both the trading contract and the vault.
+     * @param salt - Salt for the market address. The vault salt derives from it.
+     * @param token - Collateral token used by both the market contract and the vault.
      * @param oracle - Oracle contract that supplies prices for `feedId`.
      * @param feedId - 32-byte Data Streams stream id for the market. Fixed
-     *   for the life of the deployed trading contract.
-     * @param config - Initial `TradingConfig` for the deployed trading contract.
+     *   for the life of the deployed market contract.
+     * @param config - Initial `MarketConfig` for the deployed market contract.
      * @param vaultDecimalsOffset - Extra decimals on the vault's share
      *   token. Higher values reduce inflation-attack risk on share pricing.
      *
@@ -132,14 +132,14 @@ export class FactoryContract extends Contract {
      * - The `(trading, vault)` address pair. Parse with `parsers.deployMarket`.
      *
      * # Errors
-     * - Propagates the trading contract's constructor validation.
+     * - Propagates the market contract's constructor validation.
      * - `InvalidConfig` (700) if `config` fails its bounds, or `feedId` is
      *   not a V3 (`0x0003…`) stream id.
      * - `NegativeValueNotAllowed` (710) if a rate, fee, or margin in
      *   `config` is negative.
      *
      * # Events
-     * - Emits `Deploy` with topics `(trading: Address, vault: Address)`.
+     * - Emits `Deploy` with topics `(market: Address, vault: Address)`.
      */
     deployMarket(
         admin: string,
@@ -147,7 +147,7 @@ export class FactoryContract extends Contract {
         token: string,
         oracle: string,
         feedId: Buffer | Uint8Array,
-        config: TradingConfig,
+        config: MarketConfig,
         vaultName: string,
         vaultSymbol: string,
         vaultDecimalsOffset: u32,
@@ -161,7 +161,7 @@ export class FactoryContract extends Contract {
             Address.fromString(token).toScVal(),
             Address.fromString(oracle).toScVal(),
             xdr.ScVal.scvBytes(feedIdBuffer),
-            tradingConfigToScVal(config),
+            marketConfigToScVal(config),
             nativeToScVal(vaultName, { type: 'string' }),
             nativeToScVal(vaultSymbol, { type: 'string' }),
             xdr.ScVal.scvU32(vaultDecimalsOffset),

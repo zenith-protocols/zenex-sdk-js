@@ -63,9 +63,9 @@ export class OrderIntent {
         public slippageBps: bigint = 0n,
     ) {}
 
-    private base(): { trading: string; user: string; isLong: boolean; expiration: number } {
+    private base(): { market: string; user: string; isLong: boolean; expiration: number } {
         return {
-            trading: this.market.id,
+            market: this.market.id,
             user: this.user,
             isLong: this.isLong,
             expiration: this.market.ledger + this.ttlLedgers,

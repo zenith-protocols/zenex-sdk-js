@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { StrKey } from '@stellar/stellar-sdk';
 import { SCALAR_18 } from '../../src/math/fixed.js';
-import { makeConfig } from '../helpers/trading_state.js';
+import { makeConfig } from '../helpers/market_state.js';
 import type {
     MarketData,
     SidePair,
-    TradingConfig,
+    MarketConfig,
 } from '../../src/contracts/market/types.js';
 import { OrderKind, Status } from '../../src/contracts/market/types.js';
 import { Market } from '../../src/trading/market.js';
@@ -61,7 +61,7 @@ function marketData(overrides: Partial<MarketData> = {}): MarketData {
 /** A loaded Market, built the way a cache or a test builds one: by constructor. */
 function loadedMarket(
     data: Partial<MarketData> = {},
-    config: Partial<TradingConfig> = {},
+    config: Partial<MarketConfig> = {},
     vaultAssets: bigint = unit(1000),
 ): Market {
     return new Market(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { StrKey, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { TradingContract } from '../../src/contracts/market/contract.js';
+import { MarketContract } from '../../src/contracts/market/contract.js';
 import {
     FULL_CLOSE,
     OrderKind,
@@ -23,8 +23,8 @@ import {
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
 
-const contract = new TradingContract(TRADING);
-const base = { trading: TRADING, user: USER, isLong: true, expiration: 99 };
+const contract = new MarketContract(TRADING);
+const base = { market: TRADING, user: USER, isLong: true, expiration: 99 };
 
 /** Decode the `create_order` an intent produces, as native argument values. */
 function encoded(params: OrderParams): unknown[] {
@@ -50,7 +50,7 @@ describe('order intents', () => {
     it('carries the target contract so the params are self-describing', () => {
         // `trading` is the field `buildOrderOperation` routes on; an intent is
         // useless without it, which is why it is not defaulted.
-        expect(openMarketParams({ ...base, notional: 100n, margin: 10n, priceBound: 5n }).trading)
+        expect(openMarketParams({ ...base, notional: 100n, margin: 10n, priceBound: 5n }).market)
             .toBe(TRADING);
     });
 
@@ -114,15 +114,15 @@ describe('order intents', () => {
     });
 
     it('maps the vault actions onto the two kind discriminants', () => {
-        expect(vaultDepositParams({ trading: TRADING, user: USER, amount: 10n, minOut: 1n }))
+        expect(vaultDepositParams({ market: TRADING, user: USER, amount: 10n, minOut: 1n }))
             .toEqual({
-                trading: TRADING, user: USER, kind: VaultOrderKind.Deposit, amount: 10n, minOut: 1n,
+                market: TRADING, user: USER, kind: VaultOrderKind.Deposit, amount: 10n, minOut: 1n,
             });
         // A redemption's SHARE count travels in the same `amount` argument a
         // deposit uses for assets -- the encoding a caller would get wrong.
-        expect(vaultRedeemParams({ trading: TRADING, user: USER, shares: 20n, minOut: 2n }))
+        expect(vaultRedeemParams({ market: TRADING, user: USER, shares: 20n, minOut: 2n }))
             .toEqual({
-                trading: TRADING, user: USER, kind: VaultOrderKind.Redeem, amount: 20n, minOut: 2n,
+                market: TRADING, user: USER, kind: VaultOrderKind.Redeem, amount: 20n, minOut: 2n,
             });
     });
 

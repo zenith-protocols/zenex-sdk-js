@@ -1,8 +1,8 @@
 import { Address, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import { SCALAR_18 } from '../../src/math/index.js';
 import {
-    tradingConfigToScVal,
-    type TradingConfig,
+    marketConfigToScVal,
+    type MarketConfig,
 } from '../../src/contracts/market/types.js';
 
 // =============================================================================
@@ -25,7 +25,7 @@ const sidePair = (long: bigint, short: bigint) =>
 export const unitKey = (name: string): xdr.ScVal =>
     xdr.ScVal.scvVec([sym(name)]);
 
-export function makeConfig(): TradingConfig {
+export function makeConfig(): MarketConfig {
     return {
         keeperRate: 5n * 10n ** 16n,
         minPositionNotional: 10n,
@@ -118,7 +118,7 @@ export const TEST_FEED_ID: Buffer = Buffer.concat([
     Buffer.alloc(30, 23),
 ]);
 
-export interface TradingInstanceOptions {
+export interface MarketInstanceOptions {
     vault: string;
     token: string;
     oracle: string;
@@ -132,10 +132,10 @@ export interface TradingInstanceOptions {
     withOwner?: string;
 }
 
-export function tradingInstanceScVal(options: TradingInstanceOptions): xdr.ScVal {
+export function marketInstanceScVal(options: MarketInstanceOptions): xdr.ScVal {
     const addr = (id: string) => Address.fromString(id).toScVal();
     const storage: xdr.ScMapEntry[] = [
-        new xdr.ScMapEntry({ key: unitKey('Config'), val: tradingConfigToScVal(makeConfig()) }),
+        new xdr.ScMapEntry({ key: unitKey('Config'), val: marketConfigToScVal(makeConfig()) }),
         new xdr.ScMapEntry({ key: unitKey('FeedId'), val: xdr.ScVal.scvBytes(options.feedId ?? TEST_FEED_ID) }),
         new xdr.ScMapEntry({ key: unitKey('Status'), val: xdr.ScVal.scvU32(options.status ?? 0) }),
         new xdr.ScMapEntry({ key: unitKey('Vault'), val: addr(options.vault) }),

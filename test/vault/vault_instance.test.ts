@@ -6,7 +6,7 @@ import {
     balanceMapScVal,
     contractInstance,
     unitKey,
-} from '../helpers/trading_state.js';
+} from '../helpers/market_state.js';
 
 const ASSET = StrKey.encodeContract(Buffer.alloc(32, 3));
 const MARKET = StrKey.encodeContract(Buffer.alloc(32, 1));

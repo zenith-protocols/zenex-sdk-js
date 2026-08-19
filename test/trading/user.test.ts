@@ -8,10 +8,10 @@ import { loadTokenBalance, loadTokenBalances } from '../../src/token.js';
 import { loadTreasuryInstance, loadTreasuryRate } from '../../src/treasury.js';
 import { contractInstanceLedgerKey } from '../../src/contracts/keys.js';
 import {
-    tradingClaimableFundingLedgerKey,
-    tradingMarketDataLedgerKey,
-    tradingOrderCounterLedgerKey,
-    tradingPositionLedgerKey,
+    marketClaimableFundingLedgerKey,
+    marketDataLedgerKey,
+    marketOrderCounterLedgerKey,
+    marketPositionLedgerKey,
 } from '../../src/contracts/market/keys.js';
 import { tokenBalanceLedgerKey } from '../../src/token.js';
 import type { Network } from '../../src/index.js';
@@ -19,12 +19,12 @@ import type { PriceData } from '../../src/trading/internal/math.js';
 import {
     marketDataScVal,
     positionScVal,
-    tradingInstanceScVal,
+    marketInstanceScVal,
     vaultInstanceScVal,
     treasuryInstanceScVal,
     balanceMapScVal,
     ledgerEntryFor,
-} from '../helpers/trading_state.js';
+} from '../helpers/market_state.js';
 
 const MARKET = StrKey.encodeContract(Buffer.alloc(32, 1));
 const OTHER_MARKET = StrKey.encodeContract(Buffer.alloc(32, 9));
@@ -56,18 +56,18 @@ function userEntries(
     const entries = [];
     if (opts.long !== false) {
         entries.push(
-            ledgerEntryFor(tradingPositionLedgerKey(MARKET, user, true), positionScVal()),
+            ledgerEntryFor(marketPositionLedgerKey(MARKET, user, true), positionScVal()),
         );
     }
     if (opts.short) {
         entries.push(
-            ledgerEntryFor(tradingPositionLedgerKey(MARKET, user, false), positionScVal()),
+            ledgerEntryFor(marketPositionLedgerKey(MARKET, user, false), positionScVal()),
         );
     }
     if (opts.counter !== undefined) {
         entries.push(
             ledgerEntryFor(
-                tradingOrderCounterLedgerKey(MARKET, user),
+                marketOrderCounterLedgerKey(MARKET, user),
                 nativeToScVal(opts.counter, { type: 'u32' }),
             ),
         );
@@ -75,7 +75,7 @@ function userEntries(
     if (opts.funding !== undefined) {
         entries.push(
             ledgerEntryFor(
-                tradingClaimableFundingLedgerKey(MARKET, user),
+                marketClaimableFundingLedgerKey(MARKET, user),
                 nativeToScVal(opts.funding, { type: 'i128' }),
             ),
         );
@@ -149,7 +149,7 @@ describe('marketContext', () => {
         mockEntries([
             ledgerEntryFor(
                 contractInstanceLedgerKey(MARKET),
-                tradingInstanceScVal({
+                marketInstanceScVal({
                     vault: VAULT,
                     token: TOKEN,
                     oracle: ORACLE,
@@ -157,7 +157,7 @@ describe('marketContext', () => {
                     adl: [false, true],
                 }),
             ),
-            ledgerEntryFor(tradingMarketDataLedgerKey(MARKET), marketDataScVal()),
+            ledgerEntryFor(marketDataLedgerKey(MARKET), marketDataScVal()),
             ledgerEntryFor(
                 contractInstanceLedgerKey(VAULT),
                 vaultInstanceScVal({

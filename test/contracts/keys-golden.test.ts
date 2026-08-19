@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { Address, StrKey, contract, xdr } from '@stellar/stellar-sdk';
 import { contractInstanceLedgerKey } from '../../src/contracts/keys.js';
 import {
-    tradingMarketDataLedgerKey,
-    tradingPriceCacheLedgerKey,
-    tradingPositionLedgerKey,
-    tradingVaultOrderLedgerKey,
-    tradingOrderCounterLedgerKey,
-    tradingClaimableFundingLedgerKey,
-    tradingOrderLedgerKey,
+    marketDataLedgerKey,
+    marketPriceCacheLedgerKey,
+    marketPositionLedgerKey,
+    marketVaultOrderLedgerKey,
+    marketOrderCounterLedgerKey,
+    marketClaimableFundingLedgerKey,
+    marketOrderLedgerKey,
 } from '../../src/contracts/market/keys.js';
 import { tokenBalanceLedgerKey } from '../../src/token.js';
 
@@ -20,7 +20,7 @@ import { tokenBalanceLedgerKey } from '../../src/token.js';
 // every hand-built ledger key to an INDEPENDENT encoder: `@stellar/stellar-sdk`'s
 // own spec-driven `contract.Spec.nativeToScVal`, driven by a reconstructed
 // `DataKey` / token `Balance` union spec that mirrors the contract's
-// `#[contracttype]` storage enums (trading/src/storage.rs::DataKey and the OZ
+// `#[contracttype]` storage enums (market/src/storage.rs::DataKey and the OZ
 // `Balance(Address)` slot).
 //
 // This is the JS analogue of zenex-sdk-rs entries.rs
@@ -68,7 +68,7 @@ function unionSpec(
     };
 }
 
-// Mirror of trading/src/storage.rs::DataKey (only the variants ledger-keys.ts
+// Mirror of market/src/storage.rs::DataKey (only the variants ledger-keys.ts
 // builds; the exact variant set and field types are what the encoding depends
 // on, not the struct/enum names).
 const dataKey = unionSpec('DataKey', [
@@ -119,7 +119,7 @@ const b64 = (v: { toXDR(f: 'base64'): string }): string => v.toXDR('base64');
 
 describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () => {
     it('MarketData persistent key matches the spec encoder', () => {
-        expect(b64(tradingMarketDataLedgerKey(MARKET))).toBe(
+        expect(b64(marketDataLedgerKey(MARKET))).toBe(
             b64(expectedContractDataKey(MARKET, specScVal(dataKey, 'MarketData'))),
         );
     });
@@ -132,15 +132,15 @@ describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () =
                 durability: xdr.ContractDataDurability.temporary(),
             }),
         );
-        expect(b64(tradingPriceCacheLedgerKey(MARKET))).toBe(b64(expected));
+        expect(b64(marketPriceCacheLedgerKey(MARKET))).toBe(b64(expected));
     });
 
     it('Position key matches for both sides and account/contract users', () => {
         const cases: [string, boolean, xdr.LedgerKey][] = [
-            [ACCOUNT_USER, true, tradingPositionLedgerKey(MARKET, ACCOUNT_USER, true)],
-            [ACCOUNT_USER, false, tradingPositionLedgerKey(MARKET, ACCOUNT_USER, false)],
-            [CONTRACT_USER, true, tradingPositionLedgerKey(MARKET, CONTRACT_USER, true)],
-            [CONTRACT_USER, false, tradingPositionLedgerKey(MARKET, CONTRACT_USER, false)],
+            [ACCOUNT_USER, true, marketPositionLedgerKey(MARKET, ACCOUNT_USER, true)],
+            [ACCOUNT_USER, false, marketPositionLedgerKey(MARKET, ACCOUNT_USER, false)],
+            [CONTRACT_USER, true, marketPositionLedgerKey(MARKET, CONTRACT_USER, true)],
+            [CONTRACT_USER, false, marketPositionLedgerKey(MARKET, CONTRACT_USER, false)],
         ];
         for (const [user, isLong, built] of cases) {
             expect(b64(built), `Position(${user}, ${isLong})`).toBe(
@@ -155,7 +155,7 @@ describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () =
     });
 
     it('Order / VaultOrder (user, id) keys match the spec encoder', () => {
-        expect(b64(tradingOrderLedgerKey(MARKET, ACCOUNT_USER, 7))).toBe(
+        expect(b64(marketOrderLedgerKey(MARKET, ACCOUNT_USER, 7))).toBe(
             b64(
                 expectedContractDataKey(
                     MARKET,
@@ -163,7 +163,7 @@ describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () =
                 ),
             ),
         );
-        expect(b64(tradingVaultOrderLedgerKey(MARKET, ACCOUNT_USER, 9))).toBe(
+        expect(b64(marketVaultOrderLedgerKey(MARKET, ACCOUNT_USER, 9))).toBe(
             b64(
                 expectedContractDataKey(
                     MARKET,
@@ -174,7 +174,7 @@ describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () =
     });
 
     it('OrderCounter / ClaimableFunding (user) keys match the spec encoder', () => {
-        expect(b64(tradingOrderCounterLedgerKey(MARKET, ACCOUNT_USER))).toBe(
+        expect(b64(marketOrderCounterLedgerKey(MARKET, ACCOUNT_USER))).toBe(
             b64(
                 expectedContractDataKey(
                     MARKET,
@@ -182,7 +182,7 @@ describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () =
                 ),
             ),
         );
-        expect(b64(tradingClaimableFundingLedgerKey(MARKET, ACCOUNT_USER))).toBe(
+        expect(b64(marketClaimableFundingLedgerKey(MARKET, ACCOUNT_USER))).toBe(
             b64(
                 expectedContractDataKey(
                     MARKET,

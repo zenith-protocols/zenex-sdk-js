@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { rpc } from '@stellar/stellar-sdk';
 import { parseError } from '../src/response_parser.js';
-import { ContractError, ContractErrorType, TradingError } from '../src/errors.js';
+import { ContractError, ContractErrorType, MarketError } from '../src/errors.js';
 
 // =============================================================================
 // parseError code resolution against the disjoint v2 namespaces:
-// trading 700-772, price-verifier 780-791, strategy-vault 800-801,
+// market 700-772, price-verifier 780-791, strategy-vault 800-801,
 // governance 810-812, treasury 900. No contract-type hint exists anymore.
 // =============================================================================
 
@@ -29,51 +29,51 @@ describe('parseError: collision-hint machinery is gone', () => {
             legacyHint?: string
         ) => ContractError;
         expect(parseWithExtraArgument(simulationError(770), 'governance').type).toBe(
-            TradingError.AdlNotTriggered
+            MarketError.AdlNotTriggered
         );
-        expect(parseWithExtraArgument(simulationError(810), 'trading').type).toBe(
+        expect(parseWithExtraArgument(simulationError(810), 'market').type).toBe(
             ContractErrorType.GovNotQueued
         );
     });
 });
 
-describe('parseError: new trading codes resolve unhinted', () => {
+describe('parseError: new market codes resolve unhinted', () => {
     it('733 -> TooManyOrders', () => {
-        expect(parseError(simulationError(733)).type).toBe(TradingError.TooManyOrders);
+        expect(parseError(simulationError(733)).type).toBe(MarketError.TooManyOrders);
     });
 
     it('734 -> UnknownKind', () => {
-        expect(parseError(simulationError(734)).type).toBe(TradingError.UnknownKind);
+        expect(parseError(simulationError(734)).type).toBe(MarketError.UnknownKind);
     });
 
     it('742 -> TriggerNotMet', () => {
-        expect(parseError(simulationError(742)).type).toBe(TradingError.TriggerNotMet);
+        expect(parseError(simulationError(742)).type).toBe(MarketError.TriggerNotMet);
     });
 
     it('752 -> MinOutNotMet (the min_out slippage gate, not the old pending-PnL meaning)', () => {
         const error = parseError(simulationError(752));
-        expect(error.type).toBe(TradingError.MinOutNotMet);
+        expect(error.type).toBe(MarketError.MinOutNotMet);
         expect(error.message).toMatch(/min_out/);
     });
 
     it('754 -> PendingPnlExceeded', () => {
         const error = parseError(simulationError(754));
-        expect(error.type).toBe(TradingError.PendingPnlExceeded);
+        expect(error.type).toBe(MarketError.PendingPnlExceeded);
         expect(error.message).toMatch(/PnL/i);
     });
 
     it('760 -> NothingToClaim', () => {
-        expect(parseError(simulationError(760)).type).toBe(TradingError.NothingToClaim);
+        expect(parseError(simulationError(760)).type).toBe(MarketError.NothingToClaim);
     });
 
-    it('770-772 resolve unhinted to the trading ADL errors', () => {
+    it('770-772 resolve unhinted to the market ADL errors', () => {
         const adlNotTriggered = parseError(simulationError(770));
-        expect(adlNotTriggered.type).toBe(TradingError.AdlNotTriggered);
+        expect(adlNotTriggered.type).toBe(MarketError.AdlNotTriggered);
         expect(adlNotTriggered.message).toMatch(/ADL/);
         expect(adlNotTriggered.message).not.toMatch(/queued/i);
 
-        expect(parseError(simulationError(771)).type).toBe(TradingError.AdlOvershoot);
-        expect(parseError(simulationError(772)).type).toBe(TradingError.AdlNotEligible);
+        expect(parseError(simulationError(771)).type).toBe(MarketError.AdlOvershoot);
+        expect(parseError(simulationError(772)).type).toBe(MarketError.AdlNotEligible);
     });
 });
 
@@ -116,9 +116,9 @@ describe('parseError: periphery namespaces resolve unhinted', () => {
 });
 
 describe('parseError: fallbacks', () => {
-    it('a non-colliding trading code resolves with its message (704 -> MarketFrozen)', () => {
+    it('a non-colliding market code resolves with its message (704 -> MarketFrozen)', () => {
         const error = parseError(simulationError(704));
-        expect(error.type).toBe(TradingError.MarketFrozen);
+        expect(error.type).toBe(MarketError.MarketFrozen);
         expect(error.type).toBe(704);
         expect(error.message).not.toContain('Unknown');
     });

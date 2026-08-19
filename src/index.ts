@@ -27,27 +27,27 @@ export { ZenexContractType } from './base_event.js';
 export type { BaseZenexEvent, ZenexEvent } from './base_event.js';
 
 // =============================================================================
-// Trading Module (order -> keeper-execute contract)
+// Market Module (order -> keeper-execute contract)
 // =============================================================================
 
 export {
     // Contract binding
-    TradingContract,
+    MarketContract,
     // Core enums, sentinels, converters, and parsers
     Status,
     OrderKind,
     VaultOrderKind,
     FULL_CLOSE,
-    tradingConfigToScVal,
+    marketConfigToScVal,
     parseSidePair,
     parseOrder,
     parseVaultOrder,
     parsePosition,
     parseMarketData,
     parseAdlState,
-    parseTradingConfig,
+    parseMarketConfig,
     // Events
-    TradingEventType,
+    MarketEventType,
 } from './contracts/market/index.js';
 
 export type {
@@ -60,32 +60,32 @@ export type {
     SidePair,
     MarketData,
     AdlState,
-    TradingConfig,
+    MarketConfig,
     // Events
-    BaseTradingEvent,
-    TradingCreateOrderEvent,
-    TradingCancelOrderEvent,
-    TradingCreateVaultOrderEvent,
-    TradingCancelVaultOrderEvent,
-    TradingDepositFillEvent,
-    TradingRedeemFillEvent,
-    TradingClaimFundingEvent,
-    TradingAdlUpdateEvent,
-    TradingFundingAccrualEvent,
-    TradingBorrowingAccrualEvent,
-    TradingStatusUpdateEvent,
-    TradingConfigUpdateEvent,
-    TradingTerminalPriceUpdateEvent,
-    TradingOpenFillEvent,
-    TradingIncreaseFillEvent,
-    TradingDecreaseFillEvent,
-    TradingCloseFillEvent,
-    TradingLiquidationEvent,
-    TradingEvent,
-    TradingInstanceState,
+    BaseMarketEvent,
+    MarketCreateOrderEvent,
+    MarketCancelOrderEvent,
+    MarketCreateVaultOrderEvent,
+    MarketCancelVaultOrderEvent,
+    MarketDepositFillEvent,
+    MarketRedeemFillEvent,
+    MarketClaimFundingEvent,
+    MarketAdlUpdateEvent,
+    MarketFundingAccrualEvent,
+    MarketBorrowingAccrualEvent,
+    MarketStatusUpdateEvent,
+    MarketConfigUpdateEvent,
+    MarketTerminalPriceUpdateEvent,
+    MarketOpenFillEvent,
+    MarketIncreaseFillEvent,
+    MarketDecreaseFillEvent,
+    MarketCloseFillEvent,
+    MarketLiquidationEvent,
+    MarketEvent,
+    MarketInstanceState,
 } from './contracts/market/index.js';
 
-export { parseTradingInstance } from './contracts/market/index.js';
+export { parseMarketInstance } from './contracts/market/index.js';
 
 // Instance-storage walkers, one per contract that keeps instance state.
 // Each is a single ledger key holding every value below, including `Owner`.
@@ -117,11 +117,11 @@ export type { MarketStateFailureCode } from './entries.js';
 export { loadTreasuryInstance, loadTreasuryRate } from './treasury.js';
 
 // =============================================================================
-// Trading Router Module (stateless batching + create-and-fill flows)
+// Market Router Module (stateless batching + create-and-fill flows)
 // =============================================================================
 
 export {
-    TradingRouterContract,
+    MarketRouterContract,
     callToScVal,
     createOrderCall,
     parseCallOutcome,
@@ -219,12 +219,12 @@ export type {
 export {
     ContractError,
     ContractErrorType,
-    TradingError,
+    MarketError,
     contractErrorFromCode,
     parseError,
     parseResult,
 } from './response_parser.js';
-export { tradingErrorMessages, parseContractErrorCode } from './errors.js';
+export { marketErrorMessages, parseContractErrorCode } from './errors.js';
 
 // =============================================================================
 // Ledger Keys (direct storage reads)
@@ -238,13 +238,13 @@ export {
     temporaryLedgerKey,
 } from './contracts/keys.js';
 export {
-    tradingMarketDataLedgerKey,
-    tradingPriceCacheLedgerKey,
-    tradingPositionLedgerKey,
-    tradingVaultOrderLedgerKey,
-    tradingOrderCounterLedgerKey,
-    tradingClaimableFundingLedgerKey,
-    tradingOrderLedgerKey,
+    marketDataLedgerKey,
+    marketPriceCacheLedgerKey,
+    marketPositionLedgerKey,
+    marketVaultOrderLedgerKey,
+    marketOrderCounterLedgerKey,
+    marketClaimableFundingLedgerKey,
+    marketOrderLedgerKey,
 } from './contracts/market/keys.js';
 
 // Token reads. Any holder, any token. Not a Zenex contract binding.
@@ -257,7 +257,7 @@ export * as FixedMath from './math/index.js';
 export { simulateAndParse } from './simulate.js';
 
 // =============================================================================
-// Trading tier: loaded chain objects, order intents, and float estimates.
+// Market tier: loaded chain objects, order intents, and float estimates.
 // Estimates render approximate numbers for display only; never feed a float
 // back into a transaction — parse user input with `parseAtomic`.
 // =============================================================================

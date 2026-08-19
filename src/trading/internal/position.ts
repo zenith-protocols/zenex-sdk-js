@@ -1,4 +1,4 @@
-import type { MarketData, Position, SidePair, TradingConfig } from '../../contracts/market/types.js';
+import type { MarketData, Position, SidePair, MarketConfig } from '../../contracts/market/types.js';
 import { SCALAR_18, addI128, checkedI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
 import { advanceMarketAccruals, exactPositionPnl, marketSidePnl, quoteTradeFees, sideCapacity } from './math.js';
 import type { PriceData } from './math.js';
@@ -63,7 +63,7 @@ export interface QuotePositionFeesInput {
      */
     market: MarketData;
     /** Fee rates the base and impact fee are computed from. */
-    config: TradingConfig;
+    config: MarketConfig;
     /** Side the fees settle against. */
     isLong: boolean;
     /**
@@ -203,7 +203,7 @@ export function impliedEntryPrice(position: Position): bigint | undefined {
  * the fee-settled equity `liquidationState` returns. It also excludes
  * pending funding and borrowing, named in the result's `assumptions`.
  *
- * The contract has no leverage function; `TradingConfig.initMargin` states
+ * The contract has no leverage function; `MarketConfig.initMargin` states
  * the inverse relation, "max leverage = 1 / initMargin".
  *
  * @returns `estimate` of `0n` when `position.notional` is `0n`.
@@ -484,7 +484,7 @@ export function unlockedNotional(position: Position, nowSecs: bigint): bigint {
  */
 export function liquidationPrice(
     position: Position,
-    config: TradingConfig,
+    config: MarketConfig,
     marketData: MarketData,
     isLong: boolean,
 ): bigint {

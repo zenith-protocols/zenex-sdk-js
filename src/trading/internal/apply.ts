@@ -1,6 +1,6 @@
 import type { OrderParams } from '../../contracts/router/types.js';
 import { FULL_CLOSE, OrderKind, Status } from '../../contracts/market/types.js';
-import type { AdlState, MarketData, Position, TradingConfig } from '../../contracts/market/types.js';
+import type { AdlState, MarketData, Position, MarketConfig } from '../../contracts/market/types.js';
 import { BPS_DENOMINATOR, addI128, checkedBps, mulDivFloor, subI128 } from '../../math/fixed.js';
 import type { PriceData } from './math.js';
 import { isIncreaseOrderKind, isMarketOrderKind, orderExecutionPrice, validateOrder } from './order.js';
@@ -32,7 +32,7 @@ export interface MarketContext {
     /** Operational status; only `Active` admits new risk. */
     status: Status;
     /** Market parameters. */
-    config: TradingConfig;
+    config: MarketConfig;
     /** The market singleton. */
     market: MarketData;
     /** The subject's stored position on the side under action. */

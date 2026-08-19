@@ -4,14 +4,14 @@ import { validateOrder } from '../../src/trading/internal/order.js';
 import { OrderKind, Status } from '../../src/contracts/market/types.js';
 import type {
     Position,
-    TradingConfig,
+    MarketConfig,
 } from '../../src/contracts/market/types.js';
 import type { OrderParams } from '../../src/contracts/router/types.js';
 
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
 
-function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
+function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
     return {
         keeperRate: 0n,
         minPositionNotional: 100n,
@@ -53,7 +53,7 @@ function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
 
 function order(overrides: Partial<OrderParams> = {}): OrderParams {
     return {
-        trading: TRADING,
+        market: TRADING,
         user: USER,
         isLong: true,
         kind: OrderKind.MarketIncrease,

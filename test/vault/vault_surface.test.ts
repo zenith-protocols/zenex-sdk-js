@@ -8,7 +8,7 @@ import {
     vaultInstanceScVal,
     balanceMapScVal,
     ledgerEntryFor,
-} from '../helpers/trading_state.js';
+} from '../helpers/market_state.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));

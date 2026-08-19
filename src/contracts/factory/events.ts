@@ -11,11 +11,11 @@ export interface BaseFactoryEvent extends BaseZenexEvent {
     eventType: FactoryEventType;
 }
 
-/** Trading and vault pair deployed via `deploy`. */
+/** Market and vault pair deployed via `deploy`. */
 export interface FactoryDeployEvent extends BaseFactoryEvent {
     eventType: FactoryEventType.Deploy;
-    /** The deployed trading contract address. */
-    trading: string;
+    /** The deployed market contract address. */
+    market: string;
     /** The deployed vault contract address. */
     vault: string;
 }

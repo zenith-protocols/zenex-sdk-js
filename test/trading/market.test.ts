@@ -3,19 +3,19 @@ import { rpc, xdr, StrKey } from '@stellar/stellar-sdk';
 import { Market, type MarketContracts } from '../../src/trading/market.js';
 import { MarketStateError } from '../../src/entries.js';
 import { contractInstanceLedgerKey } from '../../src/contracts/keys.js';
-import { tradingMarketDataLedgerKey } from '../../src/contracts/market/keys.js';
+import { marketDataLedgerKey } from '../../src/contracts/market/keys.js';
 import { tokenBalanceLedgerKey } from '../../src/token.js';
 import { Status } from '../../src/contracts/market/types.js';
 import type { Network } from '../../src/index.js';
 import {
     makeConfig,
     marketDataScVal,
-    tradingInstanceScVal,
+    marketInstanceScVal,
     vaultInstanceScVal,
     balanceMapScVal,
     ledgerEntryFor,
     TEST_FEED_ID,
-} from '../helpers/trading_state.js';
+} from '../helpers/market_state.js';
 
 const MARKET = StrKey.encodeContract(Buffer.alloc(32, 1));
 const MARKET_B = StrKey.encodeContract(Buffer.alloc(32, 9));
@@ -47,7 +47,7 @@ function marketEntries(
 ) {
     const instance =
         overrides.instance ??
-        tradingInstanceScVal({
+        marketInstanceScVal({
             vault: where.vault,
             token: where.token,
             oracle: ORACLE,
@@ -69,7 +69,7 @@ function marketEntries(
     ];
     if (!overrides.omitData) {
         entries.push(
-            ledgerEntryFor(tradingMarketDataLedgerKey(where.market), marketDataScVal()),
+            ledgerEntryFor(marketDataLedgerKey(where.market), marketDataScVal()),
         );
     }
     if (!overrides.omitBalance) {
@@ -158,7 +158,7 @@ describe('Market.load', () => {
 
     it('rejects contracts the market itself disagrees with', async () => {
         // Instance says VAULT_B; the caller asked with VAULT.
-        const instance = tradingInstanceScVal({
+        const instance = marketInstanceScVal({
             vault: VAULT_B,
             token: TOKEN,
             oracle: ORACLE,
@@ -182,7 +182,7 @@ describe('Market.load', () => {
 describe('Market accessors', () => {
     it('surfaces the owner from the same entry, with no extra call', async () => {
         const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 12));
-        const instance = tradingInstanceScVal({
+        const instance = marketInstanceScVal({
             vault: VAULT,
             token: TOKEN,
             oracle: ORACLE,
@@ -209,7 +209,7 @@ describe('Market accessors', () => {
     });
 
     it('reports (terminalPrice, delistedAt) once retired — the get_retirement shape', async () => {
-        const instance = tradingInstanceScVal({
+        const instance = marketInstanceScVal({
             vault: VAULT,
             token: TOKEN,
             oracle: ORACLE,

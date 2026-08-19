@@ -53,7 +53,7 @@ export interface MulticallWithFeeArgs {
 export interface CreateAndFillWithFeeArgs {
     /**
      * The batch to run. `calls[0]` must be a `create_order` call; build it
-     * with [`TradingRouterContract.createOrderCall`]. It is the order the
+     * with [`MarketRouterContract.createOrderCall`]. It is the order the
      * fill targets. Calls after the first simply rest.
      */
     calls: Call[];
@@ -91,7 +91,7 @@ export interface CreateAndFillWithFeeArgs {
  * Every method returns a base64-encoded XDR operation for transaction
  * building.
  */
-export class TradingRouterContract extends Contract {
+export class MarketRouterContract extends Contract {
     /** Parsed spec for the router contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(marketRouterSpec);
 
@@ -193,7 +193,7 @@ export class TradingRouterContract extends Contract {
      * Strict: any failing call, including the fill, traps the whole batch,
      * so either everything lands or nothing rests. `calls[0]` must be a
      * `create_order`-shaped call; build it with
-     * [`TradingRouterContract.createOrderCall`]. Its `u32` return value is
+     * [`MarketRouterContract.createOrderCall`]. Its `u32` return value is
      * the id of the order the fill targets, and `user` is that order's
      * owner. Calls
      * after the first are never filled and simply rest. With
@@ -206,7 +206,7 @@ export class TradingRouterContract extends Contract {
      * # Errors
      * - Traps if `calls` is empty or `calls[0]` does not return a `u32`
      *   order id.
-     * - Propagates the trading contract's `create_order` and `execute_order`
+     * - Propagates the market contract's `create_order` and `execute_order`
      *   errors.
      */
     createAndFill(
@@ -242,7 +242,7 @@ export class TradingRouterContract extends Contract {
      * # Errors
      * - Traps if `calls` is empty or `calls[0]` does not return a `u32`
      *   order id.
-     * - Propagates the trading contract's `create_order` errors. A failed
+     * - Propagates the market contract's `create_order` errors. A failed
      *   fill is reported in the appended outcome, not thrown.
      *
      * @deprecated Low-level ABI compatibility only. User-facing instant
@@ -285,7 +285,7 @@ export class TradingRouterContract extends Contract {
      *   order id.
      * - InvalidFeeBounds (5003) if `feeAmount` is negative or exceeds
      *   `maxFeeAmount`.
-     * - Propagates the trading contract's `create_order` and `execute_order`
+     * - Propagates the market contract's `create_order` and `execute_order`
      *   errors.
      *
      * # Events
@@ -319,7 +319,7 @@ export class TradingRouterContract extends Contract {
      *   order id.
      * - InvalidFeeBounds (5003) if `feeAmount` is negative or exceeds
      *   `maxFeeAmount`.
-     * - Propagates the trading contract's `create_order` errors. A failed
+     * - Propagates the market contract's `create_order` errors. A failed
      *   fill is reported in the appended outcome, not thrown.
      *
      * # Events

@@ -4,13 +4,13 @@ import type {
     AdlState,
     MarketData,
     Status,
-    TradingConfig,
+    MarketConfig,
 } from '../contracts/market/types.js';
 import { parseMarketData } from '../contracts/market/types.js';
-import { parseTradingInstance } from '../contracts/market/instance.js';
+import { parseMarketInstance } from '../contracts/market/instance.js';
 import { parseVaultInstance } from '../contracts/vault/instance.js';
 import { contractInstanceLedgerKey } from '../contracts/keys.js';
-import { tradingMarketDataLedgerKey } from '../contracts/market/keys.js';
+import { marketDataLedgerKey } from '../contracts/market/keys.js';
 import { tokenBalanceLedgerKey, tokenBalanceOrZero } from '../token.js';
 import { MarketStateError, readEntries } from '../entries.js';
 import type { EntryBatch } from '../entries.js';
@@ -80,7 +80,7 @@ export class Market {
         /** Operational status; only `Active` admits new risk. */
         public status: Status,
         /** Global trading parameters. */
-        public config: TradingConfig,
+        public config: MarketConfig,
         /** The market singleton: open interest, indices, funding. */
         public data: MarketData,
         /** Per-side ADL flags; a flagged side is closed-only. */
@@ -124,7 +124,7 @@ export class Market {
     }
 
     /**
-     * Resolve `MarketContracts` from the trading contract id alone. One
+     * Resolve `MarketContracts` from the market contract id alone. One
      * `getLedgerEntries`: the instance names its own vault and token, so the
      * result always passes `load`'s identity check.
      */
@@ -134,7 +134,7 @@ export class Market {
     ): Promise<MarketContracts> {
         const key = contractInstanceLedgerKey(marketId);
         const batch = await readEntries(network, [key]);
-        const instance = parseTradingInstance(
+        const instance = parseMarketInstance(
             batch.require(key, `market instance ${marketId}`),
         );
         return { market: marketId, vault: instance.vault, token: instance.token };
@@ -354,13 +354,13 @@ export class Market {
 /** @internal The four ledger keys one market's state collapses to. */
 export function marketKeys(contracts: MarketContracts): {
     instance: ReturnType<typeof contractInstanceLedgerKey>;
-    data: ReturnType<typeof tradingMarketDataLedgerKey>;
+    data: ReturnType<typeof marketDataLedgerKey>;
     vaultInstance: ReturnType<typeof contractInstanceLedgerKey>;
     vaultBalance: ReturnType<typeof tokenBalanceLedgerKey>;
 } {
     return {
         instance: contractInstanceLedgerKey(contracts.market),
-        data: tradingMarketDataLedgerKey(contracts.market),
+        data: marketDataLedgerKey(contracts.market),
         vaultInstance: contractInstanceLedgerKey(contracts.vault),
         vaultBalance: tokenBalanceLedgerKey(contracts.token, contracts.vault),
     };
@@ -374,7 +374,7 @@ function decodeMarket(
 ): Market {
     const keys = marketKeys(contracts);
 
-    const instance = parseTradingInstance(
+    const instance = parseMarketInstance(
         batch.require(keys.instance, `market instance ${contracts.market}`),
     );
 

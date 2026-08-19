@@ -2,7 +2,7 @@ import { Address, xdr } from '@stellar/stellar-sdk';
 import { persistentLedgerKey, temporaryLedgerKey } from '../keys.js';
 
 // =============================================================================
-// Trading contract `DataKey` mirror
+// Market contract `DataKey` mirror
 //
 // `DataKey` carries data on several variants (Position, VaultOrder, etc.), so
 // soroban-sdk encodes every variant - including the zero-field ones - as a Vec
@@ -18,7 +18,7 @@ function toAddressScVal(address: string | Address): xdr.ScVal {
 // --- persistent, shared tier ---
 
 /** `DataKey::MarketData` -> MarketData: hot per-market state, singleton, own entry (persistent, shared tier). */
-export function tradingMarketDataLedgerKey(contractId: string): xdr.LedgerKey {
+export function marketDataLedgerKey(contractId: string): xdr.LedgerKey {
     return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('MarketData')]);
 }
 
@@ -30,14 +30,14 @@ export function tradingMarketDataLedgerKey(contractId: string): xdr.LedgerKey {
  * network-minimum TTL (16 ledgers), re-extended on every write; lazy, lapses
  * harmlessly, so an absent entry just means no recent consumption.
  */
-export function tradingPriceCacheLedgerKey(contractId: string): xdr.LedgerKey {
+export function marketPriceCacheLedgerKey(contractId: string): xdr.LedgerKey {
     return temporaryLedgerKey(contractId, [xdr.ScVal.scvSymbol('PriceCache')]);
 }
 
 // --- persistent, user tier ---
 
 /** `DataKey::Position(user, is_long)` -> Position: netted position, hedge mode (persistent user tier). */
-export function tradingPositionLedgerKey(
+export function marketPositionLedgerKey(
     contractId: string,
     user: string | Address,
     isLong: boolean
@@ -50,7 +50,7 @@ export function tradingPositionLedgerKey(
 }
 
 /** `DataKey::VaultOrder(user, id)` -> VaultOrder: pending vault deposit or redemption (persistent user tier). */
-export function tradingVaultOrderLedgerKey(
+export function marketVaultOrderLedgerKey(
     contractId: string,
     user: string | Address,
     id: number
@@ -63,17 +63,17 @@ export function tradingVaultOrderLedgerKey(
 }
 
 /** `DataKey::OrderCounter(user)` -> u32: next id for trade and vault orders, allocated from 1 (persistent user tier). */
-export function tradingOrderCounterLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
+export function marketOrderCounterLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
     return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('OrderCounter'), toAddressScVal(user)]);
 }
 
 /** `DataKey::ClaimableFunding(user)` -> i128: funding owed to the user, in token-dec (persistent user tier). */
-export function tradingClaimableFundingLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
+export function marketClaimableFundingLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
     return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('ClaimableFunding'), toAddressScVal(user)]);
 }
 
 /** `DataKey::Order(user, id)` -> Order: pending keeper order (persistent user tier, 100/120-day TTL). */
-export function tradingOrderLedgerKey(contractId: string, user: string | Address, id: number): xdr.LedgerKey {
+export function marketOrderLedgerKey(contractId: string, user: string | Address, id: number): xdr.LedgerKey {
     return persistentLedgerKey(contractId, [
         xdr.ScVal.scvSymbol('Order'),
         toAddressScVal(user),

@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { StrKey, xdr } from '@stellar/stellar-sdk';
-import { parseTradingInstance } from '../../src/contracts/market/instance.js';
+import { parseMarketInstance } from '../../src/contracts/market/instance.js';
 import { Status } from '../../src/contracts/market/types.js';
 import {
     makeConfig,
-    tradingInstanceScVal,
+    marketInstanceScVal,
     contractInstance,
     unitKey,
     TEST_FEED_ID,
-} from '../helpers/trading_state.js';
+} from '../helpers/market_state.js';
 
 const VAULT = StrKey.encodeContract(Buffer.alloc(32, 2));
 const TOKEN = StrKey.encodeContract(Buffer.alloc(32, 3));
@@ -23,10 +23,10 @@ const wiring = {
     treasury: TREASURY,
 };
 
-describe('parseTradingInstance', () => {
+describe('parseMarketInstance', () => {
     it('walks a full instance: config, anchors, addresses, status', () => {
-        const instance = parseTradingInstance(
-            tradingInstanceScVal({ ...wiring, feedId: TEST_FEED_ID, status: 1, withOwner: OWNER }),
+        const instance = parseMarketInstance(
+            marketInstanceScVal({ ...wiring, feedId: TEST_FEED_ID, status: 1, withOwner: OWNER }),
         );
         expect(instance.config).toEqual(makeConfig());
         expect(instance.feedId).toEqual(TEST_FEED_ID);
@@ -39,15 +39,15 @@ describe('parseTradingInstance', () => {
     });
 
     it('lazy keys default when absent (DelistedAt/TerminalPrice undefined, Adl zeroed)', () => {
-        const instance = parseTradingInstance(tradingInstanceScVal(wiring));
+        const instance = parseMarketInstance(marketInstanceScVal(wiring));
         expect(instance.delistedAt).toBeUndefined();
         expect(instance.terminalPrice).toBeUndefined();
         expect(instance.adl).toEqual({ long: false, short: false });
     });
 
     it('reads lazy keys when present', () => {
-        const instance = parseTradingInstance(
-            tradingInstanceScVal({
+        const instance = parseMarketInstance(
+            marketInstanceScVal({
                 ...wiring,
                 delistedAt: 1_751_000_000n,
                 terminalPrice: 9_100_000_000n,
@@ -63,22 +63,22 @@ describe('parseTradingInstance', () => {
         // Instance storage is ONE entry: Owner is already fetched and paid for,
         // and a client needs it to verify the market is governance-owned.
         expect(
-            parseTradingInstance(tradingInstanceScVal({ ...wiring, withOwner: OWNER })).owner,
+            parseMarketInstance(marketInstanceScVal({ ...wiring, withOwner: OWNER })).owner,
         ).toBe(OWNER);
     });
 
     it('reports no owner once ownership has been renounced', () => {
-        expect(parseTradingInstance(tradingInstanceScVal(wiring)).owner).toBeUndefined();
+        expect(parseMarketInstance(marketInstanceScVal(wiring)).owner).toBeUndefined();
     });
 
     it('still ignores a key it has no field for, rather than failing the read', () => {
         // Forward compatibility: a contract upgrade that adds a storage key must
         // not break every client reading the instance.
         const extended = contractInstance([
-            ...(tradingInstanceScVal(wiring).instance().storage() ?? []),
+            ...(marketInstanceScVal(wiring).instance().storage() ?? []),
             new xdr.ScMapEntry({ key: unitKey('SomeFutureKey'), val: xdr.ScVal.scvU32(1) }),
         ]);
-        expect(() => parseTradingInstance(extended)).not.toThrow();
+        expect(() => parseMarketInstance(extended)).not.toThrow();
     });
 
     it('throws when a required key is missing', () => {
@@ -86,11 +86,11 @@ describe('parseTradingInstance', () => {
         const partial = contractInstance([
             new xdr.ScMapEntry({ key: unitKey('FeedId'), val: xdr.ScVal.scvBytes(TEST_FEED_ID) }),
         ]);
-        expect(() => parseTradingInstance(partial)).toThrow(/missing/);
+        expect(() => parseMarketInstance(partial)).toThrow(/missing/);
     });
 
     it('rejects a non-instance value', () => {
-        expect(() => parseTradingInstance(xdr.ScVal.scvU32(1))).toThrow(
+        expect(() => parseMarketInstance(xdr.ScVal.scvU32(1))).toThrow(
             /contract-instance/,
         );
     });

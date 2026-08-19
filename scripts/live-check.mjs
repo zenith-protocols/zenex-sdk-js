@@ -13,13 +13,13 @@ import {
     MarketUser,
     OrderIntent,
     VaultOrderIntent,
-    TradingContract,
+    MarketContract,
     VaultContract,
     estimateMarket,
     estimatePosition,
     previewOrder,
     simulateAndParse,
-    tradingPriceCacheLedgerKey,
+    marketPriceCacheLedgerKey,
 } from '../dist/esm/index.js';
 import { rpc } from '@stellar/stellar-sdk';
 
@@ -49,7 +49,7 @@ const contracts = {
     token: process.env.ZENEX_TOKEN ?? 'CBHJFR3Z56NCY3RNDU2MPHJCLFBVLIM6C65POU4Z7AMMSUYYPAYOIYQL',
 };
 console.log(`\nLive market xlm-usd via ${NETWORK.rpc}`);
-console.log(`  trading ${contracts.market}\n  vault   ${contracts.vault}\n  token   ${contracts.token}\n`);
+console.log(`  market  ${contracts.market}\n  vault   ${contracts.vault}\n  token   ${contracts.token}\n`);
 
 // --- 1. Load through the SDK ------------------------------------------------
 const market = await Market.load(NETWORK, contracts);
@@ -60,15 +60,15 @@ check('config decoded', market.config.maxOpenInterest > 0n, `maxOI=${fmt(market.
 check('asset decimals', market.assetDecimals > 0, `decimals=${market.assetDecimals}`);
 
 // --- 2. Cross-check every loaded field against the contract's own views -----
-const trading = new TradingContract(contracts.market);
+const marketContract = new MarketContract(contracts.market);
 const vault = new VaultContract(contracts.vault);
 const sim = (op, parser) => simulateAndParse(NETWORK, op, parser);
 
 const [status, cfg, data, adl, totalAssets, totalSupply] = await Promise.all([
-    sim(trading.getStatus(), TradingContract.parsers.getStatus),
-    sim(trading.getConfig(), TradingContract.parsers.getConfig),
-    sim(trading.getMarketData(), TradingContract.parsers.getMarketData),
-    sim(trading.getAdl(), TradingContract.parsers.getAdl),
+    sim(marketContract.getStatus(), MarketContract.parsers.getStatus),
+    sim(marketContract.getConfig(), MarketContract.parsers.getConfig),
+    sim(marketContract.getMarketData(), MarketContract.parsers.getMarketData),
+    sim(marketContract.getAdl(), MarketContract.parsers.getAdl),
     sim(vault.totalAssets(), VaultContract.parsers.totalAssets),
     sim(vault.totalSupply(), VaultContract.parsers.totalSupply),
 ]);
@@ -112,7 +112,7 @@ check(
 let price;
 const server = new rpc.Server(NETWORK.rpc, NETWORK.opts);
 try {
-    const cache = await server.getLedgerEntries(tradingPriceCacheLedgerKey(contracts.market));
+    const cache = await server.getLedgerEntries(marketPriceCacheLedgerKey(contracts.market));
     if (cache.entries.length > 0) {
         const value = cache.entries[0].val.contractData().val();
         const { scValToNative } = await import('@stellar/stellar-sdk');

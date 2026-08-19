@@ -12,7 +12,7 @@ import {
     contractInstance,
     treasuryInstanceScVal,
     unitKey,
-} from '../helpers/trading_state.js';
+} from '../helpers/market_state.js';
 
 const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 4));
 const VERIFIER = StrKey.encodeContract(Buffer.alloc(32, 5));

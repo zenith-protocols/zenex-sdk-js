@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { TradingContract, DeployArgs } from '../../src/contracts/market/contract.js';
+import { MarketContract, DeployArgs } from '../../src/contracts/market/contract.js';
 import {
-    OrderKind, VaultOrderKind, TradingConfig, tradingConfigToScVal,
+    OrderKind, VaultOrderKind, MarketConfig, marketConfigToScVal,
 } from '../../src/contracts/market/types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
@@ -26,7 +26,7 @@ function decodeInvoke(operation: string) {
     };
 }
 
-function makeConfig(): TradingConfig {
+function makeConfig(): MarketConfig {
     return {
         keeperRate: 1n, minPositionNotional: 1n, maxPositionNotional: 2n,
         maxOpenInterest: 2n, minOrderNotional: 1n, minOrderMargin: 1n,
@@ -62,15 +62,15 @@ const marketDataScVal = () => xdr.ScVal.scvMap([
     entry('tokens', sidePair(14n, 15n)),
 ]);
 
-describe('TradingContract full surface', () => {
-    const contract = new TradingContract(CONTRACT_ID);
+describe('MarketContract full surface', () => {
+    const contract = new MarketContract(CONTRACT_ID);
 
     it('deploy builds a createCustomContract op with the constructor args', () => {
         const args: DeployArgs = {
             owner: OWNER, token: TOKEN, vault: VAULT, oracle: ORACLE,
             treasury: TREASURY, feedId: FEED_ID, config: makeConfig(),
         };
-        const opHex = TradingContract.deploy(OWNER, Buffer.alloc(32, 9).toString('hex'), args);
+        const opHex = MarketContract.deploy(OWNER, Buffer.alloc(32, 9).toString('hex'), args);
         const body = xdr.Operation.fromXDR(opHex, 'base64').body().invokeHostFunctionOp();
         const create = body.hostFunction().createContractV2();
         expect(create.constructorArgs().length).toBe(7);
@@ -79,10 +79,10 @@ describe('TradingContract full surface', () => {
         expect(Buffer.from(create.constructorArgs()[5].bytes())).toEqual(FEED_ID);
 
         // Buffer wasmHash + salt variant
-        const opBuf = TradingContract.deploy(OWNER, Buffer.alloc(32, 9), args, Buffer.alloc(32, 2));
+        const opBuf = MarketContract.deploy(OWNER, Buffer.alloc(32, 9), args, Buffer.alloc(32, 2));
         expect(opBuf).toBeTypeOf('string');
         // base64 string format variant
-        const opB64 = TradingContract.deploy(OWNER, Buffer.alloc(32, 9).toString('base64'), args, undefined, 'base64');
+        const opB64 = MarketContract.deploy(OWNER, Buffer.alloc(32, 9).toString('base64'), args, undefined, 'base64');
         expect(opB64).toBeTypeOf('string');
     });
 
@@ -179,7 +179,7 @@ describe('TradingContract full surface', () => {
     });
 
     describe('parsers', () => {
-        const parsers = TradingContract.parsers;
+        const parsers = MarketContract.parsers;
 
         it('parses void admin results', () => {
             expect(parsers.setConfig()).toBeUndefined();
@@ -281,7 +281,7 @@ describe('TradingContract full surface', () => {
             expect(parsedVaultOrder.minOut).toBe(3n);
             expect(parsedVaultOrder.execFee).toBe(5n);
 
-            const config = tradingConfigToScVal(makeConfig()).toXDR('base64');
+            const config = marketConfigToScVal(makeConfig()).toXDR('base64');
             expect(parsers.getConfig(config)).toEqual(makeConfig());
         });
     });

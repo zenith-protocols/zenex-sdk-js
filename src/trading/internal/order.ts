@@ -1,6 +1,6 @@
 import type { Call, OrderParams } from '../../contracts/router/types.js';
 import { FULL_CLOSE, MAX_ORDERS_PER_SIDE, OrderKind, Status, VaultOrderKind } from '../../contracts/market/types.js';
-import type { Position, TradingConfig } from '../../contracts/market/types.js';
+import type { Position, MarketConfig } from '../../contracts/market/types.js';
 import type { i128, u32 } from '../../index.js';
 import { checkedI128 } from '../../math/fixed.js';
 import type { PriceData } from './math.js';
@@ -104,8 +104,8 @@ export function orderKindFiresAbove(
  * which validates it against a ledger snapshot before submission.
  */
 export interface OrderIntentBase {
-    /** The trading contract the order is created on. */
-    trading: string;
+    /** The market contract the order is created on. */
+    market: string;
     /** The order owner. */
     user: string;
     /** Side the order targets. */
@@ -170,8 +170,8 @@ export interface TriggerOrderArgs extends OrderIntentBase {
 
 /** Deposit assets into the vault. */
 export interface VaultDepositArgs {
-    /** The trading contract the order is created on. */
-    trading: string;
+    /** The market contract the order is created on. */
+    market: string;
     /** The order owner. */
     user: string;
     /** Assets to deposit, token-dec. */
@@ -182,8 +182,8 @@ export interface VaultDepositArgs {
 
 /** Redeem vault shares for assets. */
 export interface VaultRedeemArgs {
-    /** The trading contract the order is created on. */
-    trading: string;
+    /** The market contract the order is created on. */
+    market: string;
     /** The order owner. */
     user: string;
     /** Shares to redeem, vault share decimals. */
@@ -194,8 +194,8 @@ export interface VaultRedeemArgs {
 
 /** Arguments of a `create_vault_order` call, as data. */
 export interface VaultOrderParams {
-    /** The target trading contract the `create_vault_order` runs on. */
-    trading: string;
+    /** The target market contract the `create_vault_order` runs on. */
+    market: string;
     /** The order owner. */
     user: string;
     /** Deposit or Redeem. */
@@ -217,7 +217,7 @@ export interface VaultOrderParams {
  */
 export function openMarketParams(args: OpenMarketArgs): OrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.MarketIncrease,
@@ -236,7 +236,7 @@ export function openMarketParams(args: OpenMarketArgs): OrderParams {
  */
 export function openLimitParams(args: OpenLimitArgs): OrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.LimitIncrease,
@@ -256,7 +256,7 @@ export function openLimitParams(args: OpenLimitArgs): OrderParams {
  */
 export function closePositionParams(args: ClosePositionArgs): OrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.MarketDecrease,
@@ -276,7 +276,7 @@ export function decreasePositionParams(
     args: DecreasePositionArgs,
 ): OrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.MarketDecrease,
@@ -295,7 +295,7 @@ export function decreasePositionParams(
  */
 export function addMarginParams(args: ModifyMarginArgs): OrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.MarketIncrease,
@@ -314,7 +314,7 @@ export function addMarginParams(args: ModifyMarginArgs): OrderParams {
  */
 export function withdrawMarginParams(args: ModifyMarginArgs): OrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.MarketDecrease,
@@ -333,7 +333,7 @@ export function withdrawMarginParams(args: ModifyMarginArgs): OrderParams {
  */
 export function takeProfitParams(args: TriggerOrderArgs): OrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.LimitDecrease,
@@ -352,7 +352,7 @@ export function takeProfitParams(args: TriggerOrderArgs): OrderParams {
  */
 export function stopLossParams(args: TriggerOrderArgs): OrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.StopDecrease,
@@ -371,7 +371,7 @@ export function stopLossParams(args: TriggerOrderArgs): OrderParams {
 /** Deposit assets into the vault for the keeper to fill. */
 export function vaultDepositParams(args: VaultDepositArgs): VaultOrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         kind: VaultOrderKind.Deposit,
         amount: args.amount,
@@ -385,7 +385,7 @@ export function vaultDepositParams(args: VaultDepositArgs): VaultOrderParams {
  */
 export function vaultRedeemParams(args: VaultRedeemArgs): VaultOrderParams {
     return {
-        trading: args.trading,
+        market: args.market,
         user: args.user,
         kind: VaultOrderKind.Redeem,
         amount: args.shares,
@@ -429,7 +429,7 @@ export interface OrderValidationContext {
     /** Market operational status at the snapshot. `Frozen` and `Retired` block order creation. */
     status: Status;
     /** Market config at the snapshot. Supplies the dust floors and the max position notional checked here. */
-    config: TradingConfig;
+    config: MarketConfig;
     /**
      * Verified market price at the snapshot. Omit it to skip the price
      * checks: the malformed-price check and, for a market order, the price
@@ -757,7 +757,7 @@ export function decodeCreateOrderCall(call: Call): OrderParams {
         expiration,
     ] = call.args.map((arg) => scValToNative(arg));
     const decoded: OrderParams = {
-        trading: Address.fromString(call.contract).toString(),
+        market: Address.fromString(call.contract).toString(),
         user: Address.fromScVal(call.args[0]).toString(),
         isLong: isLong as boolean,
         kind: kind as OrderKind,

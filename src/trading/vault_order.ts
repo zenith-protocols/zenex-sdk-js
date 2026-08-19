@@ -1,5 +1,5 @@
 import { VaultOrderKind } from '../contracts/market/types.js';
-import { TradingContract } from '../contracts/market/contract.js';
+import { MarketContract } from '../contracts/market/contract.js';
 import {
     BPS_DENOMINATOR,
     SCALAR_18,
@@ -180,11 +180,11 @@ export class VaultOrderIntent {
 
     /**
      * The `create_vault_order` operation, base64 XDR, ready for a
-     * transaction. Delegates to `TradingContract.createVaultOrder` on the
+     * transaction. Delegates to `MarketContract.createVaultOrder` on the
      * stored market address.
      */
     toOperation(): string {
-        return new TradingContract(this.marketId).createVaultOrder(
+        return new MarketContract(this.marketId).createVaultOrder(
             this.user,
             this.kind,
             this.amount,

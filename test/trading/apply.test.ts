@@ -23,7 +23,7 @@ import type {
     MarketData,
     Position,
     SidePair,
-    TradingConfig,
+    MarketConfig,
 } from '../../src/contracts/market/types.js';
 import type { OrderParams } from '../../src/contracts/router/types.js';
 
@@ -80,7 +80,7 @@ function marketFor(open: Position, isLong = true): MarketData {
     };
 }
 
-function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
+function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
     return {
         keeperRate: 0n,
         minPositionNotional: 1n,
@@ -137,7 +137,7 @@ function snapshot(overrides: Partial<MarketContext> = {}): MarketContext {
         ledger: 1_000,
         ledgerTime: 1n,
         deployment: {
-            trading: TRADING,
+            market: TRADING,
             router: ROUTER,
             vault: VAULT,
             oracle: ORACLE,
@@ -165,7 +165,7 @@ function snapshot(overrides: Partial<MarketContext> = {}): MarketContext {
 
 function order(overrides: Partial<OrderParams> = {}): OrderParams {
     return {
-        trading: TRADING,
+        market: TRADING,
         user: USER,
         isLong: true,
         kind: OrderKind.MarketIncrease,

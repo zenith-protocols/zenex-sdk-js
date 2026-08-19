@@ -1,5 +1,5 @@
 import { Status } from '../../contracts/market/types.js';
-import type { MarketData, TradingConfig } from '../../contracts/market/types.js';
+import type { MarketData, MarketConfig } from '../../contracts/market/types.js';
 import { BPS_DENOMINATOR, SCALAR_18, addI128, checkedBps, checkedI128, mulDivFloor, subI128 } from '../../math/fixed.js';
 import { advanceMarketAccruals, marketSidePnl, sideCapacity, sideReserved } from './math.js';
 import type { PriceData } from './math.js';
@@ -61,7 +61,7 @@ function minimum(left: bigint, right: bigint): bigint {
  */
 export function evaluateVaultWithdrawGates(
     market: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     price: PriceData,
     postVaultAssets: bigint,
 ): VaultWithdrawHeadroom {
@@ -214,7 +214,7 @@ export interface VaultOrderCreationQuoteInput {
     ledger: number;
     now: bigint;
     status: Status;
-    config: TradingConfig;
+    config: MarketConfig;
     /** Deposit escrows `amount` assets; redeem escrows `amount` shares. */
     action: 'deposit' | 'redeem';
     /** Assets to deposit (token-dec) or shares to redeem (share-dec). */
@@ -317,7 +317,7 @@ export interface VaultQuoteContext {
     ledger: number;
     now: bigint;
     market: MarketData;
-    config: TradingConfig;
+    config: MarketConfig;
     price: PriceData;
     vault: VaultAtomicState;
     /** Treasury's cut of the fill fee (SCALAR_18), read live like `execute_vault_order` reads it at fill time. */
@@ -437,7 +437,7 @@ function feeSplit(
 
 export function cappedNetPnl(
     market: MarketData,
-    config: TradingConfig,
+    config: MarketConfig,
     price: PriceData,
     vaultAssets: bigint,
     maximize: boolean,

@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { TradingContract } from '../src/contracts/market/contract.js';
-import { TradingRouterContract } from '../src/contracts/router/contract.js';
+import { MarketContract } from '../src/contracts/market/contract.js';
+import { MarketRouterContract } from '../src/contracts/router/contract.js';
 import { FactoryContract } from '../src/contracts/factory/contract.js';
 import { VaultContract } from '../src/contracts/vault/contract.js';
 import { OracleContract } from '../src/contracts/oracle/contract.js';
@@ -40,7 +40,7 @@ const contracts = [
         exportName: 'marketSpec',
         spec: marketSpec,
         fixture: marketFixture,
-        contract: TradingContract,
+        contract: MarketContract,
         source: 'src/contracts/market/contract.ts',
     },
     {
@@ -48,7 +48,7 @@ const contracts = [
         exportName: 'marketRouterSpec',
         spec: marketRouterSpec,
         fixture: marketRouterFixture,
-        contract: TradingRouterContract,
+        contract: MarketRouterContract,
         source: 'src/contracts/router/contract.ts',
     },
     {

@@ -1,7 +1,7 @@
 // Contract binding + its constructor arguments. Named-order helpers live in
 // `src/trading/order/intents.ts`, not here -- this file is the entrypoint
 // binding surface and nothing else.
-export { TradingContract } from './contract.js';
+export { MarketContract } from './contract.js';
 export type { DeployArgs } from './contract.js';
 
 // Core types, enums, converters, and parsers
@@ -10,14 +10,14 @@ export {
     OrderKind,
     VaultOrderKind,
     FULL_CLOSE,
-    tradingConfigToScVal,
+    marketConfigToScVal,
     parseSidePair,
     parseOrder,
     parseVaultOrder,
     parsePosition,
     parseMarketData,
     parseAdlState,
-    parseTradingConfig,
+    parseMarketConfig,
 } from './types.js';
 
 export type {
@@ -27,37 +27,37 @@ export type {
     SidePair,
     MarketData,
     AdlState,
-    TradingConfig,
+    MarketConfig,
 } from './types.js';
 
-export { TradingEventType } from './events.js';
+export { MarketEventType } from './events.js';
 
 // Instance-storage walker (getLedgerEntries reads)
-export { parseTradingInstance } from './instance.js';
-export type { TradingInstanceState } from './instance.js';
+export { parseMarketInstance } from './instance.js';
+export type { MarketInstanceState } from './instance.js';
 
 // State loaders live in `src/state/`: `Market.load`, `MarketUser.load`,
 // `loadTokenBalance`, `loadTreasuryRate`.
 
 export type {
-    BaseTradingEvent,
-    TradingCreateOrderEvent,
-    TradingCancelOrderEvent,
-    TradingCreateVaultOrderEvent,
-    TradingCancelVaultOrderEvent,
-    TradingDepositFillEvent,
-    TradingRedeemFillEvent,
-    TradingClaimFundingEvent,
-    TradingAdlUpdateEvent,
-    TradingFundingAccrualEvent,
-    TradingBorrowingAccrualEvent,
-    TradingStatusUpdateEvent,
-    TradingConfigUpdateEvent,
-    TradingTerminalPriceUpdateEvent,
-    TradingOpenFillEvent,
-    TradingIncreaseFillEvent,
-    TradingDecreaseFillEvent,
-    TradingCloseFillEvent,
-    TradingLiquidationEvent,
-    TradingEvent,
+    BaseMarketEvent,
+    MarketCreateOrderEvent,
+    MarketCancelOrderEvent,
+    MarketCreateVaultOrderEvent,
+    MarketCancelVaultOrderEvent,
+    MarketDepositFillEvent,
+    MarketRedeemFillEvent,
+    MarketClaimFundingEvent,
+    MarketAdlUpdateEvent,
+    MarketFundingAccrualEvent,
+    MarketBorrowingAccrualEvent,
+    MarketStatusUpdateEvent,
+    MarketConfigUpdateEvent,
+    MarketTerminalPriceUpdateEvent,
+    MarketOpenFillEvent,
+    MarketIncreaseFillEvent,
+    MarketDecreaseFillEvent,
+    MarketCloseFillEvent,
+    MarketLiquidationEvent,
+    MarketEvent,
 } from './events.js';

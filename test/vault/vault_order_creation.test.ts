@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { I128_MAX } from '../../src/math/fixed.js';
 import { Status } from '../../src/contracts/market/types.js';
-import type { TradingConfig } from '../../src/contracts/market/types.js';
+import type { MarketConfig } from '../../src/contracts/market/types.js';
 import {
     quoteVaultOrderCreation,
     type VaultOrderCreationQuoteInput,
@@ -9,7 +9,7 @@ import {
 
 const U64_MAX = 2n ** 64n - 1n;
 
-function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
+function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
     return {
         keeperRate: 0n,
         minPositionNotional: 1n,

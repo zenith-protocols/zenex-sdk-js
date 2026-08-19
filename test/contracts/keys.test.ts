@@ -7,13 +7,13 @@ import {
     temporaryLedgerKey,
 } from '../../src/contracts/keys.js';
 import {
-    tradingMarketDataLedgerKey,
-    tradingPriceCacheLedgerKey,
-    tradingPositionLedgerKey,
-    tradingVaultOrderLedgerKey,
-    tradingOrderCounterLedgerKey,
-    tradingClaimableFundingLedgerKey,
-    tradingOrderLedgerKey,
+    marketDataLedgerKey,
+    marketPriceCacheLedgerKey,
+    marketPositionLedgerKey,
+    marketVaultOrderLedgerKey,
+    marketOrderCounterLedgerKey,
+    marketClaimableFundingLedgerKey,
+    marketOrderLedgerKey,
 } from '../../src/contracts/market/keys.js';
 import { tokenBalanceLedgerKey } from '../../src/token.js';
 
@@ -31,15 +31,15 @@ function unitVariantScVal(variantName: string): xdr.ScVal {
     return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variantName)]);
 }
 
-describe('contract keys: trading DataKey mirror (trading/src/storage.rs)', () => {
+describe('contract keys: trading DataKey mirror (market/src/storage.rs)', () => {
     it('MarketData (persistent, shared singleton) builds [Symbol("MarketData")]', () => {
-        const marketDataKey = tradingMarketDataLedgerKey(CONTRACT_ID);
+        const marketDataKey = marketDataLedgerKey(CONTRACT_ID);
         expect(marketDataKey.contractData().durability().name).toBe('persistent');
         expect(decodeKeyVec(marketDataKey.contractData().key())).toEqual(['MarketData']);
     });
 
     it('PriceCache (price cache) is the TEMPORARY tier and builds [Symbol("PriceCache")]', () => {
-        const priceCacheKey = tradingPriceCacheLedgerKey(CONTRACT_ID);
+        const priceCacheKey = marketPriceCacheLedgerKey(CONTRACT_ID);
         expect(priceCacheKey.contractData().durability().name).toBe('temporary');
         expect(decodeKeyVec(priceCacheKey.contractData().key())).toEqual(['PriceCache']);
         const contractAddress = Address.fromScAddress(priceCacheKey.contractData().contract()).toString();
@@ -47,46 +47,46 @@ describe('contract keys: trading DataKey mirror (trading/src/storage.rs)', () =>
     });
 
     it('Position(user, is_long) builds [Symbol("Position"), user, bool] for both sides', () => {
-        const longPositionKey = tradingPositionLedgerKey(CONTRACT_ID, USER, true);
+        const longPositionKey = marketPositionLedgerKey(CONTRACT_ID, USER, true);
         expect(longPositionKey.contractData().durability().name).toBe('persistent');
         expect(decodeKeyVec(longPositionKey.contractData().key())).toEqual(['Position', USER, true]);
 
-        const shortPositionKey = tradingPositionLedgerKey(CONTRACT_ID, USER, false);
+        const shortPositionKey = marketPositionLedgerKey(CONTRACT_ID, USER, false);
         expect(decodeKeyVec(shortPositionKey.contractData().key())).toEqual(['Position', USER, false]);
     });
 
     it('VaultOrder(user, id) builds [Symbol("VaultOrder"), user, u32]', () => {
-        const vaultOrderKey = tradingVaultOrderLedgerKey(CONTRACT_ID, USER, 3);
+        const vaultOrderKey = marketVaultOrderLedgerKey(CONTRACT_ID, USER, 3);
         expect(vaultOrderKey.contractData().durability().name).toBe('persistent');
         expect(decodeKeyVec(vaultOrderKey.contractData().key())).toEqual(['VaultOrder', USER, 3]);
     });
 
     it('Order(user, id) is the PERSISTENT user tier (escrow-carrying keeper orders)', () => {
-        const orderKey = tradingOrderLedgerKey(CONTRACT_ID, USER, 7);
+        const orderKey = marketOrderLedgerKey(CONTRACT_ID, USER, 7);
         expect(orderKey.contractData().durability().name).toBe('persistent');
         expect(decodeKeyVec(orderKey.contractData().key())).toEqual(['Order', USER, 7]);
     });
 
     it('OrderCounter(user) builds [Symbol("OrderCounter"), user]', () => {
-        const orderCounterKey = tradingOrderCounterLedgerKey(CONTRACT_ID, USER);
+        const orderCounterKey = marketOrderCounterLedgerKey(CONTRACT_ID, USER);
         expect(orderCounterKey.contractData().durability().name).toBe('persistent');
         expect(decodeKeyVec(orderCounterKey.contractData().key())).toEqual(['OrderCounter', USER]);
     });
 
     it('ClaimableFunding(user) builds [Symbol("ClaimableFunding"), user]', () => {
-        const claimableFundingKey = tradingClaimableFundingLedgerKey(CONTRACT_ID, USER);
+        const claimableFundingKey = marketClaimableFundingLedgerKey(CONTRACT_ID, USER);
         expect(claimableFundingKey.contractData().durability().name).toBe('persistent');
         expect(decodeKeyVec(claimableFundingKey.contractData().key())).toEqual(['ClaimableFunding', USER]);
     });
 
     it('persistent keys target the requested contract', () => {
-        const orderKey = tradingOrderLedgerKey(CONTRACT_ID, USER, 1);
+        const orderKey = marketOrderLedgerKey(CONTRACT_ID, USER, 1);
         const contractAddress = Address.fromScAddress(orderKey.contractData().contract()).toString();
         expect(contractAddress).toBe(CONTRACT_ID);
     });
 
     it('accepts an Address object as the user argument', () => {
-        const positionKey = tradingPositionLedgerKey(CONTRACT_ID, Address.fromString(USER), true);
+        const positionKey = marketPositionLedgerKey(CONTRACT_ID, Address.fromString(USER), true);
         expect(decodeKeyVec(positionKey.contractData().key())).toEqual(['Position', USER, true]);
     });
 });

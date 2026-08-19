@@ -3,10 +3,10 @@ import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operati
 import { i128, u32, u64 } from '../../index.js';
 import type { Call } from '../router/types.js';
 import {
-    OrderKind, VaultOrderKind, TradingConfig,
+    OrderKind, VaultOrderKind, MarketConfig,
     Order, VaultOrder, Position, MarketData, AdlState,
-    tradingConfigToScVal,
-    parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState, parseTradingConfig,
+    marketConfigToScVal,
+    parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState, parseMarketConfig,
 } from './types.js';
 
 /** Deploy-time constructor arguments (`__constructor`). */
@@ -18,7 +18,7 @@ export interface DeployArgs {
     treasury: string;
     /** 32-byte Data Streams stream id (`BytesN<32>`); must be a V3 (`0x0003…`) stream. */
     feedId: Buffer | Uint8Array;
-    config: TradingConfig;
+    config: MarketConfig;
 }
 
 /** Coerce a price update to a `Buffer`. */
@@ -40,7 +40,7 @@ function feedIdBuffer(feedId: Buffer | Uint8Array): Buffer {
  *
  * Every method returns a base64 XDR `Operation` string, not a result.
  */
-export class TradingContract extends Contract {
+export class MarketContract extends Contract {
     static spec: contract.Spec = new contract.Spec(marketSpec);
 
     static readonly parsers = {
@@ -95,8 +95,8 @@ export class TradingContract extends Contract {
         // result here is always a stored row.
         getVaultOrder: (result: string): VaultOrder =>
             parseVaultOrder(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
-        getConfig: (result: string): TradingConfig =>
-            parseTradingConfig(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
+        getConfig: (result: string): MarketConfig =>
+            parseMarketConfig(scValToNative(xdr.ScVal.fromXDR(result, 'base64'))),
         // --- plain scalar / address / tuple views (passthrough) ---
         getStatus: (result: string): u32 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
@@ -147,7 +147,7 @@ export class TradingContract extends Contract {
                 Address.fromString(args.oracle).toScVal(),
                 Address.fromString(args.treasury).toScVal(),
                 xdr.ScVal.scvBytes(feedIdBuffer(args.feedId)),
-                tradingConfigToScVal(args.config),
+                marketConfigToScVal(args.config),
             ],
         }).toXDR('base64');
     }
@@ -169,10 +169,10 @@ export class TradingContract extends Contract {
      * - MarketNotAccrued (703) if a borrowing or funding rate param changes
      *   without a same-ledger accrual.
      */
-    setConfig(config: TradingConfig): string {
+    setConfig(config: MarketConfig): string {
         return this.call(
             'set_config',
-            tradingConfigToScVal(config),
+            marketConfigToScVal(config),
         ).toXDR('base64');
     }
 

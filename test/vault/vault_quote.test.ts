@@ -4,7 +4,7 @@ import type { PriceData } from '../../src/trading/internal/math.js';
 import type {
     MarketData,
     SidePair,
-    TradingConfig,
+    MarketConfig,
 } from '../../src/contracts/market/types.js';
 import {
     convertVaultAssetsToShares,
@@ -30,7 +30,7 @@ interface ContractCase {
 // Contract-derived scenarios preserved from the retired trading-v2 and
 // strategy-vault-v2 golden vectors
 // (contracts commit 4c631eb17af53ec5e6875f42bf71a43af295e521).
-const tradingVaultCases: Record<string, ContractCase> = {
+const marketVaultCases: Record<string, ContractCase> = {
     'vault.deposit.pnl_fee_settlement_success': {
         operation: 'deposit_gate',
         inputs: {
@@ -239,7 +239,7 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
     };
 }
 
-function config(overrides: Partial<TradingConfig> = {}): TradingConfig {
+function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
     return {
         keeperRate: 0n,
         minPositionNotional: 1n,
@@ -324,18 +324,18 @@ function strategyState(inputs: Record<string, unknown>): VaultAtomicState {
     };
 }
 
-function tradingVector(id: string): ContractCase {
-    const found = tradingVaultCases[id];
+function marketVector(id: string): ContractCase {
+    const found = marketVaultCases[id];
     if (!found) throw new Error(`Missing vector ${id}`);
     return found;
 }
 
-function tradingContext(id: string): {
+function marketContext(id: string): {
     input: VaultDepositQuoteInput | VaultRedeemQuoteInput;
     work: Record<string, unknown>;
     expected: Record<string, unknown>;
 } {
-    const golden = tradingVector(id);
+    const golden = marketVector(id);
     const inputs = golden.inputs;
     const work = golden.work;
     const expected = golden.expected;
@@ -426,7 +426,7 @@ describe('strategy-vault share conversion', () => {
 
 describe('trading vault fill sequence', () => {
     it('reports gross assets and keeps execution fee outside vault backing', () => {
-        const { input } = tradingContext(
+        const { input } = marketContext(
             'vault.deposit.pnl_fee_settlement_success',
         );
         const result = quoteVaultDeposit(input as VaultDepositQuoteInput);
@@ -440,7 +440,7 @@ describe('trading vault fill sequence', () => {
     });
 
     it('applies the redeem cooldown gate', () => {
-        const { input } = tradingContext(
+        const { input } = marketContext(
             'vault.redeem.pnl_fee_settlement_success',
         );
         const base = input as VaultRedeemQuoteInput;
@@ -577,7 +577,7 @@ describe('trading vault fill sequence', () => {
     });
 
     it('applies redeem minOut to net assets', () => {
-        const { input } = tradingContext(
+        const { input } = marketContext(
             'vault.redeem.pnl_fee_settlement_success',
         );
         const result = quoteVaultRedeem({
@@ -641,7 +641,7 @@ describe('trading vault fill sequence', () => {
 
 describe('withdrawal gates', () => {
     it('returns zero utilization headroom at the exact boundary', () => {
-        const { input, work } = tradingContext(
+        const { input, work } = marketContext(
             'vault.utilization.exact_boundary_pass',
         );
         const result = checkVaultWithdrawGates({
@@ -660,7 +660,7 @@ describe('withdrawal gates', () => {
     });
 
     it('returns zero PnL headroom at the exact boundary', () => {
-        const { input, work } = tradingContext(
+        const { input, work } = marketContext(
             'vault.pending_pnl.exact_boundary_pass',
         );
         const result = checkVaultWithdrawGates({

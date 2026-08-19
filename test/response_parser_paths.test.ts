@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal } from '@stellar/stellar-sdk';
-import { parseError, parseResult, ContractErrorType, TradingError } from '../src/response_parser.js';
+import { parseError, parseResult, ContractErrorType, MarketError } from '../src/response_parser.js';
 
 // =============================================================================
 // Exercises every parseError input shape: simulation errors (regex path),
@@ -39,14 +39,14 @@ function txBadSeqResult() {
 }
 
 describe('parseError: simulation responses', () => {
-    it('resolves a trading code without any hint', () => {
+    it('resolves a market code without any hint', () => {
         const error = parseError(simulationError('HostError: Error(Contract, #720)'));
-        expect(error.type).toBe(TradingError.PositionNotFound);
+        expect(error.type).toBe(MarketError.PositionNotFound);
     });
 
     it('resolves 770 unhinted now that governance vacated the ADL range', () => {
         const error = parseError(simulationError('Error(Contract, #770)'));
-        expect(error.type).toBe(TradingError.AdlNotTriggered);
+        expect(error.type).toBe(MarketError.AdlNotTriggered);
         expect(error.message).toMatch(/ADL/);
     });
 

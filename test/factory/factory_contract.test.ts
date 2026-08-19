@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, Address } from '@stellar/stellar-sdk';
 import { FactoryContract, FactoryConstructorArgs } from '../../src/contracts/factory/contract.js';
-import { TradingConfig } from '../../src/contracts/market/types.js';
+import { MarketConfig } from '../../src/contracts/market/types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const ADMIN = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -26,7 +26,7 @@ function decodeInvoke(op: string) {
 // Every field gets a distinct value so a key mix-up in the encoder cannot
 // cancel out. The values 1..34 are assigned in the contract Config's
 // alphabetical snake_case field order.
-function makeConfig(): TradingConfig {
+function makeConfig(): MarketConfig {
     return {
         adlClearTarget: 1n,
         adlMaxPnl: 2n,

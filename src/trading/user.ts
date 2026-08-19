@@ -3,11 +3,11 @@ import type { Network } from '../index.js';
 import type { Order, VaultOrder } from '../contracts/market/types.js';
 import { parseOrder, parsePosition, parseVaultOrder } from '../contracts/market/types.js';
 import {
-    tradingClaimableFundingLedgerKey,
-    tradingOrderCounterLedgerKey,
-    tradingOrderLedgerKey,
-    tradingPositionLedgerKey,
-    tradingVaultOrderLedgerKey,
+    marketClaimableFundingLedgerKey,
+    marketOrderCounterLedgerKey,
+    marketOrderLedgerKey,
+    marketPositionLedgerKey,
+    marketVaultOrderLedgerKey,
 } from '../contracts/market/keys.js';
 import { readEntries } from '../entries.js';
 import type { EntryBatch } from '../entries.js';
@@ -104,8 +104,8 @@ export class MarketUser {
         for (let id = from; id < this.orderCounter; id++) {
             probes.push({
                 id,
-                order: tradingOrderLedgerKey(this.marketId, this.userId, id),
-                vaultOrder: tradingVaultOrderLedgerKey(
+                order: marketOrderLedgerKey(this.marketId, this.userId, id),
+                vaultOrder: marketVaultOrderLedgerKey(
                     this.marketId,
                     this.userId,
                     id,
@@ -168,10 +168,10 @@ export function marketUserKeys(
     claimableFunding: xdr.LedgerKey;
 } {
     return {
-        long: tradingPositionLedgerKey(marketId, userId, true),
-        short: tradingPositionLedgerKey(marketId, userId, false),
-        orderCounter: tradingOrderCounterLedgerKey(marketId, userId),
-        claimableFunding: tradingClaimableFundingLedgerKey(marketId, userId),
+        long: marketPositionLedgerKey(marketId, userId, true),
+        short: marketPositionLedgerKey(marketId, userId, false),
+        orderCounter: marketOrderCounterLedgerKey(marketId, userId),
+        claimableFunding: marketClaimableFundingLedgerKey(marketId, userId),
     };
 }
 

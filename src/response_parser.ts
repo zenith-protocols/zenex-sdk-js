@@ -5,7 +5,7 @@ import {
     contractErrorFromCode,
 } from './errors.js';
 
-export { ContractError, ContractErrorType, TradingError, contractErrorFromCode } from './errors.js';
+export { ContractError, ContractErrorType, MarketError, contractErrorFromCode } from './errors.js';
 
 /**
  * Parse a failed simulation, send-transaction, or get-transaction response

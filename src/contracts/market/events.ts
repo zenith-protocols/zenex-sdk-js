@@ -1,12 +1,12 @@
 import { i128, u32, u64 } from '../../index.js';
 import { ZenexContractType, BaseZenexEvent } from '../../base_event.js';
 import {
-    Order, VaultOrder, SidePair, TradingConfig,
-    parseOrder, parseVaultOrder, parseSidePair, parseTradingConfig,
+    Order, VaultOrder, SidePair, MarketConfig,
+    parseOrder, parseVaultOrder, parseSidePair, parseMarketConfig,
 } from './types.js';
 
-/** Discriminates a decoded {@link TradingEvent}. */
-export enum TradingEventType {
+/** Discriminates a decoded {@link MarketEvent}. */
+export enum MarketEventType {
     CreateOrder = 'create_order',
     CancelOrder = 'cancel_order',
     CreateVaultOrder = 'create_vault_order',
@@ -28,17 +28,17 @@ export enum TradingEventType {
 }
 
 /** Base shape shared by every decoded market contract event. */
-export interface BaseTradingEvent extends BaseZenexEvent {
-    contractType: ZenexContractType.Trading;
-    eventType: TradingEventType;
+export interface BaseMarketEvent extends BaseZenexEvent {
+    contractType: ZenexContractType.Market;
+    eventType: MarketEventType;
 }
 
 /**
  * Order created via `create_order`. The row is immutable while pending, so
  * the payload stays authoritative until the order's fill or cancel receipt.
  */
-export interface TradingCreateOrderEvent extends BaseTradingEvent {
-    eventType: TradingEventType.CreateOrder;
+export interface MarketCreateOrderEvent extends BaseMarketEvent {
+    eventType: MarketEventType.CreateOrder;
     user: string;
     orderId: u32;
     /** The stored order row, as returned by `get_order`. */
@@ -52,8 +52,8 @@ export interface TradingCreateOrderEvent extends BaseTradingEvent {
  * cancel's refund rides the same-tx `close_fill` or `liquidation` payout
  * transfer, one receipt per swept order.
  */
-export interface TradingCancelOrderEvent extends BaseTradingEvent {
-    eventType: TradingEventType.CancelOrder;
+export interface MarketCancelOrderEvent extends BaseMarketEvent {
+    eventType: MarketEventType.CancelOrder;
     user: string;
     orderId: u32;
     /** Escrow returned by this cancel, token-dec. */
@@ -65,8 +65,8 @@ export interface TradingCancelOrderEvent extends BaseTradingEvent {
  * immutable while pending, so the payload stays authoritative until the
  * order's fill or cancel receipt.
  */
-export interface TradingCreateVaultOrderEvent extends BaseTradingEvent {
-    eventType: TradingEventType.CreateVaultOrder;
+export interface MarketCreateVaultOrderEvent extends BaseMarketEvent {
+    eventType: MarketEventType.CreateVaultOrder;
     user: string;
     orderId: u32;
     /** The stored vault-order row, as returned by `get_vault_order`. */
@@ -74,15 +74,15 @@ export interface TradingCreateVaultOrderEvent extends BaseTradingEvent {
 }
 
 /** Pending vault order cancelled by its owner via `cancel_vault_order`. */
-export interface TradingCancelVaultOrderEvent extends BaseTradingEvent {
-    eventType: TradingEventType.CancelVaultOrder;
+export interface MarketCancelVaultOrderEvent extends BaseMarketEvent {
+    eventType: MarketEventType.CancelVaultOrder;
     user: string;
     orderId: u32;
 }
 
 /** A keeper fill of a deposit order via `execute_vault_order` (the user's receipt). */
-export interface TradingDepositFillEvent extends BaseTradingEvent {
-    eventType: TradingEventType.DepositFill;
+export interface MarketDepositFillEvent extends BaseMarketEvent {
+    eventType: MarketEventType.DepositFill;
     user: string;
     orderId: u32;
     /** The keeper rewarded for the fill. */
@@ -98,8 +98,8 @@ export interface TradingDepositFillEvent extends BaseTradingEvent {
 }
 
 /** A keeper fill of a redeem order via `execute_vault_order` (the user's receipt). */
-export interface TradingRedeemFillEvent extends BaseTradingEvent {
-    eventType: TradingEventType.RedeemFill;
+export interface MarketRedeemFillEvent extends BaseMarketEvent {
+    eventType: MarketEventType.RedeemFill;
     user: string;
     orderId: u32;
     /** `'order'` for a keeper fill of a pending order, `'instant'` for a Retired-market direct redeem. */
@@ -117,16 +117,16 @@ export interface TradingRedeemFillEvent extends BaseTradingEvent {
 }
 
 /** Claimable funding balance paid out via `claim_funding`. */
-export interface TradingClaimFundingEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ClaimFunding;
+export interface MarketClaimFundingEvent extends BaseMarketEvent {
+    eventType: MarketEventType.ClaimFunding;
     user: string;
     /** Paid claimable balance, token-dec. */
     amount: i128;
 }
 
 /** ADL flags recomputed via `update_adl_state`. */
-export interface TradingAdlUpdateEvent extends BaseTradingEvent {
-    eventType: TradingEventType.AdlUpdate;
+export interface MarketAdlUpdateEvent extends BaseMarketEvent {
+    eventType: MarketEventType.AdlUpdate;
     /** Long-side ADL enabled (long increases blocked). */
     long: boolean;
     /** Short-side ADL enabled (short increases blocked). */
@@ -134,8 +134,8 @@ export interface TradingAdlUpdateEvent extends BaseTradingEvent {
 }
 
 /** The market's post-accrual funding state, emitted by the `accrue` entry. */
-export interface TradingFundingAccrualEvent extends BaseTradingEvent {
-    eventType: TradingEventType.FundingAccrual;
+export interface MarketFundingAccrualEvent extends BaseMarketEvent {
+    eventType: MarketEventType.FundingAccrual;
     /** Signed funding rate, + = longs pay (SCALAR_18, per second). */
     fundingRate: i128;
     /** Cumulative funding index per side (SCALAR_18). */
@@ -145,8 +145,8 @@ export interface TradingFundingAccrualEvent extends BaseTradingEvent {
 }
 
 /** The market's post-accrual borrowing state, emitted by `accrue`. */
-export interface TradingBorrowingAccrualEvent extends BaseTradingEvent {
-    eventType: TradingEventType.BorrowingAccrual;
+export interface MarketBorrowingAccrualEvent extends BaseMarketEvent {
+    eventType: MarketEventType.BorrowingAccrual;
     /** Cumulative borrowing index per side (SCALAR_18). */
     borrowingIdx: SidePair;
     /** Accrual timestamp, seconds. */
@@ -154,22 +154,22 @@ export interface TradingBorrowingAccrualEvent extends BaseTradingEvent {
 }
 
 /** Operational status changed via `set_status`. */
-export interface TradingStatusUpdateEvent extends BaseTradingEvent {
-    eventType: TradingEventType.StatusUpdate;
+export interface MarketStatusUpdateEvent extends BaseMarketEvent {
+    eventType: MarketEventType.StatusUpdate;
     /** The new status, as a `Status` discriminant. */
     status: u32;
 }
 
 /** Global configuration replaced via `set_config`. */
-export interface TradingConfigUpdateEvent extends BaseTradingEvent {
-    eventType: TradingEventType.ConfigUpdate;
+export interface MarketConfigUpdateEvent extends BaseMarketEvent {
+    eventType: MarketEventType.ConfigUpdate;
     /** The new global trading configuration. */
-    config: TradingConfig;
+    config: MarketConfig;
 }
 
 /** Flat settlement price set or refreshed via `set_terminal_price`. */
-export interface TradingTerminalPriceUpdateEvent extends BaseTradingEvent {
-    eventType: TradingEventType.TerminalPriceUpdate;
+export interface MarketTerminalPriceUpdateEvent extends BaseMarketEvent {
+    eventType: MarketEventType.TerminalPriceUpdate;
     /** Flat settlement price, price_scalar units. */
     price: i128;
 }
@@ -179,8 +179,8 @@ export interface TradingTerminalPriceUpdateEvent extends BaseTradingEvent {
  * prior position. An increase on an already-open position emits
  * `increase_fill` instead, which also settles funding and borrowing.
  */
-export interface TradingOpenFillEvent extends BaseTradingEvent {
-    eventType: TradingEventType.OpenFill;
+export interface MarketOpenFillEvent extends BaseMarketEvent {
+    eventType: MarketEventType.OpenFill;
     user: string;
     orderId: u32;
     isLong: boolean;
@@ -201,8 +201,8 @@ export interface TradingOpenFillEvent extends BaseTradingEvent {
 }
 
 /** A keeper fill of an increase order on an already-open position (the user's itemized receipt). */
-export interface TradingIncreaseFillEvent extends BaseTradingEvent {
-    eventType: TradingEventType.IncreaseFill;
+export interface MarketIncreaseFillEvent extends BaseMarketEvent {
+    eventType: MarketEventType.IncreaseFill;
     user: string;
     orderId: u32;
     isLong: boolean;
@@ -232,8 +232,8 @@ export interface TradingIncreaseFillEvent extends BaseTradingEvent {
  * `notional` and `tokens` are the closed fraction at entry pricing, so
  * `notional * SCALAR_18 / tokens` is the entry price of the closed chunk.
  */
-export interface TradingDecreaseFillEvent extends BaseTradingEvent {
-    eventType: TradingEventType.DecreaseFill;
+export interface MarketDecreaseFillEvent extends BaseMarketEvent {
+    eventType: MarketEventType.DecreaseFill;
     user: string;
     orderId: u32;
     /** `'order'` for a keeper fill of a user order, `'adl'` for an ADL close. */
@@ -264,8 +264,8 @@ export interface TradingDecreaseFillEvent extends BaseTradingEvent {
 }
 
 /** A keeper fill that closes the whole position. The stored row zeroes. */
-export interface TradingCloseFillEvent extends BaseTradingEvent {
-    eventType: TradingEventType.CloseFill;
+export interface MarketCloseFillEvent extends BaseMarketEvent {
+    eventType: MarketEventType.CloseFill;
     user: string;
     orderId: u32;
     /** `'order'` for a keeper fill of a user order, `'adl'` for an ADL close. */
@@ -298,8 +298,8 @@ export interface TradingCloseFillEvent extends BaseTradingEvent {
 }
 
 /** A keeper liquidation receipt. The full size is force-closed. */
-export interface TradingLiquidationEvent extends BaseTradingEvent {
-    eventType: TradingEventType.Liquidation;
+export interface MarketLiquidationEvent extends BaseMarketEvent {
+    eventType: MarketEventType.Liquidation;
     user: string;
     isLong: boolean;
     /** The keeper rewarded for the liquidation. */
@@ -336,22 +336,22 @@ export interface TradingLiquidationEvent extends BaseTradingEvent {
 }
 
 /** A decoded market contract event. Narrow on `eventType` for the concrete shape. */
-export type TradingEvent =
-    | TradingCreateOrderEvent
-    | TradingCancelOrderEvent
-    | TradingCreateVaultOrderEvent
-    | TradingCancelVaultOrderEvent
-    | TradingDepositFillEvent
-    | TradingRedeemFillEvent
-    | TradingClaimFundingEvent
-    | TradingAdlUpdateEvent
-    | TradingFundingAccrualEvent
-    | TradingBorrowingAccrualEvent
-    | TradingStatusUpdateEvent
-    | TradingConfigUpdateEvent
-    | TradingTerminalPriceUpdateEvent
-    | TradingOpenFillEvent
-    | TradingIncreaseFillEvent
-    | TradingDecreaseFillEvent
-    | TradingCloseFillEvent
-    | TradingLiquidationEvent;
+export type MarketEvent =
+    | MarketCreateOrderEvent
+    | MarketCancelOrderEvent
+    | MarketCreateVaultOrderEvent
+    | MarketCancelVaultOrderEvent
+    | MarketDepositFillEvent
+    | MarketRedeemFillEvent
+    | MarketClaimFundingEvent
+    | MarketAdlUpdateEvent
+    | MarketFundingAccrualEvent
+    | MarketBorrowingAccrualEvent
+    | MarketStatusUpdateEvent
+    | MarketConfigUpdateEvent
+    | MarketTerminalPriceUpdateEvent
+    | MarketOpenFillEvent
+    | MarketIncreaseFillEvent
+    | MarketDecreaseFillEvent
+    | MarketCloseFillEvent
+    | MarketLiquidationEvent;

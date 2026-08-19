@@ -5,7 +5,7 @@ import {
     tokenBalanceOrZero,
     tokenBalanceLedgerKey,
 } from '../src/token.js';
-import { balanceMapScVal } from './helpers/trading_state.js';
+import { balanceMapScVal } from './helpers/market_state.js';
 
 describe('parseTokenBalance', () => {
     it('reads the SAC map amount', () => {

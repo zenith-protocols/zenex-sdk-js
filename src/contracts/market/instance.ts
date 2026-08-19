@@ -1,13 +1,13 @@
 import { xdr, scValToBigInt, scValToNative } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 import { Status } from './types.js';
-import type { AdlState, TradingConfig } from './types.js';
-import { parseAdlState, parseTradingConfig } from './types.js';
+import type { AdlState, MarketConfig } from './types.js';
+import { parseAdlState, parseMarketConfig } from './types.js';
 
 
-export interface TradingInstanceState {
+export interface MarketInstanceState {
     /** Global trading parameters, mostly SCALAR_18 rates and ratios; mutable at runtime via the owner-only `set_config`. */
-    config: TradingConfig;
+    config: MarketConfig;
     /** 32-byte Chainlink Data Streams stream id (`BytesN<32>` on-chain); a V3 (`0x0003…`) stream, immutable after construction. */
     feedId: Buffer;
     /** Market lifecycle stage; only `Active` admits new position opens. */
@@ -35,16 +35,16 @@ export interface TradingInstanceState {
  * `Treasury` are all set; the lazy keys fall back to `undefined` or a zeroed
  * `AdlState`.
  */
-export function parseTradingInstance(
+export function parseMarketInstance(
     instanceVal: xdr.ScVal,
-): TradingInstanceState {
-    const storage = instanceStorage(instanceVal, 'trading');
+): MarketInstanceState {
+    const storage = instanceStorage(instanceVal, 'market');
     const delistedAt = storage.get('DelistedAt');
     const terminalPrice = storage.get('TerminalPrice');
     const adl = storage.get('Adl');
 
     return {
-        config: parseTradingConfig(scValToNative(storage.require('Config'))),
+        config: parseMarketConfig(scValToNative(storage.require('Config'))),
         feedId: Buffer.from(storage.require('FeedId').bytes()),
         status: Number(scValToNative(storage.require('Status'))) as Status,
         vault: storage.address('Vault'),
