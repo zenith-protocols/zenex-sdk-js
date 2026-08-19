@@ -157,7 +157,7 @@ export class VaultOrderIntent {
             config: market.config,
             price: { ...p, publishTime: createdAt + lock },
             vault: market.vaultAtomic(),
-            treasuryRate: 0n,
+            treasuryRate: market.treasuryRate,
             executionFee: market.config.execFee,
             minOut: this.minOut,
             createdAt,

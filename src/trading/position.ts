@@ -137,7 +137,7 @@ export class MarketPosition {
             config: market.config,
             price: resolvePrice(price),
             vaultAssets: market.vaultAssets,
-            treasuryRate: 0n,
+            treasuryRate: market.treasuryRate,
         });
         return state.kind === 'exact' ? state.value.liquidatable : false;
     }

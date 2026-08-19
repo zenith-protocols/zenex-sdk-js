@@ -93,7 +93,6 @@ function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
 describe('exact market marks, PnL and capacity', () => {
     it('selects the contract entry and exit sides', () => {
         const price: PriceData = {
-            feedId: Buffer.alloc(32, 1),
             bid: 900_000_000n,
             ask: 1_100_000_000n,
             publishTime: 1n,
@@ -107,7 +106,6 @@ describe('exact market marks, PnL and capacity', () => {
 
     it('floors a fractional long exit and ceils the mirrored short exit', () => {
         const price: PriceData = {
-            feedId: Buffer.alloc(32, 1),
             bid: 250_000_000n,
             ask: 250_000_000n,
             publishTime: 1n,
@@ -123,7 +121,6 @@ describe('exact market marks, PnL and capacity', () => {
 
     it('rounds a long ask reserve up by one atomic unit', () => {
         const price: PriceData = {
-            feedId: Buffer.alloc(32, 1),
             bid: 1n,
             ask: 1n,
             publishTime: 1n,
@@ -139,7 +136,6 @@ describe('exact market marks, PnL and capacity', () => {
             tokens: pair(2_000_000_000_000_000_000n, 500_000_000_000_000_000n),
         });
         const price: PriceData = {
-            feedId: Buffer.alloc(32, 1),
             bid: 90_000_000n,
             ask: 110_000_000n,
             publishTime: 1n,
@@ -160,7 +156,6 @@ describe('exact market marks, PnL and capacity', () => {
             tokens: pair(2_000_000_000_000_000_000n, 500_000_000_000_000_000n),
         });
         const price: PriceData = {
-            feedId: Buffer.alloc(32, 1),
             bid: 90_000_000n,
             ask: 110_000_000n,
             publishTime: 1n,

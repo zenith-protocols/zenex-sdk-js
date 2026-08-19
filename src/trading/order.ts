@@ -275,7 +275,7 @@ export function marketContext(
         position,
         price: resolvePrice(price),
         vault: market.vaultAtomic(),
-        treasuryRate: 0n,
+        treasuryRate: market.treasuryRate,
         adl: market.adl,
         retirement: market.retirement,
     };

@@ -398,15 +398,8 @@ function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
     };
 }
 
-function feedId(id = 1n): Buffer {
-    const bytes = Buffer.alloc(32);
-    bytes.writeBigUInt64BE(id, 24);
-    return bytes;
-}
-
 function verifiedPrice(inputs: Record<string, unknown>): PriceData {
     return {
-        feedId: feedId((inputs.feed_id ?? 1n) as bigint),
         bid: (inputs.bid ?? SCALAR_18) as bigint,
         ask: (inputs.ask ?? SCALAR_18) as bigint,
         publishTime: (inputs.publish_time ?? 1n) as bigint,
@@ -870,7 +863,6 @@ describe('haircuts and protocol gates', () => {
                     maxPnlTrader: 900_000_000_000_000_000n,
                 }),
                 price: {
-                    feedId: feedId(),
                     bid: 105_000_000n,
                     ask: 105_000_000n,
                     publishTime: 1n,

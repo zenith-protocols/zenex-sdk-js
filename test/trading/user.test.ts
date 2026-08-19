@@ -204,6 +204,16 @@ describe('marketContext', () => {
         const context = marketContext(market, user.long, 100n * 10n ** 18n);
         expect(context.ledgerTime).toBeGreaterThanOrEqual(before);
     });
+
+    it('threads an attached treasury rate into the engine context', async () => {
+        const { market, user } = await loadPair();
+        const rate = 250_000_000_000_000_000n;
+        const rated = market.withTreasuryRate(rate);
+        const context = marketContext(rated, user.long, 100n * 10n ** 18n);
+        expect(context.treasuryRate).toBe(rate);
+        // The copy carries the rate; the original snapshot stays at the default.
+        expect(market.treasuryRate).toBe(0n);
+    });
 });
 
 describe('MarketUser.claimable', () => {

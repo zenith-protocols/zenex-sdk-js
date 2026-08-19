@@ -24,9 +24,14 @@ const FORBIDDEN_CONTRACT_FUNCTIONS = new Set([
     'forward_unsafe',
 ]);
 
-async function sourceFiles(directory) {
+async function sourceFiles(directory, { required = false } = {}) {
+    // A vanished nested directory is a race worth tolerating; an unreadable
+    // root would let the gate pass without inspecting anything.
     const entries = await readdir(directory, { withFileTypes: true }).catch(
-        () => [],
+        (error) => {
+            if (required) throw error;
+            return [];
+        },
     );
     const nested = await Promise.all(
         entries.map((entry) => {
@@ -150,7 +155,7 @@ function inspectSource(root, path, source) {
 }
 
 export async function checkArchitecture(root = DEFAULT_ROOT) {
-    const paths = await sourceFiles(resolve(root, 'src'));
+    const paths = await sourceFiles(resolve(root, 'src'), { required: true });
     const sources = new Map(
         await Promise.all(
             paths.map(async (path) => [

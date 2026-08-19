@@ -73,7 +73,6 @@ function context(overrides: Record<string, unknown> = {}) {
         status: Status.Active,
         config: config(),
         price: {
-            feedId: Buffer.alloc(32, 1),
             bid: 100n,
             ask: 105n,
             publishTime: 1n,

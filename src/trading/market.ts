@@ -95,6 +95,15 @@ export class Market {
         public vaultDecimalsOffset: number,
         /** Settlement-token decimals. */
         public assetDecimals: number,
+        /**
+         * Protocol fee rate (SCALAR_18 fraction) used to split fees between
+         * vault and treasury in exact previews. Not read by the load — the
+         * rate lives on the treasury contract, which the load discovers —
+         * so it defaults to `0n`, pricing previews as if the treasury takes
+         * nothing. For the exact split, attach it:
+         * `market.withTreasuryRate(await loadTreasuryRate(network, market.treasury))`.
+         */
+        public treasuryRate: bigint = 0n,
     ) {}
 
     /**
@@ -212,6 +221,7 @@ export class Market {
             this.vaultShares,
             this.vaultDecimalsOffset,
             this.assetDecimals,
+            this.treasuryRate,
         );
     }
 
@@ -317,6 +327,16 @@ export class Market {
         return convertVaultSharesToAssets(this.vaultAtomic(), shares, pnl);
     }
 
+    /**
+     * A copy of this snapshot carrying `rate` as the treasury fee rate, for
+     * exact fee splits in previews. Pair with {@link loadTreasuryRate}.
+     */
+    withTreasuryRate(rate: bigint): Market {
+        const copy = this.withData(this.data);
+        copy.treasuryRate = rate;
+        return copy;
+    }
+
     /** @internal A copy of this snapshot carrying different market data (post-fill projections). */
     withData(data: MarketData): Market {
         return new Market(
@@ -338,6 +358,7 @@ export class Market {
             this.vaultShares,
             this.vaultDecimalsOffset,
             this.assetDecimals,
+            this.treasuryRate,
         );
     }
 
