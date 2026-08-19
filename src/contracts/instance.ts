@@ -1,5 +1,5 @@
 import { Address, xdr } from '@stellar/stellar-sdk';
-import { decodeEntryKey } from '../ledger-keys.js';
+import { decodeEntryKey } from './keys.js';
 
 /**
  * A contract's instance storage, indexed by key name and bound to one

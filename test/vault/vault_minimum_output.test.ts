@@ -3,7 +3,7 @@ import { I128_MAX } from '../../src/math/fixed.js';
 import {
     deriveVaultMinimumOutput,
     type DeriveVaultMinimumOutputInput,
-} from '../../src/trading/quote/vault.js';
+} from '../../src/trading/internal/vault.js';
 
 const assumptions = [
     'minimum output is derived from a caller-supplied estimated fill output',

@@ -1,5 +1,5 @@
-export { TradingRouterContract } from './router_contract.js';
-export type { CreateAndFillWithFeeArgs, MulticallWithFeeArgs } from './router_contract.js';
+export { TradingRouterContract } from './contract.js';
+export type { CreateAndFillWithFeeArgs, MulticallWithFeeArgs } from './contract.js';
 
 // Core types, converters, and parsers
 export {
@@ -7,10 +7,10 @@ export {
     createOrderCall,
     parseCallOutcome,
     UNTYPED_FAILURE,
-} from './router_types.js';
+} from './types.js';
 
 export type {
     Call,
     CallOutcome,
     OrderParams,
-} from './router_types.js';
+} from './types.js';

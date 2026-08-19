@@ -1,6 +1,6 @@
-export { TreasuryContract } from './treasury_contract.js';
-export type { TreasuryConstructorArgs } from './treasury_contract.js';
+export { TreasuryContract } from './contract.js';
+export type { TreasuryConstructorArgs } from './contract.js';
 
 // Ledger-entry reader (getLedgerEntries reads)
-export { parseTreasuryInstance, parseTreasuryRate } from './treasury_instance.js';
-export type { TreasuryInstanceState } from './treasury_instance.js';
+export { parseTreasuryInstance, parseTreasuryRate } from './instance.js';
+export type { TreasuryInstanceState } from './instance.js';

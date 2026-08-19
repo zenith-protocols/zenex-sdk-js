@@ -1,18 +1,18 @@
-export { FactoryContract } from './factory_contract.js';
+export { FactoryContract } from './contract.js';
 
 export type {
     FactoryInitMeta,
     FactoryConstructorArgs,
-} from './factory_contract.js';
+} from './contract.js';
 
-export { FactoryEventType } from './factory_events.js';
+export { FactoryEventType } from './events.js';
 
 export type {
     BaseFactoryEvent,
     FactoryDeployEvent,
     FactoryEvent,
-} from './factory_events.js';
+} from './events.js';
 
 // Instance-storage walker (getLedgerEntries reads)
-export { parseFactoryInstance } from './factory_instance.js';
-export type { FactoryInstanceState } from './factory_instance.js';
+export { parseFactoryInstance } from './instance.js';
+export type { FactoryInstanceState } from './instance.js';

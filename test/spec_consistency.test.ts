@@ -1,20 +1,20 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { TradingContract } from '../src/contracts/trading/trading_contract.js';
-import { TradingRouterContract } from '../src/contracts/router/router_contract.js';
-import { FactoryContract } from '../src/contracts/factory/factory_contract.js';
-import { VaultContract } from '../src/contracts/vault/vault_contract.js';
-import { OracleContract } from '../src/contracts/oracle/oracle_contract.js';
-import { TreasuryContract } from '../src/contracts/treasury/treasury_contract.js';
-import { GovernanceContract } from '../src/contracts/governance/governance_contract.js';
+import { TradingContract } from '../src/contracts/market/contract.js';
+import { TradingRouterContract } from '../src/contracts/router/contract.js';
+import { FactoryContract } from '../src/contracts/factory/contract.js';
+import { VaultContract } from '../src/contracts/vault/contract.js';
+import { OracleContract } from '../src/contracts/oracle/contract.js';
+import { TreasuryContract } from '../src/contracts/treasury/contract.js';
+import { GovernanceContract } from '../src/contracts/governance/contract.js';
 import {
     factorySpec,
     governanceSpec,
     oracleSpec,
     strategyVaultSpec,
-    tradingRouterSpec,
-    tradingSpec,
+    marketRouterSpec,
+    marketSpec,
     treasurySpec,
 } from '../src/contracts/contract_specs.js';
 
@@ -22,8 +22,8 @@ import factoryFixture from './fixtures/specs/factory.json';
 import governanceFixture from './fixtures/specs/governance.json';
 import oracleFixture from './fixtures/specs/oracle.json';
 import strategyVaultFixture from './fixtures/specs/strategy_vault.json';
-import tradingFixture from './fixtures/specs/trading.json';
-import tradingRouterFixture from './fixtures/specs/trading_router.json';
+import marketFixture from './fixtures/specs/market.json';
+import marketRouterFixture from './fixtures/specs/market_router.json';
 import treasuryFixture from './fixtures/specs/treasury.json';
 
 // These assertions cover the wiring between a generated spec array and the
@@ -36,20 +36,20 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 const contracts = [
     {
-        package: 'trading',
-        exportName: 'tradingSpec',
-        spec: tradingSpec,
-        fixture: tradingFixture,
+        package: 'market',
+        exportName: 'marketSpec',
+        spec: marketSpec,
+        fixture: marketFixture,
         contract: TradingContract,
-        source: 'src/contracts/trading/trading_contract.ts',
+        source: 'src/contracts/market/contract.ts',
     },
     {
-        package: 'trading-router',
-        exportName: 'tradingRouterSpec',
-        spec: tradingRouterSpec,
-        fixture: tradingRouterFixture,
+        package: 'market-router',
+        exportName: 'marketRouterSpec',
+        spec: marketRouterSpec,
+        fixture: marketRouterFixture,
         contract: TradingRouterContract,
-        source: 'src/contracts/router/router_contract.ts',
+        source: 'src/contracts/router/contract.ts',
     },
     {
         package: 'factory',
@@ -57,7 +57,7 @@ const contracts = [
         spec: factorySpec,
         fixture: factoryFixture,
         contract: FactoryContract,
-        source: 'src/contracts/factory/factory_contract.ts',
+        source: 'src/contracts/factory/contract.ts',
     },
     {
         package: 'strategy-vault',
@@ -65,7 +65,7 @@ const contracts = [
         spec: strategyVaultSpec,
         fixture: strategyVaultFixture,
         contract: VaultContract,
-        source: 'src/contracts/vault/vault_contract.ts',
+        source: 'src/contracts/vault/contract.ts',
     },
     {
         package: 'oracle',
@@ -73,7 +73,7 @@ const contracts = [
         spec: oracleSpec,
         fixture: oracleFixture,
         contract: OracleContract,
-        source: 'src/contracts/oracle/oracle_contract.ts',
+        source: 'src/contracts/oracle/contract.ts',
     },
     {
         package: 'treasury',
@@ -81,7 +81,7 @@ const contracts = [
         spec: treasurySpec,
         fixture: treasuryFixture,
         contract: TreasuryContract,
-        source: 'src/contracts/treasury/treasury_contract.ts',
+        source: 'src/contracts/treasury/contract.ts',
     },
     {
         package: 'governance',
@@ -89,7 +89,7 @@ const contracts = [
         spec: governanceSpec,
         fixture: governanceFixture,
         contract: GovernanceContract,
-        source: 'src/contracts/governance/governance_contract.ts',
+        source: 'src/contracts/governance/contract.ts',
     },
 ] as const;
 

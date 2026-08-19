@@ -1,24 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { I128_MAX, SCALAR_18 } from '../../src/math/fixed.js';
-import type { PriceData } from '../../src/trading/market/types.js';
+import type { PriceData } from '../../src/trading/internal/math.js';
 import type {
     MarketData,
     SidePair,
     TradingConfig,
-} from '../../src/contracts/trading/trading_types.js';
+} from '../../src/contracts/market/types.js';
 import {
     convertVaultAssetsToShares,
     convertVaultSharesToAssets,
     quoteVaultDeposit,
     quoteVaultRedeem,
-} from '../../src/trading/quote/vault.js';
+} from '../../src/trading/internal/vault.js';
 import type {
     VaultAtomicState,
     VaultDepositQuoteInput,
     VaultQuoteContext,
     VaultRedeemQuoteInput,
-} from '../../src/trading/quote/vault.js';
-import { checkVaultWithdrawGates } from '../../src/trading/quote/vault_gates.js';
+} from '../../src/trading/internal/vault.js';
+import { checkVaultWithdrawGates } from '../../src/trading/internal/vault.js';
 
 interface ContractCase {
     operation: string;

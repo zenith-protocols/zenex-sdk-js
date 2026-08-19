@@ -3,7 +3,7 @@ import { SCALAR_18 } from '../../src/math/index.js';
 import {
     tradingConfigToScVal,
     type TradingConfig,
-} from '../../src/contracts/trading/trading_types.js';
+} from '../../src/contracts/market/types.js';
 
 // =============================================================================
 // Test builders for contract-instance / persistent ledger-entry values, shared

@@ -48,7 +48,7 @@ export {
     parseTradingConfig,
     // Events
     TradingEventType,
-} from './contracts/trading/index.js';
+} from './contracts/market/index.js';
 
 export type {
     // Argument interfaces
@@ -83,9 +83,9 @@ export type {
     TradingLiquidationEvent,
     TradingEvent,
     TradingInstanceState,
-} from './contracts/trading/index.js';
+} from './contracts/market/index.js';
 
-export { parseTradingInstance } from './contracts/trading/index.js';
+export { parseTradingInstance } from './contracts/market/index.js';
 
 // Instance-storage walkers, one per contract that keeps instance state.
 // Each is a single ledger key holding every value below, including `Owner`.
@@ -109,10 +109,12 @@ export {
 } from './contracts/treasury/index.js';
 
 // =============================================================================
-// State layer (getLedgerEntries reads, one round trip each)
+// State reads (getLedgerEntries, one round trip each)
 // =============================================================================
 
-export * from './state/index.js';
+export { MarketStateError } from './entries.js';
+export type { MarketStateFailureCode } from './entries.js';
+export { loadTreasuryInstance, loadTreasuryRate } from './treasury.js';
 
 // =============================================================================
 // Trading Router Module (stateless batching + create-and-fill flows)
@@ -229,25 +231,13 @@ export { tradingErrorMessages, parseContractErrorCode } from './errors.js';
 // =============================================================================
 
 export {
-    // Generic key builders
     enumStorageKeyWithAddress,
-    tokenBalanceLedgerKey,
     decodeEntryKey,
     contractInstanceLedgerKey,
     persistentLedgerKey,
     temporaryLedgerKey,
-    // Trading DataKey mirrors - instance tier
-    tradingConfigKey,
-    tradingFeedIdKey,
-    tradingStatusKey,
-    tradingVaultKey,
-    tradingTokenKey,
-    tradingOracleKey,
-    tradingTreasuryKey,
-    tradingDelistedAtKey,
-    tradingTerminalPriceKey,
-    tradingAdlKey,
-    // Trading DataKey mirrors - persistent / temporary entries
+} from './contracts/keys.js';
+export {
     tradingMarketDataLedgerKey,
     tradingPriceCacheLedgerKey,
     tradingPositionLedgerKey,
@@ -255,7 +245,7 @@ export {
     tradingOrderCounterLedgerKey,
     tradingClaimableFundingLedgerKey,
     tradingOrderLedgerKey,
-} from './ledger-keys.js';
+} from './contracts/market/keys.js';
 
 // Token reads. Any holder, any token. Not a Zenex contract binding.
 export * from './token.js';
@@ -267,59 +257,13 @@ export * as FixedMath from './math/index.js';
 export { simulateAndParse } from './simulate.js';
 
 // =============================================================================
-// Exact quote and order boundaries
+// Trading tier: loaded chain objects, order intents, and float estimates.
+// Estimates render approximate numbers for display only; never feed a float
+// back into a transaction — parse user input with `parseAtomic`.
 // =============================================================================
 
 export * from './math/index.js';
-export * from './trading/quote/index.js';
-export * from './trading/market/index.js';
-export * from './trading/position/index.js';
-export * from './trading/order/index.js';
-
-// =============================================================================
-// Display layer (approximate floats, for rendering only)
-//
-// Never feed these back into a transaction: quote with the exact surfaces above
-// and parse user input with `parseAtomic`. Also available namespaced as
-// `Display` for call sites that want the distinction visible.
-// =============================================================================
-
-export * from './display/index.js';
-export * as Display from './display/index.js';
-
-export {
-    convertVaultAssetsToShares,
-    convertVaultSharesToAssets,
-    deriveVaultMinimumOutput,
-    quoteVaultDeposit,
-    quoteVaultDepositFill,
-    quoteVaultOrderCreation,
-    quoteVaultRedeem,
-    quoteVaultRedeemFill,
-} from './trading/quote/vault.js';
-export {
-    checkVaultWithdrawGates,
-    evaluateVaultWithdrawGates,
-    VaultProtocolGateError,
-} from './trading/quote/vault_gates.js';
-export type {
-    DeriveVaultMinimumOutputInput,
-    ExactVaultOrderCreationQuote,
-    ExactVaultRestingOrderCreationQuote,
-    VaultAtomicState,
-    VaultEstimatedOutputReference,
-    VaultMinimumOutput,
-    VaultOrderCreationOutcome,
-    VaultOrderCreationQuoteInput,
-    VaultRestingOrderCreation,
-    VaultRetiredImmediateRedeem,
-    VaultQuoteOutcome,
-    VaultQuoteContext,
-    VaultDepositQuoteInput,
-    VaultRedeemQuoteInput,
-    VaultGateInput,
-} from './trading/quote/vault.js';
-export type { VaultWithdrawHeadroom } from './trading/quote/vault_gates.js';
+export * from './trading/index.js';
 
 
 // =============================================================================

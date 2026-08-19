@@ -1,10 +1,10 @@
-export { OracleContract } from './oracle_contract.js';
+export { OracleContract } from './contract.js';
 
 export type {
     OraclePriceData,
     OracleConstructorArgs,
-} from './oracle_contract.js';
+} from './contract.js';
 
 // Instance-storage walker (getLedgerEntries reads)
-export { parseOracleInstance } from './oracle_instance.js';
-export type { OracleInstanceState } from './oracle_instance.js';
+export { parseOracleInstance } from './instance.js';
+export type { OracleInstanceState } from './instance.js';

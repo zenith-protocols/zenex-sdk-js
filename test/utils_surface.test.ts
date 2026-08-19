@@ -9,14 +9,14 @@ import {
 } from '@stellar/stellar-sdk';
 import {
     enumStorageKeyWithAddress,
-    tokenBalanceLedgerKey,
     decodeEntryKey,
     contractInstanceLedgerKey,
-} from '../src/ledger-keys.js';
+} from '../src/contracts/keys.js';
+import { tokenBalanceLedgerKey } from '../src/token.js';
 import { toFixed, toFloat, mulDivFloor, mulDivCeil, SCALAR_18 } from '../src/math/index.js';
 import { simulateAndParse } from '../src/simulate.js';
 import { ContractError } from '../src/errors.js';
-import { TreasuryContract } from '../src/contracts/treasury/treasury_contract.js';
+import { TreasuryContract } from '../src/contracts/treasury/contract.js';
 import { Network } from '../src/index.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));

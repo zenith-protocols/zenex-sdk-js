@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey } from '@stellar/stellar-sdk';
-import { GovernanceContract } from '../../src/contracts/governance/governance_contract.js';
+import { GovernanceContract } from '../../src/contracts/governance/contract.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const TARGET = StrKey.encodeContract(Buffer.alloc(32, 2));

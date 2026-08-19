@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SCALAR_18 } from '../../src/math/index.js';
-import { Position, MarketData, SidePair, TradingConfig } from '../../src/contracts/trading/trading_types.js';
+import { Position, MarketData, SidePair, TradingConfig } from '../../src/contracts/market/types.js';
 import {
     positionPnl,
     pendingFunding,
@@ -8,7 +8,7 @@ import {
     positionEquity,
     unlockedNotional,
     liquidationPrice,
-} from '../../src/trading/position/estimates.js';
+} from '../../src/trading/internal/position.js';
 
 // =============================================================================
 // Hand-computed test vectors on the canonical test-data decimal system:
@@ -79,7 +79,7 @@ function makeMarket(overrides: Partial<MarketData> = {}): MarketData {
     };
 }
 
-// A valid baseline mirroring `zenex-contracts/trading/src/trading/config.rs::test_config`.
+// A valid baseline mirroring `zenex-contracts/market/src/trading/config.rs::test_config`.
 function baselineConfig(): TradingConfig {
     return {
         keeperRate: SCALAR_18 / 10n, // 10%

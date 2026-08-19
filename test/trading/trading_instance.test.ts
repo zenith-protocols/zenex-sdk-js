@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { StrKey, xdr } from '@stellar/stellar-sdk';
-import { parseTradingInstance } from '../../src/contracts/trading/trading_instance.js';
-import { Status } from '../../src/contracts/trading/trading_types.js';
+import { parseTradingInstance } from '../../src/contracts/market/instance.js';
+import { Status } from '../../src/contracts/market/types.js';
 import {
     makeConfig,
     tradingInstanceScVal,

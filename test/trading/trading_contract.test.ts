@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, nativeToScVal } from '@stellar/stellar-sdk';
-import { TradingContract, DeployArgs } from '../../src/contracts/trading/trading_contract.js';
-import { OrderKind, VaultOrderKind, TradingConfig } from '../../src/contracts/trading/trading_types.js';
+import { TradingContract, DeployArgs } from '../../src/contracts/market/contract.js';
+import { OrderKind, VaultOrderKind, TradingConfig } from '../../src/contracts/market/types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -256,5 +256,13 @@ describe('TradingContract', () => {
         expect(() =>
             TradingContract.deploy(USER, Buffer.alloc(32, 9), deployArgs),
         ).toThrow(/32 bytes/);
+    });
+
+    it('upgrade builds with the wasm hash first, then the operator', () => {
+        const contract = new TradingContract(CONTRACT_ID);
+        const { fn, args } = decodeInvoke(contract.upgrade(Buffer.alloc(32, 7), USER));
+        expect(fn).toBe('upgrade');
+        expect(Buffer.from(args[0])).toEqual(Buffer.alloc(32, 7));
+        expect(args[1]).toBe(USER);
     });
 });

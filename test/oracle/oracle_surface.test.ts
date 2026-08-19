@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { OracleContract } from '../../src/contracts/oracle/oracle_contract.js';
+import { OracleContract } from '../../src/contracts/oracle/contract.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));

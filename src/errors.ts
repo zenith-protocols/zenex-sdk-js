@@ -1,7 +1,8 @@
 /**
  * Non-trading contract error codes: Soroban host and transaction codes, plus
  * the shared, token, vault, oracle, strategy-vault, governance, treasury and
- * fee-abstraction domains. Trading codes (700-772) live in `TradingError`
+ * fee-abstraction domains, plus the shared admin and OpenZeppelin
+ * ownable/role-transfer domains. Trading codes (700-772) live in `TradingError`
  * instead. Resolve a raw code with `contractErrorFromCode`. Do not match on
  * codes in this enum directly.
  */
@@ -83,6 +84,11 @@ export enum ContractErrorType {
     // the contract's `TradingError` exactly; see below). `contractErrorFromCode` falls
     // through to it automatically.
 
+    // Shared admin (600): raised with the same name and meaning by every
+    // upgradeable contract (market, oracle, factory), so the bare code
+    // still names one condition.
+    UpgradeNotOwner = 600,
+
     // Oracle Errors (780-793): the oracle owns the 78x/79x domain inherited
     // from the price-verifier it replaces. Codes whose semantics carried over
     // keep their numbers (780-783, 790, 793); the Lazer parser block
@@ -109,11 +115,30 @@ export enum ContractErrorType {
     // Treasury Errors (900)
     TreasuryInvalidRate = 900,
 
-    // Fee Abstraction Errors (5003)
-    // Emitted by OpenZeppelin's stellar-fee-abstraction contract (the relay's
-    // fee-bump gateway), not by the Zenex trading contracts; mirrored here so
-    // relay simulations decode end-to-end.
+    // OwnableError (2100-2102): OpenZeppelin ownable, raised by every
+    // owner-gated contract.
+    OwnerNotSet = 2100,
+    OwnershipTransferInProgress = 2101,
+    OwnerAlreadySet = 2102,
+
+    // RoleTransferError (2200-2203): OpenZeppelin two-step ownership
+    // transfer machinery.
+    NoPendingTransfer = 2200,
+    TransferInvalidLiveUntilLedger = 2201,
+    InvalidPendingAccount = 2202,
+    TransferExpired = 2203,
+
+    // Fee Abstraction Errors (5000-5006)
+    // Emitted by OpenZeppelin's stellar-fee-abstraction library inside the
+    // market router (the relay's fee-bump gateway); mirrored so relay
+    // simulations decode end-to-end.
+    FeeTokenNotAllowed = 5000,
+    FeeTokenAlreadyAllowed = 5001,
+    TokenCountOverflow = 5002,
     FeeAbstractionInvalidFeeBounds = 5003,
+    NoTokensToSweep = 5004,
+    FeeAbstractionInvalidUser = 5005,
+    FeeAbstractionInvalidExpirationLedger = 5006,
 }
 
 const errorMessages: Record<number, string> = {
@@ -212,11 +237,31 @@ const errorMessages: Record<number, string> = {
     [811]: 'Timelock delay has not yet passed',
     [812]: 'Invalid delay value (must be between 1 second and 60 days)',
 
+    // Shared admin
+    [600]: 'upgrade called by an operator that is not the contract owner',
+
     // Treasury
     [900]: 'Fee rate out of range (must be between 0 and 50%)',
 
+    // Ownable
+    [2100]: 'Contract owner is not set',
+    [2101]: 'An ownership transfer is already in progress',
+    [2102]: 'Contract owner is already set',
+
+    // Role transfer
+    [2200]: 'No matching pending ownership transfer',
+    [2201]: 'Invalid live_until_ledger for the ownership transfer',
+    [2202]: 'Caller is not the pending owner',
+    [2203]: 'The pending ownership transfer has expired',
+
     // Fee Abstraction (OpenZeppelin stellar-fee-abstraction)
+    [5000]: 'Fee token is not on the allowlist',
+    [5001]: 'Fee token is already on the allowlist',
+    [5002]: 'Fee token count overflow',
     [5003]: 'Relayer fee is outside the signed fee bounds',
+    [5004]: 'No tokens to sweep',
+    [5005]: 'Invalid user for fee abstraction',
+    [5006]: 'Invalid expiration ledger for fee abstraction',
 };
 
 /**
@@ -237,9 +282,10 @@ export class ContractError extends Error {
 /**
  * Resolve a raw on-chain error code to a ContractError.
  *
- * The per-contract code namespaces are disjoint (trading 700-772,
- * oracle 780-793, strategy-vault 800-801, governance 810-812,
- * treasury 900, fee-abstraction 5003), so every code resolves without a
+ * The per-contract code namespaces are disjoint (shared admin 600,
+ * trading 700-772, oracle 780-793, strategy-vault 800-801,
+ * governance 810-812, treasury 900, ownable 2100-2102, role transfer
+ * 2200-2203, fee-abstraction 5000-5006), so every code resolves without a
  * hint: from the merged `ContractErrorType` first, then the standalone
  * `TradingError` enum.
  */

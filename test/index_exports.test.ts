@@ -55,22 +55,30 @@ describe('package root exports', () => {
         ).toBeUndefined();
     });
 
-    it('exports the position display estimates', () => {
-        expect(SDK.positionPnl).toBeTypeOf('function');
-        expect(SDK.positionEquity).toBeTypeOf('function');
-        expect(SDK.pendingFunding).toBeTypeOf('function');
-        expect(SDK.pendingBorrowing).toBeTypeOf('function');
-        expect(SDK.liquidationPrice).toBeTypeOf('function');
-        expect(SDK.unlockedNotional).toBeTypeOf('function');
-        // Per-key loader classes and approximate market math are not part
-        // of the public surface; the exact quote layer covers market math.
-        expect(SDK.PositionView).toBeUndefined();
-        expect(SDK.MarketView).toBeUndefined();
-        expect(SDK.sidePnl).toBeUndefined();
-        expect(SDK.netPnl).toBeUndefined();
-        expect(SDK.utilization).toBeUndefined();
-        expect(SDK.impactFee).toBeUndefined();
-        expect(SDK.skewSplitFees).toBeUndefined();
+    it('exports the estimate tier and keeps the engine internal', () => {
+        const sdk = SDK as Record<string, unknown>;
+        expect(SDK.estimateMarket).toBeTypeOf('function');
+        expect(SDK.estimatePosition).toBeTypeOf('function');
+        expect(SDK.previewOrder).toBeTypeOf('function');
+        expect(SDK.Price).toBeTypeOf('function');
+        expect(SDK.MarketPosition).toBeTypeOf('function');
+        // The per-position exact math lives on MarketPosition; the loose
+        // engine functions stay internal.
+        expect(sdk.positionPnl).toBeUndefined();
+        expect(sdk.positionEquity).toBeUndefined();
+        expect(sdk.pendingFunding).toBeUndefined();
+        expect(sdk.quotePositionAction).toBeUndefined();
+        expect(sdk.advanceMarketAccruals).toBeUndefined();
+        expect(SDK.MarketPosition.prototype.pnl).toBeTypeOf('function');
+        expect(SDK.MarketPosition.prototype.equity).toBeTypeOf('function');
+        expect(SDK.MarketPosition.prototype.liquidationPrice).toBeTypeOf(
+            'function',
+        );
+        expect(SDK.MarketPosition.prototype.isLiquidatable).toBeTypeOf(
+            'function',
+        );
+        expect(SDK.MarketPosition.prototype.estimate).toBeTypeOf('function');
+        expect(SDK.MarketPosition.prototype.preview).toBeTypeOf('function');
     });
 
     it('exports the event enums and decoders', () => {
@@ -165,18 +173,12 @@ describe('package root exports', () => {
         expect(SDK.contractInstanceLedgerKey).toBeTypeOf('function');
         expect(SDK.persistentLedgerKey).toBeTypeOf('function');
         expect(SDK.temporaryLedgerKey).toBeTypeOf('function');
-        expect(SDK.tradingConfigKey).toBeTypeOf('function');
-        expect(SDK.tradingFeedIdKey).toBeTypeOf('function');
-        expect(SDK.tradingStatusKey).toBeTypeOf('function');
-        expect(SDK.tradingVaultKey).toBeTypeOf('function');
-        expect(SDK.tradingTokenKey).toBeTypeOf('function');
-        expect(SDK.tradingOracleKey).toBeTypeOf('function');
-        expect(SDK.tradingTreasuryKey).toBeTypeOf('function');
-        expect(SDK.tradingDelistedAtKey).toBeTypeOf('function');
-        expect(SDK.tradingTerminalPriceKey).toBeTypeOf('function');
-        expect(SDK.tradingAdlKey).toBeTypeOf('function');
-        // The Exponent and PriceVerifier keys are gone from the contract.
+        // The instance-tier ScVal builders are gone: parseTradingInstance
+        // decodes every instance field, so the per-field keys were dead API.
         const sdk = SDK as Record<string, unknown>;
+        expect(sdk.tradingConfigKey).toBeUndefined();
+        expect(sdk.tradingStatusKey).toBeUndefined();
+        expect(sdk.tradingAdlKey).toBeUndefined();
         expect(sdk.tradingExponentKey).toBeUndefined();
         expect(sdk.tradingPriceVerifierKey).toBeUndefined();
         expect(SDK.tradingMarketDataLedgerKey).toBeTypeOf('function');
@@ -208,33 +210,60 @@ describe('package root exports', () => {
         expect(SDK.VaultState).toBeUndefined();
     });
 
-    it('exports exact quote, transaction, and execution boundaries', () => {
-        expect(SDK.quotePositionAction).toBeTypeOf('function');
-        expect(SDK.applyOrder).toBeTypeOf('function');
-        expect(SDK.orderPriceBound).toBeTypeOf('function');
-        expect(SDK.maxWithdrawableMargin).toBeTypeOf('function');
-        expect(SDK.quoteVaultDeposit).toBeTypeOf('function');
-        expect(SDK.quoteVaultDepositFill).toBeTypeOf('function');
-        expect(SDK.quoteVaultOrderCreation).toBeTypeOf('function');
-        expect(SDK.quoteVaultRedeem).toBeTypeOf('function');
-        expect(SDK.quoteVaultRedeemFill).toBeTypeOf('function');
-        expect(SDK.deriveVaultMinimumOutput).toBeTypeOf('function');
+    it('exports the loaded classes, intents, and order helpers', () => {
         expect(SDK.Market).toBeTypeOf('function');
         expect(SDK.MarketUser).toBeTypeOf('function');
-        expect(SDK.marketContext).toBeTypeOf('function');
+        expect(SDK.OrderIntent).toBeTypeOf('function');
+        expect(SDK.VaultOrderIntent).toBeTypeOf('function');
+        expect(SDK.orderPriceBound).toBeTypeOf('function');
+        expect(SDK.maxMarginForBalance).toBeTypeOf('function');
         expect(SDK.loadTokenBalance).toBeTypeOf('function');
         expect(SDK.loadTreasuryRate).toBeTypeOf('function');
-        expect(SDK.buildOrderOperation).toBeTypeOf('function');
-        expect(SDK.buildVaultOrderOperation).toBeTypeOf('function');
-        expect(SDK.buildVaultActionExecution).toBeTypeOf('function');
+        expect(SDK.loadTreasuryInstance).toBeTypeOf('function');
+        expect(SDK.MarketStateError).toBeTypeOf('function');
+        // The loaded-class surface.
+        expect(SDK.Market.prototype.loadUser).toBeTypeOf('function');
+        expect(SDK.Market.prototype.estimate).toBeTypeOf('function');
+        expect(SDK.Market.prototype.accrue).toBeTypeOf('function');
+        expect(SDK.Market.prototype.openCapacity).toBeTypeOf('function');
+        expect(SDK.Market.prototype.assetsToShares).toBeTypeOf('function');
+        expect(SDK.MarketUser.prototype.loadOrders).toBeTypeOf('function');
+        expect(SDK.MarketUser.prototype.claimable).toBeTypeOf('function');
+        expect(SDK.OrderIntent.prototype.openMarket).toBeTypeOf('function');
+        expect(SDK.OrderIntent.prototype.closePosition).toBeTypeOf('function');
+        expect(SDK.OrderIntent.prototype.stopLoss).toBeTypeOf('function');
+        expect(SDK.VaultOrderIntent.create).toBeTypeOf('function');
+        expect(SDK.VaultOrderIntent.prototype.fills).toBeTypeOf('function');
+        expect(SDK.VaultOrderIntent.prototype.toOperation).toBeTypeOf(
+            'function',
+        );
+        // The batching machinery is gone: no consumer ever used it.
+        const sdk = SDK as Record<string, unknown>;
+        expect(sdk.readEntries).toBeUndefined();
+        expect(sdk.EntryBatch).toBeUndefined();
+        expect(sdk.MAX_KEYS_PER_REQUEST).toBeUndefined();
+        expect(sdk.marketKeys).toBeUndefined();
+        expect(sdk.marketUserKeys).toBeUndefined();
+        expect((SDK.Market as Record<string, unknown>).loadMany).toBeUndefined();
+        expect(
+            (SDK.MarketUser as Record<string, unknown>).loadMany,
+        ).toBeUndefined();
+        // The display module and the old execution machinery are gone.
+        expect(sdk.Display).toBeUndefined();
+        expect(sdk.positionDisplay).toBeUndefined();
+        expect(sdk.sideRates).toBeUndefined();
+        expect(sdk.fundingApr).toBeUndefined();
+        expect(sdk.buildOrderOperation).toBeUndefined();
+        expect(sdk.buildVaultOrderOperation).toBeUndefined();
+        expect(sdk.buildVaultActionExecution).toBeUndefined();
+        expect(sdk.marketContext).toBeUndefined();
         expect(SDK.isIncreaseOrderKind).toBeTypeOf('function');
         expect(SDK.isDecreaseOrderKind).toBeTypeOf('function');
         expect(SDK.isMarketOrderKind).toBeTypeOf('function');
-        expect(SDK.isRestingOrderKind).toBeTypeOf('function');
         expect(SDK.isTriggerOrderKind).toBeTypeOf('function');
-        expect(SDK.orderKindCrossing).toBeTypeOf('function');
-        expect(SDK.orderKindFiresAbove).toBeTypeOf('function');
-        expect(SDK.MAX_SIGNED_PRICE_UPDATE_BYTES).toBeUndefined();
+        expect(sdk.isRestingOrderKind).toBeUndefined();
+        expect(sdk.orderKindCrossing).toBeUndefined();
+        expect(sdk.MAX_SIGNED_PRICE_UPDATE_BYTES).toBeUndefined();
     });
 
     it('does not export the removed intent model', () => {

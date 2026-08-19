@@ -3,16 +3,16 @@ import { ZenexContractType } from '../src/base_event.js';
 import type { ZenexEvent } from '../src/base_event.js';
 import {
     TradingEventType,
-} from '../src/contracts/trading/trading_events.js';
+} from '../src/contracts/market/events.js';
 import type {
     TradingCancelOrderEvent,
     TradingLiquidationEvent,
-} from '../src/contracts/trading/trading_events.js';
-import { VaultEventType } from '../src/contracts/vault/vault_events.js';
-import type { VaultDepositEvent, VaultWithdrawEvent } from '../src/contracts/vault/vault_events.js';
-import { GovernanceEventType } from '../src/contracts/governance/governance_events.js';
-import { FactoryEventType } from '../src/contracts/factory/factory_events.js';
-import type { FactoryDeployEvent } from '../src/contracts/factory/factory_events.js';
+} from '../src/contracts/market/events.js';
+import { VaultEventType } from '../src/contracts/vault/events.js';
+import type { VaultDepositEvent, VaultWithdrawEvent } from '../src/contracts/vault/events.js';
+import { GovernanceEventType } from '../src/contracts/governance/events.js';
+import { FactoryEventType } from '../src/contracts/factory/events.js';
+import type { FactoryDeployEvent } from '../src/contracts/factory/events.js';
 
 // =============================================================================
 // Event-type enums are hand-checked against the contract sources on v2 main:

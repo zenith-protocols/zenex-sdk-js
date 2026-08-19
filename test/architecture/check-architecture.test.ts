@@ -30,19 +30,30 @@ afterEach(async () => {
 
 describe('SDK architecture checker mutation fixtures', () => {
     it('recognizes exact modules through portable path separators', () => {
-        expect(isExactModulePath('/repo/src/trading/order/bad.ts')).toBe(true);
+        expect(isExactModulePath('/repo/src/trading/internal/order.ts')).toBe(
+            true,
+        );
         expect(
-            isExactModulePath('C:\\repo\\src\\trading\\order\\bad.ts'),
+            isExactModulePath('C:\\repo\\src\\trading\\internal\\order.ts'),
         ).toBe(true);
         expect(isExactModulePath('/repo/src/math/fixed.ts')).toBe(true);
-        expect(isExactModulePath('/repo/src/contracts/trading/types.ts')).toBe(
+        expect(isExactModulePath('/repo/src/contracts/market/types.ts')).toBe(
             false,
         );
+        // The public trading classes and estimate modules are deliberately
+        // outside the exact surface.
+        expect(isExactModulePath('/repo/src/trading/market.ts')).toBe(false);
+        expect(isExactModulePath('/repo/src/trading/user.ts')).toBe(false);
+        expect(isExactModulePath('/repo/src/trading/market_est.ts')).toBe(false);
+        expect(isExactModulePath('/repo/src/trading/position_est.ts')).toBe(
+            false,
+        );
+        expect(isExactModulePath('/repo/src/trading/index.ts')).toBe(false);
     });
 
     it('rejects lossy number conversion in exact modules', async () => {
         const root = await fixture({
-            'src/trading/order/bad.ts':
+            'src/trading/internal/order.ts':
                 'export const bad = (atomic: bigint) => Number(atomic);',
         });
         expect(await checkArchitecture(root)).toEqual(
@@ -54,7 +65,7 @@ describe('SDK architecture checker mutation fixtures', () => {
 
     it('rejects try-fill contract paths', async () => {
         const root = await fixture({
-            'src/trading/order/bad.ts':
+            'src/trading/internal/order.ts':
                 "export const func = 'create_and_try_fill_with_fee';",
         });
         expect(await checkArchitecture(root)).toEqual(
@@ -68,7 +79,7 @@ describe('SDK architecture checker mutation fixtures', () => {
 
     it('rejects forbidden try boundaries in exact modules', async () => {
         const root = await fixture({
-            'src/trading/position/bad.ts':
+            'src/trading/internal/position.ts':
                 'export const submitTransactionXdr = (value: string) => value;',
         });
         expect(await checkArchitecture(root)).toEqual(
@@ -78,24 +89,24 @@ describe('SDK architecture checker mutation fixtures', () => {
         );
     });
 
-    it('exempts only the snapshot read simulation from the try rule', async () => {
+    it('leaves the estimate modules outside the exact rules', async () => {
         const root = await fixture({
-            'src/trading/snapshot.ts':
-                'export const multicallTry = (value: string) => value;',
-            'src/trading/market/bad.ts':
-                'export const multicallTry = (value: string) => value;',
+            'src/trading/position_est.ts':
+                'export const est = (atomic: bigint) => Number(atomic);',
+            'src/trading/internal/math.ts':
+                'export const bad = (atomic: bigint) => Number(atomic);',
         });
         const findings = await checkArchitecture(root);
         expect(findings).toHaveLength(1);
         expect(findings[0]).toMatchObject({
-            file: 'src/trading/market/bad.ts',
-            rule: 'forbidden-public-boundary',
+            file: 'src/trading/internal/math.ts',
+            rule: 'exact-number-conversion',
         });
     });
 
     it('rejects frontend dependencies in exact modules', async () => {
         const root = await fixture({
-            'src/trading/market/bad.ts':
+            'src/trading/internal/math.ts':
                 "export const dependency = 'zenex-trade';",
         });
         expect(await checkArchitecture(root)).toEqual(

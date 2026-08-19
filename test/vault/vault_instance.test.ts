@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { StrKey, xdr, nativeToScVal } from '@stellar/stellar-sdk';
-import { parseVaultInstance } from '../../src/contracts/vault/vault_instance.js';
+import { parseVaultInstance } from '../../src/contracts/vault/instance.js';
 import {
     vaultInstanceScVal,
     balanceMapScVal,

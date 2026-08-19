@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { rpc, xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { VaultContract } from '../../src/contracts/vault/vault_contract.js';
-import { decodeVaultEvent, VaultEventType } from '../../src/contracts/vault/vault_events.js';
+import { VaultContract } from '../../src/contracts/vault/contract.js';
+import { decodeVaultEvent, VaultEventType } from '../../src/contracts/vault/events.js';
 import { NormalizedEvent } from '../../src/base_event.js';
-import { contractInstanceLedgerKey, tokenBalanceLedgerKey } from '../../src/ledger-keys.js';
+import { contractInstanceLedgerKey, tokenBalanceLedgerKey } from '../../src/contracts/keys.js';
 import {
     vaultInstanceScVal,
     balanceMapScVal,

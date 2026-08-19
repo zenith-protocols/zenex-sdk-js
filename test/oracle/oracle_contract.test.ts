@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, nativeToScVal, StrKey } from '@stellar/stellar-sdk';
-import { OracleContract, OracleConstructorArgs } from '../../src/contracts/oracle/oracle_contract.js';
+import { OracleContract, OracleConstructorArgs } from '../../src/contracts/oracle/contract.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const OWNER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -124,5 +124,13 @@ describe('OracleContract', () => {
         expect(structEntry).toBeDefined();
         const fields = structEntry!.udtStructV0().fields().map((f) => f.name().toString());
         expect(fields).toEqual(['ask', 'bid', 'feed_id', 'publish_time']);
+    });
+
+    it('upgrade builds with the wasm hash first, then the operator', () => {
+        const oracle = new OracleContract(CONTRACT_ID);
+        const { fn, args } = decodeInvoke(oracle.upgrade(Buffer.alloc(32, 7), OWNER));
+        expect(fn).toBe('upgrade');
+        expect(Buffer.from(args[0])).toEqual(Buffer.alloc(32, 7));
+        expect(args[1]).toBe(OWNER);
     });
 });

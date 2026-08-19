@@ -1,6 +1,6 @@
 {
     "name": "@zenith-protocols/zenex-sdk",
-    "version": "0.0.1",
+    "version": "3.0.0",
     "type": "module",
     "description": "Javascript SDK for Zenex",
     "author": "Robeart",
@@ -27,7 +27,8 @@
         "test:coverage": "vitest run --coverage",
         "specs:generate": "node scripts/contract-specs.mjs generate",
         "specs:check": "node scripts/contract-specs.mjs check",
-        "architecture:check": "node scripts/check-architecture.mjs"
+        "architecture:check": "node scripts/check-architecture.mjs",
+        "live:check": "node scripts/live-check.mjs"
     },
     "exports": {
         ".": {

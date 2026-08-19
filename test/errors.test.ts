@@ -11,13 +11,17 @@ import {
 
 // =============================================================================
 // Error enums are hand-checked against the contract sources:
-//   trading/src/errors.rs          (TradingError, 700-772)
-//   oracle/src/error.rs            (OracleError, 780-793)
+//   market/src/errors.rs           (MarketError, 600 + 700-772)
+//   oracle/src/error.rs            (OracleError, 600 + 780-793)
+//   factory/src/errors.rs          (FactoryError, 600)
 //   strategy-vault/src/strategy.rs (StrategyVaultError, 800-801)
 //   governance/src/errors.rs       (GovernanceError, 810-812)
 //   treasury/src/lib.rs            (TreasuryError, 900)
-//   OpenZeppelin fee-abstraction   (FeeAbstractionError::InvalidFeeBounds, 5003)
+//   OpenZeppelin ownable           (OwnableError 2100-2102, RoleTransferError 2200-2203)
+//   OpenZeppelin fee-abstraction   (FeeAbstractionError, 5000-5006)
 // The namespaces are disjoint, so contractErrorFromCode takes no hint.
+// UpgradeNotOwner (600) is one shared code raised identically by market,
+// oracle and factory, so the bare code still names one condition.
 // =============================================================================
 
 describe('TradingError (v2 trading/src/errors.rs)', () => {
@@ -120,8 +124,32 @@ describe('ContractErrorType periphery codes (v2 contracts)', () => {
         }
     });
 
-    it('fee-abstraction InvalidFeeBounds is 5003 (OpenZeppelin, not a Zenex contract)', () => {
+    it('fee-abstraction covers the FeeAbstractionError set (5000-5006, OpenZeppelin)', () => {
+        expect(ContractErrorType.FeeTokenNotAllowed).toBe(5000);
+        expect(ContractErrorType.FeeTokenAlreadyAllowed).toBe(5001);
+        expect(ContractErrorType.TokenCountOverflow).toBe(5002);
         expect(ContractErrorType.FeeAbstractionInvalidFeeBounds).toBe(5003);
+        expect(ContractErrorType.NoTokensToSweep).toBe(5004);
+        expect(ContractErrorType.FeeAbstractionInvalidUser).toBe(5005);
+        expect(ContractErrorType.FeeAbstractionInvalidExpirationLedger).toBe(5006);
+    });
+
+    it('UpgradeNotOwner is the one shared admin code (600), out of the token 1xx domain', () => {
+        expect(ContractErrorType.UpgradeNotOwner).toBe(600);
+        expect(contractErrorFromCode(600).type).toBe(ContractErrorType.UpgradeNotOwner);
+        // The token domain keeps 100-102; a bare code cannot be ambiguous.
+        expect(contractErrorFromCode(100).type).toBe(ContractErrorType.InsufficientBalance);
+        expect(contractErrorFromCode(102).type).toBe(ContractErrorType.InvalidLiveUntilLedger);
+    });
+
+    it('ownable and role-transfer cover the OpenZeppelin sets (2100-2102, 2200-2203)', () => {
+        expect(ContractErrorType.OwnerNotSet).toBe(2100);
+        expect(ContractErrorType.OwnershipTransferInProgress).toBe(2101);
+        expect(ContractErrorType.OwnerAlreadySet).toBe(2102);
+        expect(ContractErrorType.NoPendingTransfer).toBe(2200);
+        expect(ContractErrorType.TransferInvalidLiveUntilLedger).toBe(2201);
+        expect(ContractErrorType.InvalidPendingAccount).toBe(2202);
+        expect(ContractErrorType.TransferExpired).toBe(2203);
     });
 
     it('strategy-vault is the 800-801 pair from strategy.rs', () => {

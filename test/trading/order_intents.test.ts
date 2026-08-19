@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { StrKey, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { TradingContract } from '../../src/contracts/trading/trading_contract.js';
+import { TradingContract } from '../../src/contracts/market/contract.js';
 import {
     FULL_CLOSE,
     OrderKind,
     VaultOrderKind,
-} from '../../src/contracts/trading/trading_types.js';
-import type { OrderParams } from '../../src/contracts/router/router_types.js';
+} from '../../src/contracts/market/types.js';
+import type { OrderParams } from '../../src/contracts/router/types.js';
 import {
     addMarginParams,
     closePositionParams,
@@ -18,7 +18,7 @@ import {
     vaultDepositParams,
     vaultRedeemParams,
     withdrawMarginParams,
-} from '../../src/trading/order/intents.js';
+} from '../../src/trading/internal/order.js';
 
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));

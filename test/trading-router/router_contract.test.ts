@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, Address } from '@stellar/stellar-sdk';
-import { TradingRouterContract } from '../../src/contracts/router/router_contract.js';
-import { Call, createOrderCall, parseCallOutcome } from '../../src/contracts/router/router_types.js';
-import { TradingContract } from '../../src/contracts/trading/trading_contract.js';
-import { OrderKind } from '../../src/contracts/trading/trading_types.js';
+import { TradingRouterContract } from '../../src/contracts/router/contract.js';
+import { Call, createOrderCall, parseCallOutcome } from '../../src/contracts/router/types.js';
+import { TradingContract } from '../../src/contracts/market/contract.js';
+import { OrderKind } from '../../src/contracts/market/types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 4));

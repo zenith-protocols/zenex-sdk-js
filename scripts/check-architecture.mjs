@@ -42,9 +42,12 @@ function normalizedFilePath(path) {
     return path.replaceAll('\\', '/');
 }
 
+// The exact (float-free) surface: all of src/math plus the fill engine under
+// src/trading/internal. The public trading classes and the estimate modules
+// legitimately convert to number and live outside it.
 export function isExactModulePath(path) {
     const normalized = normalizedFilePath(path);
-    return /\/src\/(?:math|trading)\//.test(normalized);
+    return /\/src\/(?:math|trading\/internal)\//.test(normalized);
 }
 
 function nodeName(node) {
@@ -110,12 +113,7 @@ function inspectSource(root, path, source) {
             const forbidden = FORBIDDEN_NAMES.find((candidate) =>
                 normalized.includes(candidate),
             );
-            // snapshot.ts drives a read-only multicall_try simulation; it
-            // never submits, so the try-boundary rule does not apply there.
-            const exempt =
-                forbidden === 'multicalltry' &&
-                normalizedPath.endsWith('/src/trading/snapshot.ts');
-            if (forbidden !== undefined && !exempt) {
+            if (forbidden !== undefined) {
                 add(
                     node,
                     'forbidden-public-boundary',

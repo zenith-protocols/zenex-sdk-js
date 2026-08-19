@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { TradingContract, DeployArgs } from '../../src/contracts/trading/trading_contract.js';
+import { TradingContract, DeployArgs } from '../../src/contracts/market/contract.js';
 import {
     OrderKind, VaultOrderKind, TradingConfig, tradingConfigToScVal,
-} from '../../src/contracts/trading/trading_types.js';
+} from '../../src/contracts/market/types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));

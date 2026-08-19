@@ -1,14 +1,14 @@
-export { GovernanceContract } from './governance_contract.js';
+export { GovernanceContract } from './contract.js';
 
 export type {
     QueuedCall,
     GovernanceConstructorArgs,
-} from './governance_contract.js';
+} from './contract.js';
 
 // Events
 export {
     GovernanceEventType,
-} from './governance_events.js';
+} from './events.js';
 
 export type {
     BaseGovernanceEvent,
@@ -18,8 +18,8 @@ export type {
     GovernanceStatusSetEvent,
     GovernanceDelaySetEvent,
     GovernanceEvent,
-} from './governance_events.js';
+} from './events.js';
 
 // Instance-storage walker (getLedgerEntries reads)
-export { parseGovernanceInstance } from './governance_instance.js';
-export type { GovernanceInstanceState } from './governance_instance.js';
+export { parseGovernanceInstance } from './instance.js';
+export type { GovernanceInstanceState } from './instance.js';

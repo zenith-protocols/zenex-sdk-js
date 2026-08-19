@@ -4,10 +4,10 @@ import { instanceStorage } from '../../src/contracts/instance.js';
 import {
     parseTreasuryInstance,
     parseTreasuryRate,
-} from '../../src/contracts/treasury/treasury_instance.js';
-import { parseOracleInstance } from '../../src/contracts/oracle/oracle_instance.js';
-import { parseFactoryInstance } from '../../src/contracts/factory/factory_instance.js';
-import { parseGovernanceInstance } from '../../src/contracts/governance/governance_instance.js';
+} from '../../src/contracts/treasury/instance.js';
+import { parseOracleInstance } from '../../src/contracts/oracle/instance.js';
+import { parseFactoryInstance } from '../../src/contracts/factory/instance.js';
+import { parseGovernanceInstance } from '../../src/contracts/governance/instance.js';
 import {
     contractInstance,
     treasuryInstanceScVal,
@@ -118,7 +118,7 @@ describe('parseFactoryInstance', () => {
             [
                 ['oracle', addr(VERIFIER)],
                 ['token', addr(VERIFIER)],
-                ['trading_hash', xdr.ScVal.scvBytes(Buffer.alloc(32, 1))],
+                ['market_hash', xdr.ScVal.scvBytes(Buffer.alloc(32, 1))],
                 ['treasury', addr(VERIFIER)],
                 ['vault_hash', xdr.ScVal.scvBytes(Buffer.alloc(32, 2))],
             ]

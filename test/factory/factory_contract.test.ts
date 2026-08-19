@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, scValToNative, StrKey, Address } from '@stellar/stellar-sdk';
-import { FactoryContract, FactoryConstructorArgs } from '../../src/contracts/factory/factory_contract.js';
-import { TradingConfig } from '../../src/contracts/trading/trading_types.js';
+import { FactoryContract, FactoryConstructorArgs } from '../../src/contracts/factory/contract.js';
+import { TradingConfig } from '../../src/contracts/market/types.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const ADMIN = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -188,10 +188,11 @@ describe('FactoryContract', () => {
         expect(FactoryContract.parsers.isDeployed(xdr.ScVal.scvBool(true).toXDR('base64'))).toBe(true);
     });
 
-    it('static deploy builds __constructor with init_meta map keys in alphabetical order', () => {
+    it('static deploy builds __constructor with owner then init_meta, map keys in alphabetical order', () => {
         const args: FactoryConstructorArgs = {
+            owner: ADMIN,
             init_meta: {
-                trading_hash: Buffer.alloc(32, 1),
+                market_hash: Buffer.alloc(32, 1),
                 treasury: TREASURY,
                 vault_hash: Buffer.alloc(32, 2),
             },
@@ -200,16 +201,52 @@ describe('FactoryContract', () => {
         const decoded = xdr.Operation.fromXDR(op, 'base64');
         const createContract = decoded.body().invokeHostFunctionOp().hostFunction().createContractV2();
         const ctorArgs = createContract.constructorArgs();
-        expect(ctorArgs).toHaveLength(1);
+        expect(ctorArgs).toHaveLength(2);
+        expect(scValToNative(ctorArgs[0])).toBe(ADMIN);
 
-        const initMetaMap = ctorArgs[0].map();
+        const initMetaMap = ctorArgs[1].map();
         expect(initMetaMap).toBeDefined();
         const keys = initMetaMap!.map((entry) => entry.key().sym().toString());
-        expect(keys).toEqual(['trading_hash', 'treasury', 'vault_hash']);
+        expect(keys).toEqual(['market_hash', 'treasury', 'vault_hash']);
 
-        const native = scValToNative(ctorArgs[0]);
+        const native = scValToNative(ctorArgs[1]);
         expect(native.treasury).toBe(TREASURY);
-        expect(Buffer.from(native.trading_hash)).toEqual(Buffer.alloc(32, 1));
+        expect(Buffer.from(native.market_hash)).toEqual(Buffer.alloc(32, 1));
         expect(Buffer.from(native.vault_hash)).toEqual(Buffer.alloc(32, 2));
+    });
+
+    it('upgrade builds with the wasm hash first, then the operator', () => {
+        const contract = new FactoryContract(CONTRACT_ID);
+        const { fn, args } = decodeInvoke(contract.upgrade(Buffer.alloc(32, 7), ADMIN));
+        expect(fn).toBe('upgrade');
+        expect(Buffer.from(args[0])).toEqual(Buffer.alloc(32, 7));
+        expect(args[1]).toBe(ADMIN);
+    });
+
+    it('setInitMeta encodes the same alphabetical init_meta map as deploy', () => {
+        const contract = new FactoryContract(CONTRACT_ID);
+        const op = contract.setInitMeta({
+            market_hash: new Uint8Array(32).fill(3),
+            treasury: TREASURY,
+            vault_hash: Buffer.alloc(32, 4),
+        });
+        const { fn, rawArgs, args } = decodeInvoke(op);
+        expect(fn).toBe('set_init_meta');
+        const keys = rawArgs[0].map()!.map((entry) => entry.key().sym().toString());
+        expect(keys).toEqual(['market_hash', 'treasury', 'vault_hash']);
+        expect(Buffer.from(args[0].market_hash)).toEqual(Buffer.alloc(32, 3));
+        expect(args[0].treasury).toBe(TREASURY);
+    });
+
+    it('getInitMeta, getOwner and the ownership methods build their calls', () => {
+        const contract = new FactoryContract(CONTRACT_ID);
+        expect(decodeInvoke(contract.getInitMeta()).fn).toBe('get_init_meta');
+        expect(decodeInvoke(contract.getOwner()).fn).toBe('get_owner');
+        const transfer = decodeInvoke(contract.transferOwnership(ADMIN, 1234));
+        expect(transfer.fn).toBe('transfer_ownership');
+        expect(transfer.args).toEqual([ADMIN, 1234]);
+        expect(decodeInvoke(contract.acceptOwnership()).fn).toBe('accept_ownership');
+        expect(decodeInvoke(contract.renounceOwnership()).fn).toBe('renounce_ownership');
+        expect(FactoryContract.parsers.getOwner(xdr.ScVal.scvVoid().toXDR('base64'))).toBeUndefined();
     });
 });

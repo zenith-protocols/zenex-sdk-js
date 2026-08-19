@@ -37,8 +37,8 @@ const wasmDir = resolve(contractsRoot, 'target/wasm32v1-none/release');
 // Keyed by WASM stem (also the fixture filename). Order fixes the layout of
 // the generated module.
 const CONTRACTS = [
-    ['trading', 'tradingSpec'],
-    ['trading_router', 'tradingRouterSpec'],
+    ['market', 'marketSpec'],
+    ['market_router', 'marketRouterSpec'],
     ['factory', 'factorySpec'],
     ['strategy_vault', 'strategyVaultSpec'],
     ['oracle', 'oracleSpec'],

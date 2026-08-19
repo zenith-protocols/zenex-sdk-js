@@ -1,7 +1,7 @@
-import type { TradingEvent } from './contracts/trading/trading_events.js';
-import type { VaultEvent } from './contracts/vault/vault_events.js';
-import type { GovernanceEvent } from './contracts/governance/governance_events.js';
-import type { FactoryEvent } from './contracts/factory/factory_events.js';
+import type { TradingEvent } from './contracts/market/events.js';
+import type { VaultEvent } from './contracts/vault/events.js';
+import type { GovernanceEvent } from './contracts/governance/events.js';
+import type { FactoryEvent } from './contracts/factory/events.js';
 
 /** Identifies which Zenex contract raised an event, discriminating `ZenexEvent`. */
 export enum ZenexContractType {

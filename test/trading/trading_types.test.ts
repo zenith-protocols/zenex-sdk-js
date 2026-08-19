@@ -5,10 +5,10 @@ import {
     tradingConfigToScVal, parseSidePair,
     parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState,
     parseTradingConfig, TradingConfig,
-} from '../../src/contracts/trading/trading_types.js';
+} from '../../src/contracts/market/types.js';
 
 // Each field gets a unique value, numbered in the declaration order of
-// zenex-contracts/trading/src/trading/config.rs (101 = keeper_rate, the
+// zenex-contracts/market/src/trading/config.rs (101 = keeper_rate, the
 // first field, through 134 = max_vault_balance, the last). Unique values
 // make any key/field misrouting in the converter or parser visible.
 function makeDistinctConfig(): TradingConfig {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as SDK from '../src/index.js';
-import * as Order from '../src/trading/order/index.js';
+import * as Trading from '../src/trading/index.js';
 
 const FORBIDDEN = [
     'buildFeeForwarderOperation',
@@ -28,7 +28,7 @@ const FORBIDDEN = [
 
 describe('negative public SDK boundary', () => {
     it('does not export unsafe, obsolete, infrastructure, or generic submit APIs', () => {
-        const surfaces = [SDK, Order] as readonly Record<
+        const surfaces = [SDK, Trading] as readonly Record<
             string,
             unknown
         >[];

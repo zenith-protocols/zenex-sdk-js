@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { TradingRouterContract } from '../src/contracts/router/router_contract.js';
-import { FactoryContract } from '../src/contracts/factory/factory_contract.js';
+import { TradingRouterContract } from '../src/contracts/router/contract.js';
+import { FactoryContract } from '../src/contracts/factory/contract.js';
 
 const ROUTER_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 2));
@@ -64,15 +64,16 @@ describe('FactoryContract extras', () => {
     it('deploy accepts Uint8Array init hashes and string wasm hashes', () => {
         const admin = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
         const op = FactoryContract.deploy(admin, Buffer.alloc(32, 9).toString('hex'), {
+            owner: admin,
             init_meta: {
-                trading_hash: new Uint8Array(32),
+                market_hash: new Uint8Array(32),
                 treasury: StrKey.encodeContract(Buffer.alloc(32, 4)),
                 vault_hash: new Uint8Array(32),
             },
         });
         const create = xdr.Operation.fromXDR(op, 'base64').body()
             .invokeHostFunctionOp().hostFunction().createContractV2();
-        const initMeta = scValToNative(create.constructorArgs()[0]);
-        expect(Buffer.from(initMeta.trading_hash)).toEqual(Buffer.alloc(32));
+        const initMeta = scValToNative(create.constructorArgs()[1]);
+        expect(Buffer.from(initMeta.market_hash)).toEqual(Buffer.alloc(32));
     });
 });

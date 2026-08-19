@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { xdr, nativeToScVal, scValToNative, Address, StrKey } from '@stellar/stellar-sdk';
-import { GovernanceContract } from '../../src/contracts/governance/governance_contract.js';
-import { decodeGovernanceEvent, GovernanceEventType } from '../../src/contracts/governance/governance_events.js';
+import { GovernanceContract } from '../../src/contracts/governance/contract.js';
+import { decodeGovernanceEvent, GovernanceEventType } from '../../src/contracts/governance/events.js';
 import { NormalizedEvent } from '../../src/base_event.js';
 
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));

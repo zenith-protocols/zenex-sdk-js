@@ -3,86 +3,40 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 describe('package root type exports', () => {
-    it('exports every intent and vault type used by execution builders', () => {
+    it('exports the estimate and intent types a consumer builds against', () => {
         const consumerPath = fileURLToPath(
             new URL('./root-account-query-consumer.ts', import.meta.url),
         );
         const source = `
             import type {
-                ApplyOrderOptions,
-                BuildVaultActionExecutionInput,
-                DeriveVaultMinimumOutputInput,
-                ExactVaultOrderCreationQuote,
-                FeeBreakdown,
-                MarginState,
-                OrderApplication,
-                PositionActionOutcome,
-                PreparedVaultActionExecution,
-                PreparedVaultRestingExecution,
-                PreparedVaultRetiredImmediateRedeemExecution,
-                VaultEstimatedOutputReference,
-                VaultMinimumOutput,
+                MarketContracts,
+                MarketEstimate,
+                OrderEstimate,
+                PendingOrder,
+                PositionEstimate,
+                PriceInput,
+                SideRatesEstimate,
+                VaultOrderBlock,
             } from '../src/index.js';
+            import { Price } from '../src/index.js';
 
-            export type PositionPublicTypes = readonly [
-                ApplyOrderOptions,
-                FeeBreakdown,
-                MarginState,
-                OrderApplication,
-                PositionActionOutcome,
-            ];
-
-            const reference: VaultEstimatedOutputReference = {
-                kind: 'estimate',
-                output: 100n,
+            export const contracts: MarketContracts = {
+                market: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+                vault: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+                token: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
             };
-            const maximumSlippageBps = 100n;
-            export const minimumOutputInput: DeriveVaultMinimumOutputInput = {
-                reference,
-                maximumSlippageBps,
-            };
-            export const minimumOutput: VaultMinimumOutput = {
-                reference,
-                maximumSlippageBps,
-                rounding: 'floor',
-                minOut: 99n,
-            };
-
-            export const vaultQuote: ExactVaultOrderCreationQuote = {
-                kind: 'exact',
-                ledger: 1,
-                value: {
-                    kind: 'retiredImmediateRedeem',
-                    policy: 'direct',
-                    action: 'redeem',
-                    shares: 100n,
-                    assets: 99n,
-                    minOutApplied: false,
-                    executionFee: 0n,
-                },
-            };
-            export const retiredExecution: PreparedVaultRetiredImmediateRedeemExecution = {
-                action: 'retiredImmediateRedeem',
-                policy: 'retiredImmediateRedeem',
-                transport: 'direct',
-                operationXdr: 'AAAA',
-            };
-            export const restingExecution: PreparedVaultRestingExecution = {
-                action: 'resting',
-                vaultAction: 'redeem',
-                policy: 'restOnly',
-                transport: 'direct',
-                operationXdr: 'AAAA',
-            };
-            export const executions: readonly PreparedVaultActionExecution[] = [
-                restingExecution,
-                retiredExecution,
-            ];
-            export const vaultBuildInput: BuildVaultActionExecutionInput = {
-                tradingAddress: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
-                user: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-                quote: vaultQuote,
-            };
+            export const asBigint: PriceInput = 100n;
+            export const asPrice: PriceInput = Price.from(100n);
+            export const side: SideRatesEstimate = {} as SideRatesEstimate;
+            export const market: MarketEstimate = {} as MarketEstimate;
+            export const position: PositionEstimate = {} as PositionEstimate;
+            export const order: OrderEstimate = {} as OrderEstimate;
+            export const block: VaultOrderBlock = { code: 714, reason: 'x' };
+            export const pending: PendingOrder = {} as PendingOrder;
+            // Estimates are plain data: spreading must type-check.
+            export const spread = { ...market, ...position };
+            // The resulting position rides inside the order estimate.
+            export const after: PositionEstimate | undefined = order.position;
         `;
         const options: ts.CompilerOptions = {
             target: ts.ScriptTarget.ES2022,
@@ -115,46 +69,68 @@ describe('package root type exports', () => {
         expect(diagnostics).toEqual([]);
     }, 15_000);
 
-    it('exports a subject-bound market context whose subject stays optional on bare fixtures', () => {
+    it('types the loaded classes and the estimate functions end to end', () => {
         const consumerPath = fileURLToPath(
             new URL('./root-snapshot-subject-consumer.ts', import.meta.url),
         );
         const source = `
             import type {
-                MarketContext,
-                MarketSubject,
-                SubjectBoundMarketContext,
                 MarketContracts,
-                MarketStateData,
+                MarketEstimate,
+                OrderEstimate,
+                PositionEstimate,
             } from '../src/index.js';
-            import { Market, MarketUser, marketContext } from '../src/index.js';
+            import {
+                Market,
+                MarketPosition,
+                MarketUser,
+                OrderIntent,
+                VaultOrderIntent,
+                estimateMarket,
+                estimatePosition,
+                previewOrder,
+            } from '../src/index.js';
 
-            const bareFields = {} as Omit<MarketContext, 'subject'>;
-            export const bare: MarketContext = bareFields;
-            export const subject: MarketSubject = {
-                user: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-                isLong: true,
-            };
-            export const bound: SubjectBoundMarketContext = {
-                ...bareFields,
-                subject,
-                adl: { long: false, short: false },
-                collateralToken: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
-            };
-            export const contracts: MarketContracts = {
+            const contracts: MarketContracts = {
                 market: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
                 vault: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
                 token: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
             };
             export const loaded: Promise<Market> =
                 Market.load({} as Parameters<typeof Market.load>[0], contracts);
-            export const rebuilt: Market =
-                Market.fromData({} as Parameters<typeof Market.load>[0], {} as MarketStateData);
-            export const composed: MarketContext = marketContext(
-                rebuilt,
-                {} as MarketUser,
-                { isLong: true, price: bare.price },
+            export const pair: Promise<{ market: Market; user: MarketUser }> =
+                Market.loadWithUser(
+                    {} as Parameters<typeof Market.load>[0],
+                    contracts,
+                    'G',
+                );
+            declare const market: Market;
+            declare const user: MarketUser;
+            export const est: MarketEstimate = estimateMarket(market, 100n);
+            export const pos: PositionEstimate = estimatePosition(
+                market,
+                user.long,
+                100n,
             );
+            const intent = new OrderIntent(market, 'G', true);
+            export const prev: OrderEstimate = previewOrder(
+                market,
+                user.long,
+                intent.openMarket({ notional: 1n, margin: 1n }),
+                100n,
+            );
+            export const prevViaMethod: OrderEstimate = user.long.preview(
+                market,
+                intent.closePosition(),
+                100n,
+            );
+            export const row: MarketPosition = user.short;
+            export const vaultOp: string = VaultOrderIntent.create(
+                market,
+                'G',
+                0,
+                100n,
+            ).toOperation();
         `;
         const options: ts.CompilerOptions = {
             target: ts.ScriptTarget.ES2022,
