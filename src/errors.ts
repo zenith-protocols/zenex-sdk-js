@@ -1,5 +1,21 @@
-export enum ContractErrorType {
+/**
+ * Every error code the SDK can decode, one flat enum: Soroban host and
+ * transaction codes, the shared, token, vault, market, oracle,
+ * strategy-vault, governance, treasury, ownable/role-transfer and
+ * fee-abstraction domains, plus the SDK-side sentinels (negative, never on
+ * chain). Contract variant names are kept verbatim where they are unique
+ * across contracts; where two contracts reuse a name for different meanings
+ * (the oracle also has an `InvalidPrice`), the smaller domain carries a
+ * prefix naming its meaning. Resolve a raw code with
+ * `zenexErrorFromCode`.
+ */
+export enum ZenexErrorCode {
+    // SDK-side sentinels: negative, never emitted by a contract.
     UnknownError = -1000,
+    /** Quote/preview math rejected an input before any contract rule ran. */
+    QuoteInvalidInput = -1001,
+    /** A quoted settlement step left the i128 range; on chain this traps without a code. */
+    QuoteOverflow = -1002,
 
     // Transaction Submission Errors
     txSorobanInvalid = -24,
@@ -71,57 +87,158 @@ export enum ContractErrorType {
     VaultMaxDecimalsOffsetExceeded = 409,
     VaultMathOverflow = 410,
 
-    // Trading Errors (700-752)
+    // Market Errors (700-772): mirror market/src/errors.rs verbatim.
+    // --- config / construction ---
+    /** A config value is out of bounds, or a range/ordering invariant is violated. */
     InvalidConfig = 700,
-    MarketNotFound = 701,
-    MarketDisabled = 702,
-    MaxMarketsReached = 703,
-    InvalidPrice = 710,
-    StalePrice = 711,
-    PriceSlippage = 712,
+    /** Flat settlement price is not strictly positive. */
+    InvalidPrice = 701,
+    /** Illegal status transition, or the action requires a different operational status. */
+    InvalidStatus = 702,
+    /** An accrual-rate parameter (borrowing or funding) changed without a same-ledger `accrue`. */
+    MarketNotAccrued = 703,
+    /** Action halted by the operational status: `Frozen`, or `Retired` on the market paths. */
+    MarketFrozen = 704,
+    /** An `Increase` was executed while the market does not accept opens. */
+    IncreaseHalted = 705,
+    /** Retirement attempted while positions remain open. */
+    MarketNotCleared = 706,
+
+    // --- general ---
+    /** A number that must be non-negative is negative. */
+    NegativeValueNotAllowed = 710,
+
+    // --- position sizing / margin ---
+    /** Resulting position notional is below `min_position_notional`. */
+    NotionalBelowMinimum = 711,
+    /** Position notional (or an increase delta) exceeds `max_position_notional`. */
+    NotionalAboveMaximum = 712,
+    /** Equity below the initial-margin floor (open, increase, or withdraw). */
+    InsufficientMargin = 713,
+    /** Open interest would exceed the utilization cap. */
+    UtilizationExceeded = 714,
+    /** A side's open interest would exceed the `max_open_interest` ceiling. */
+    OpenInterestExceeded = 715,
+
+    // --- position lifecycle ---
+    /** No position exists for `(user, is_long)`. */
     PositionNotFound = 720,
-    PositionNotPending = 721,
-    NegativeValueNotAllowed = 723,
-    NotionalBelowMinimum = 724,
-    NotionalAboveMaximum = 725,
-    LeverageAboveMaximum = 726,
-    CollateralUnchanged = 727,
-    WithdrawalBreaksMargin = 728,
-    NotActionable = 731,
-    PositionTooNew = 732,
-    ActionNotAllowedForStatus = 733,
-    InvalidInput = 734,
-    InvalidStatus = 740,
-    ContractOnIce = 741,
-    ContractFrozen = 742,
-    ThresholdNotMet = 750,
-    UtilizationExceeded = 751,
-    FundingTooEarly = 752,
-    Expired = 760,
+    /** Requested close exceeds the position's unlocked notional. */
+    NotionalLocked = 721,
+    /** Liquidation attempted while equity is still above maintenance margin. */
+    NotLiquidatable = 722,
+    /** Decrease or ADL attempted while settled equity is below maintenance
+     * margin: a liquidatable position's only legal transition is `liquidate`. */
+    PositionLiquidatable = 723,
 
-    // Governance Errors (770-772)
-    GovNotQueued = 770,
-    GovNotUnlocked = 771,
-    GovInvalidDelay = 772,
+    // --- orders / price ---
+    /** No keeper order exists for `(user, id)`. */
+    OrderNotFound = 730,
+    /** Order `expiration` is behind the current ledger sequence. */
+    OrderExpired = 731,
+    /** Delta pair is not an allowed combination, a moved value is below its dust
+     * floor, a trigger kind carries a non-positive `trigger_price`, or an
+     * increase's `margin + exec_fee` escrow sum overflows. */
+    InvalidOrder = 732,
+    /** A side already holds `MAX_ORDERS_PER_SIDE` pending decrease orders. */
+    TooManyOrders = 733,
+    /** An order or vault-order `kind` discriminant is not a known variant. */
+    UnknownKind = 734,
+    /** Verified price predates the position or order (anti-replay). */
+    StalePrice = 740,
+    /** Fill price is worse than the order's `price_bound`. */
+    PriceBoundExceeded = 741,
+    /** Order `trigger_price` has not been crossed at the verified price. */
+    TriggerNotMet = 742,
 
-    // Price Verifier Errors (780-783)
-    PVInvalidData = 780,
-    PVInvalidPrice = 781,
-    PVPriceStale = 782,
-    PVInvalidStaleness = 783,
+    // --- vault orders ---
+    /** No vault order exists for `(user, id)`. */
+    VaultOrderNotFound = 750,
+    /** Vault order filled before its kind's lock cooldown elapsed. */
+    VaultOrderLocked = 751,
+    /** Vault order fill returned less than the order's `min_out`. */
+    MinOutNotMet = 752,
+    /** Deposit fill would push the vault balance above `max_vault_balance`. */
+    VaultBalanceExceeded = 753,
+    /** Redeem fill while a side's pending PnL exceeds `max_pnl_withdraw` of
+     * half the post-redeem vault balance. */
+    PendingPnlExceeded = 754,
+    /** A settlement's vault draw exceeds the vault's balance. */
+    VaultInsolvent = 755,
 
-    // Strategy Vault Errors (790-793)
-    StrategyInvalidAmount = 790,
-    SharesLocked = 791,
-    UnauthorizedStrategy = 792,
-    BelowMinDeposit = 793,
+    // --- funding ---
+    /** Claim attempted with no claimable funding balance. */
+    NothingToClaim = 760,
+
+    // --- ADL ---
+    /** ADL execution attempted while the PnL ratio is at or below the trigger. */
+    AdlNotTriggered = 770,
+    /** ADL close left the side's pending PnL under the clear target. */
+    AdlOvershoot = 771,
+    /** ADL close did not reduce the side's pending PnL. */
+    AdlNotEligible = 772,
+
+    // Shared admin (600): raised with the same name and meaning by every
+    // upgradeable contract (market, oracle, factory), so the bare code
+    // still names one condition.
+    UpgradeNotOwner = 600,
+
+    // Oracle Errors (780-793): the oracle owns the 78x/79x domain inherited
+    // from the price-verifier it replaces. Codes whose semantics carried over
+    // keep their numbers (780-783, 790, 793); the Lazer parser block
+    // (784-789) is retired, with 784 reassigned to the report-expiry reject
+    // that replaced that machinery.
+    OracleInvalidData = 780,
+    OracleInvalidPrice = 781,
+    OraclePriceStale = 782,
+    OracleInvalidStaleness = 783,
+    OracleReportExpired = 784,
+    OracleInvalidSpreadReduction = 785,
+    OracleFeedMismatch = 790,
+    OraclePriceAhead = 793,
+
+    // Strategy Vault Errors (800-801)
+    StrategyInvalidAmount = 800,
+    StrategyPnlExceedsAssets = 801,
+
+    // Governance Errors (810-812)
+    GovNotQueued = 810,
+    GovNotUnlocked = 811,
+    GovInvalidDelay = 812,
 
     // Treasury Errors (900)
     TreasuryInvalidRate = 900,
+
+    // OwnableError (2100-2102): OpenZeppelin ownable, raised by every
+    // owner-gated contract.
+    OwnerNotSet = 2100,
+    OwnershipTransferInProgress = 2101,
+    OwnerAlreadySet = 2102,
+
+    // RoleTransferError (2200-2203): OpenZeppelin two-step ownership
+    // transfer machinery.
+    NoPendingTransfer = 2200,
+    TransferInvalidLiveUntilLedger = 2201,
+    InvalidPendingAccount = 2202,
+    TransferExpired = 2203,
+
+    // Fee Abstraction Errors (5000-5006)
+    // Emitted by OpenZeppelin's stellar-fee-abstraction library inside the
+    // market router (the relay's fee-bump gateway); mirrored so relay
+    // simulations decode end-to-end.
+    FeeTokenNotAllowed = 5000,
+    FeeTokenAlreadyAllowed = 5001,
+    TokenCountOverflow = 5002,
+    FeeAbstractionInvalidFeeBounds = 5003,
+    NoTokensToSweep = 5004,
+    FeeAbstractionInvalidUser = 5005,
+    FeeAbstractionInvalidExpirationLedger = 5006,
 }
 
 const errorMessages: Record<number, string> = {
     [-1000]: 'Unknown contract error',
+    [-1001]: 'SDK rejected the input before contract math ran',
+    [-1002]: 'A quoted settlement step left the i128 range',
 
     // Transaction
     [-24]: 'Transaction contains invalid Soroban operations',
@@ -136,16 +253,16 @@ const errorMessages: Record<number, string> = {
     [-15]: 'Source account does not exist',
     [-14]: 'Insufficient balance to cover fees and operations',
     [-13]: 'Transaction authentication failed',
-    [-12]: 'Bad sequence number — account may have pending transactions',
+    [-12]: 'Bad sequence number; account may have pending transactions',
     [-11]: 'Transaction has no operations',
     [-10]: 'Transaction submitted after its validity window',
     [-9]: 'Transaction submitted before its validity window',
 
     // Host Function
     [-5]: 'Insufficient refundable fee for host function execution',
-    [-4]: 'Contract entry has been archived — restore it first',
+    [-4]: 'Contract entry has been archived; restore it first',
     [-3]: 'Resource limit exceeded (CPU, memory, or storage)',
-    [-2]: 'Host function trapped — contract panicked',
+    [-2]: 'Host function trapped; contract panicked',
     [-1]: 'Malformed host function invocation',
 
     // Common
@@ -193,60 +310,152 @@ const errorMessages: Record<number, string> = {
     [409]: 'Decimals offset exceeds maximum (10)',
     [410]: 'Vault math overflow',
 
-    // Trading
-    [700]: 'Trading config parameter out of valid range',
-    [701]: 'No market registered for this market ID',
-    [702]: 'Market is disabled — new positions cannot be opened',
-    [703]: 'Maximum number of markets reached',
-    [710]: 'Price verification failed or feed ID mismatch',
-    [711]: 'Price data is stale, predates position open time',
-    [712]: 'Fill price outside the user-supplied price_bound (slippage)',
-    [720]: 'Position not found',
-    [721]: 'Position is already filled — expected pending',
-    [723]: 'Parameter must be positive',
-    [724]: 'Notional size is below the minimum',
-    [725]: 'Notional size exceeds the maximum',
-    [726]: 'Leverage exceeds maximum (notional × margin > collateral)',
-    [727]: 'Collateral amount is unchanged',
-    [728]: 'Collateral withdrawal would breach margin requirement',
-    [731]: 'Position has no actionable trigger (fill, liquidation, SL, or TP)',
-    [732]: 'Position is too new to close — wait at least 30 seconds',
-    [733]: 'Action not allowed for current position status',
-    [734]: 'Malformed input (e.g. mismatched parallel vec lengths)',
-    [740]: 'Invalid or disallowed contract status value',
-    [741]: 'Contract is on ice — new positions are blocked',
-    [742]: 'Contract is frozen — all position operations are blocked',
-    [750]: 'PnL threshold not met for status change',
-    [751]: 'Position would exceed utilization cap',
-    [752]: 'Funding can only be applied once per hour',
-    [760]: 'Transaction expired (current ledger past expiration_ledger)',
+    // Market
+    [700]: 'Market config value out of bounds or invariant violated',
+    [701]: 'Flat settlement price is not strictly positive',
+    [702]: 'Illegal status transition or action requires a different status',
+    [703]: 'Borrowing or funding rate changed without a same-ledger accrue',
+    [704]: 'Action halted by operational status (Frozen, or Retired on the market paths)',
+    [705]: 'Increase executed while the market does not accept opens',
+    [706]: 'Retirement attempted while positions remain open',
+    [710]: 'A number that must be non-negative is negative',
+    [711]: 'Resulting position notional is below min_position_notional',
+    [712]: 'Position notional exceeds max_position_notional',
+    [713]: 'Equity below the initial-margin floor',
+    [714]: 'Open interest would exceed the utilization cap',
+    [715]: 'Open interest would exceed the max_open_interest ceiling',
+    [720]: 'No position exists for (user, is_long)',
+    [721]: 'Requested close exceeds the unlocked notional',
+    [722]: 'Liquidation attempted while equity is above maintenance margin',
+    [723]: 'Decrease or ADL attempted on a liquidatable position (equity below maintenance margin)',
+    [730]: 'No keeper order exists for (user, id)',
+    [731]: 'Order expiration is behind the current ledger sequence',
+    [732]: 'Invalid order (no-op shape, dust floor, missing trigger price, or escrow-sum overflow)',
+    [733]: 'Side already holds the maximum pending decrease orders',
+    [734]: 'Order kind discriminant is not a known variant',
+    [740]: 'Verified price predates the position or order (anti-replay)',
+    [741]: 'Fill price is worse than the order price_bound',
+    [742]: 'Order trigger_price has not been crossed at the verified price',
+    [750]: 'No vault order exists for (user, id)',
+    [751]: 'Vault order filled before its lock cooldown elapsed',
+    [752]: 'Vault order fill returned less than the order min_out',
+    [753]: 'Deposit fill would push the vault balance above max_vault_balance',
+    [754]: 'Redeem fill would leave pending PnL above the max_pnl_withdraw gate',
+    [755]: 'Settlement vault draw exceeds the vault balance',
+    [760]: 'Claim attempted with no claimable funding balance',
+    [770]: 'ADL execution attempted while the PnL ratio is at or below the trigger',
+    [771]: 'ADL close left the pending PnL under the clear target',
+    [772]: 'ADL close did not reduce the pending PnL',
 
-    // Governance
-    [770]: 'Queued call not found or has expired',
-    [771]: 'Timelock delay has not yet passed',
-    [772]: 'Invalid delay value — must be between 1 second and 60 days',
-
-    // Price Verifier
-    [780]: 'Price update signature or format is invalid',
-    [781]: 'Price confidence exceeds bounds or required fields missing',
-    [782]: 'Price update is stale (exceeds max staleness threshold)',
-    [783]: 'max_staleness exceeds MAX_STALENESS_SECONDS cap (30)',
+    // Oracle
+    [780]: 'Verified report body failed decoding',
+    [781]: 'Non-positive price side, crossed book (bid > ask), or int192 overflow',
+    [782]: 'Price observation is older than the selected staleness window (trade_staleness for fills, close_staleness for gap-closing calls)',
+    [783]: 'Staleness pair violates 3 <= trade_staleness <= 15 or trade_staleness <= close_staleness <= 120 seconds',
+    [784]: 'Ledger clock has passed the report expiresAt',
+    [785]: 'spread_reduction_factor outside [0, SCALAR_18]',
+    [790]: 'Report prices a different stream than the feed anchor',
+    [793]: 'Report validity window not open, or observation more than trade_staleness ahead of the ledger clock (the forward allowance never widens with the call class)',
 
     // Strategy Vault
-    [790]: 'Invalid amount for strategy operation',
-    [791]: 'Shares are still locked — wait for lock period to expire',
-    [792]: 'Caller is not the authorized strategy contract',
-    [793]: 'Deposit/mint asset amount is below the vault min_deposit',
+    [800]: 'Invalid amount for strategy operation',
+    [801]: 'Strategy withdrawal exceeds the vault assets',
+
+    // Governance
+    [810]: 'Queued call not found or has expired',
+    [811]: 'Timelock delay has not yet passed',
+    [812]: 'Invalid delay value (must be between 1 second and 60 days)',
+
+    // Shared admin
+    [600]: 'upgrade called by an operator that is not the contract owner',
 
     // Treasury
-    [900]: 'Fee rate out of range — must be between 0 and 50%',
+    [900]: 'Fee rate out of range (must be between 0 and 50%)',
+
+    // Ownable
+    [2100]: 'Contract owner is not set',
+    [2101]: 'An ownership transfer is already in progress',
+    [2102]: 'Contract owner is already set',
+
+    // Role transfer
+    [2200]: 'No matching pending ownership transfer',
+    [2201]: 'Invalid live_until_ledger for the ownership transfer',
+    [2202]: 'Caller is not the pending owner',
+    [2203]: 'The pending ownership transfer has expired',
+
+    // Fee Abstraction (OpenZeppelin stellar-fee-abstraction)
+    [5000]: 'Fee token is not on the allowlist',
+    [5001]: 'Fee token is already on the allowlist',
+    [5002]: 'Fee token count overflow',
+    [5003]: 'Relayer fee is outside the signed fee bounds',
+    [5004]: 'No tokens to sweep',
+    [5005]: 'Invalid user for fee abstraction',
+    [5006]: 'Invalid expiration ledger for fee abstraction',
 };
 
-export class ContractError extends Error {
-    public type: ContractErrorType;
+/**
+ * The one error shape the SDK reports, from a failed contract call, an RPC
+ * response, or the SDK's own quote/preview gates. `code` carries the
+ * numeric code. The message defaults to the code's entry in
+ * `errorMessages`, or a fallback string when the code is not recognized.
+ */
+export class ZenexError extends Error {
+    public code: ZenexErrorCode;
 
-    constructor(type: ContractErrorType) {
-        super(errorMessages[type] ?? `Contract error ${type}`);
-        this.type = type;
+    constructor(code: ZenexErrorCode, message?: string) {
+        super(message ?? errorMessages[code] ?? `Contract error ${code}`);
+        this.code = code;
     }
 }
+
+/**
+ * Resolve a raw on-chain error code to a ZenexError.
+ *
+ * The per-contract code namespaces are disjoint (shared admin 600,
+ * market 700-772, oracle 780-793, strategy-vault 800-801,
+ * governance 810-812, treasury 900, ownable 2100-2102, role transfer
+ * 2200-2203, fee-abstraction 5000-5006), so every code resolves without a
+ * hint.
+ */
+export function zenexErrorFromCode(code: number): ZenexError {
+    if (code in ZenexErrorCode) {
+        return new ZenexError(code as ZenexErrorCode);
+    }
+    return new ZenexError(ZenexErrorCode.UnknownError);
+}
+
+/**
+ * Resolve a quote/preview gate to a `ZenexError`: the canonical message for
+ * a contract code, the gate's own `reason` for an SDK sentinel — sentinel
+ * reasons are built in place and carry more context than the generic
+ * sentinel message.
+ */
+export function zenexErrorFromGate(code: number, reason: string): ZenexError {
+    if (
+        code === ZenexErrorCode.QuoteInvalidInput ||
+        code === ZenexErrorCode.QuoteOverflow
+    ) {
+        return new ZenexError(code, reason);
+    }
+    return zenexErrorFromCode(code);
+}
+
+// Soroban contract error codes are u32; anything larger is not a real code.
+const MAXIMUM_ERROR_CODE = 4_294_967_295;
+
+// Strictly the host's `Error(Contract, #N)` shape. Bare `#N` fragments in
+// diagnostics are NOT trusted as contract codes.
+const CONTRACT_ERROR_PATTERN = /Error\(Contract, #(\d{1,10})\)/;
+
+/**
+ * The contract error code inside a raw RPC simulation or diagnostic string,
+ * or `undefined` when the strict `Error(Contract, #N)` shape is absent or the
+ * number is not a valid u32. Feed the result to `zenexErrorFromCode`.
+ */
+export function parseContractErrorCode(rpcError: string): number | undefined {
+    const match = CONTRACT_ERROR_PATTERN.exec(rpcError);
+    if (match?.[1] === undefined) return undefined;
+    const code = Number(match[1]);
+    return Number.isSafeInteger(code) && code <= MAXIMUM_ERROR_CODE ? code : undefined;
+}
+

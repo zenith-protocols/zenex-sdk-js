@@ -1,5 +1,5 @@
 // =============================================================================
-// Zenex SDK v2 - Public API
+// Zenex SDK - Public API
 // =============================================================================
 
 import { rpc } from '@stellar/stellar-sdk';
@@ -22,85 +22,141 @@ export interface Network {
     opts?: rpc.Server.Options;
 }
 
-// Types - Asset
-export type { Asset } from './asset.js';
-export { getAssetKey, getAssetName, assetsEqual, assetToScVal, assetFromScVal, assetFromKey } from './asset.js';
+// Typed event surface (types only; consumers own their decode path)
+export { ZenexContractType } from './base_event.js';
+export type { BaseZenexEvent, ZenexEvent } from './base_event.js';
 
-// Base Event types, normalizers, and unified decoder
-export { ZenexContractType, normalizeRpc, normalizeMercury, normalizeGoldsky, decodeEvent } from './base_event.js';
-export type { BaseZenexEvent, NormalizedEvent, MercuryWebhookEvent, MercuryScVal, GoldskyWebhookEvent, ZenexEvent } from './base_event.js';
+// =============================================================================
+// Market Module (order -> keeper-execute contract)
+// =============================================================================
 
-// Trading Module
 export {
-    TradingContract,
-    Position,
-    Market,
-    TradingConfig,
-    ContractStatus,
-    TradingEventType,
-    OrderValidationError,
-    decodeTradingEvent,
-} from './trading/index.js';
+    // Contract binding
+    MarketContract,
+    // Core enums, sentinels, converters, and parsers
+    Status,
+    OrderKind,
+    VaultOrderKind,
+    FULL_CLOSE,
+    marketConfigToScVal,
+    parseSidePair,
+    parseOrder,
+    parseVaultOrder,
+    parsePosition,
+    parseMarketData,
+    parseAdlState,
+    parseMarketConfig,
+    // Events
+    MarketEventType,
+} from './contracts/market/index.js';
 
 export type {
-    FeeBreakdown,
-    PositionPnL,
-    PositionBreakdown,
-    PositionData,
-    PositionRaw,
-    ValidateOrderParams,
-    GrossCollateralParams,
-    GrossCollateralResult,
-    MarketConfig,
-    MarketData,
-    TradingConfigData,
-    TradingInstanceData,
-    PlaceLimitArgs,
-    OpenMarketArgs,
-    ClosePositionArgs,
-    SetTriggersArgs,
-    ModifyCollateralArgs,
-    ExecuteArgs,
+    // Argument interfaces
     DeployArgs,
-    BaseTradingEvent,
-    TradingSetConfigEvent,
-    TradingSetMarketEvent,
-    TradingDelMarketEvent,
-    TradingSetStatusEvent,
-    TradingOpenMarketEvent,
-    TradingPlaceLimitEvent,
-    TradingClosePositionEvent,
-    TradingFillLimitEvent,
-    TradingLiquidationEvent,
-    TradingTakeProfitEvent,
-    TradingStopLossEvent,
-    TradingModifyCollateralEvent,
-    TradingSetTriggersEvent,
-    TradingRefundPositionEvent,
-    TradingApplyFundingEvent,
-    TradingADLTriggeredEvent,
-    TradingEvent,
-    TradingConfigArgs,
-    MarketConfigArgs,
-} from './trading/index.js';
+    // Core types
+    Order,
+    VaultOrder,
+    Position,
+    SidePair,
+    MarketData,
+    AdlState,
+    MarketConfig,
+    // Events
+    BaseMarketEvent,
+    MarketCreateOrderEvent,
+    MarketCancelOrderEvent,
+    MarketCreateVaultOrderEvent,
+    MarketCancelVaultOrderEvent,
+    MarketDepositFillEvent,
+    MarketRedeemFillEvent,
+    MarketClaimFundingEvent,
+    MarketAdlUpdateEvent,
+    MarketFundingAccrualEvent,
+    MarketBorrowingAccrualEvent,
+    MarketStatusUpdateEvent,
+    MarketConfigUpdateEvent,
+    MarketTerminalPriceUpdateEvent,
+    MarketOpenFillEvent,
+    MarketIncreaseFillEvent,
+    MarketDecreaseFillEvent,
+    MarketCloseFillEvent,
+    MarketLiquidationEvent,
+    MarketEvent,
+    MarketInstanceState,
+} from './contracts/market/index.js';
 
-// Factory Module
+export { parseMarketInstance } from './contracts/market/index.js';
+
+// Instance-storage walkers, one per contract that keeps instance state.
+// Each is a single ledger key holding every value below, including `Owner`.
+export { instanceStorage } from './contracts/instance.js';
+export type { InstanceStorage } from './contracts/instance.js';
 export {
-    FactoryContract,
-} from './factory/index.js';
+    parseOracleInstance,
+    type OracleInstanceState,
+} from './contracts/oracle/index.js';
+export {
+    parseFactoryInstance,
+    type FactoryInstanceState,
+} from './contracts/factory/index.js';
+export {
+    parseGovernanceInstance,
+    type GovernanceInstanceState,
+} from './contracts/governance/index.js';
+export {
+    parseTreasuryInstance,
+    type TreasuryInstanceState,
+} from './contracts/treasury/index.js';
+
+// =============================================================================
+// State reads (getLedgerEntries, one round trip each)
+// =============================================================================
+
+export { MarketStateError } from './entries.js';
+export type { MarketStateFailureCode } from './entries.js';
+
+// =============================================================================
+// Market Router Module (stateless batching + create-and-fill flows)
+// =============================================================================
+
+export {
+    MarketRouterContract,
+    callToScVal,
+    createOrderCall,
+    parseCallOutcome,
+    UNTYPED_FAILURE,
+} from './contracts/router/index.js';
+
+export type {
+    Call,
+    CallOutcome,
+    OrderParams,
+    CreateAndFillWithFeeArgs,
+    MulticallWithFeeArgs,
+} from './contracts/router/index.js';
+
+// =============================================================================
+// Factory Module
+// =============================================================================
+
+export { FactoryContract, FactoryEventType } from './contracts/factory/index.js';
 
 export type {
     FactoryInitMeta,
-    FactoryDeployArgs,
     FactoryConstructorArgs,
-} from './factory/index.js';
+    BaseFactoryEvent,
+    FactoryDeployEvent,
+    FactoryEvent,
+} from './contracts/factory/index.js';
 
+// =============================================================================
 // Governance Module (generic timelock)
+// =============================================================================
+
 export {
     GovernanceContract,
     GovernanceEventType,
-    decodeGovernanceEvent,
-} from './governance/index.js';
+} from './contracts/governance/index.js';
 
 export type {
     QueuedCall,
@@ -112,75 +168,101 @@ export type {
     GovernanceStatusSetEvent,
     GovernanceDelaySetEvent,
     GovernanceEvent,
-} from './governance/index.js';
+} from './contracts/governance/index.js';
 
-// Price Verifier Module
-export {
-    PriceVerifierContract,
-} from './price-verifier/index.js';
+// =============================================================================
+// Oracle Module (Chainlink Data Streams verifier)
+// =============================================================================
+
+export { OracleContract } from './contracts/oracle/index.js';
 
 export type {
-    PriceVerifierPriceData,
-    PriceVerifierConstructorArgs,
-} from './price-verifier/index.js';
+    OraclePriceData,
+    OracleConstructorArgs,
+} from './contracts/oracle/index.js';
 
+// =============================================================================
 // Treasury Module
-export {
-    TreasuryContract,
-} from './treasury/index.js';
+// =============================================================================
 
-export type {
-    TreasuryConstructorArgs,
-} from './treasury/index.js';
+export { TreasuryContract, parseTreasuryRate } from './contracts/treasury/index.js';
 
-// Smart Account Module
-export {
-    SmartAccountContract,
-    signerToScVal,
-    contextRuleTypeToScVal,
-    sessionConfigToScVal,
-} from './smart-account/index.js';
+export type { TreasuryConstructorArgs } from './contracts/treasury/index.js';
 
-export type {
-    Signer as SmartAccountSigner,
-    ContextRuleType,
-    SessionConfig,
-    AddContextRuleArgs,
-} from './smart-account/index.js';
-
+// =============================================================================
 // Vault Module
+// =============================================================================
+
 export {
     VaultContract,
-    VaultState,
     VaultEventType,
-    decodeVaultEvent,
-} from './vault/index.js';
+    parseVaultInstance,
+} from './contracts/vault/index.js';
+
+
 
 export type {
     VaultConstructorArgs,
-    VaultStateData,
+    VaultInstanceState,
     BaseVaultEvent,
+    VaultDepositEvent,
+    VaultWithdrawEvent,
     VaultStrategyWithdrawEvent,
     VaultEvent,
-} from './vault/index.js';
+} from './contracts/vault/index.js';
 
-// Oracle
-export { getOraclePrice, getOracleDecimals } from './oracle.js';
-export type { PriceData } from './oracle.js';
+// =============================================================================
+// Errors / Response Parsing
+// =============================================================================
 
-// Response Parser / Errors
 export {
-    ContractError,
-    ContractErrorType,
+    ZenexError,
+    ZenexErrorCode,
+    zenexErrorFromCode,
     parseError,
     parseResult,
 } from './response_parser.js';
+export { parseContractErrorCode } from './errors.js';
+
+// =============================================================================
+// Ledger Keys (direct storage reads)
+// =============================================================================
+
+export {
+    enumStorageKeyWithAddress,
+    decodeEntryKey,
+    contractInstanceLedgerKey,
+    persistentLedgerKey,
+    temporaryLedgerKey,
+} from './contracts/keys.js';
+export {
+    marketDataLedgerKey,
+    marketPriceCacheLedgerKey,
+    marketPositionLedgerKey,
+    marketVaultOrderLedgerKey,
+    marketOrderCounterLedgerKey,
+    marketClaimableFundingLedgerKey,
+    marketOrderLedgerKey,
+} from './contracts/market/keys.js';
+
+// Token reads. Any holder, any token. Not a Zenex contract binding.
+export * from './token.js';
 
 // Fixed-Point Math
-export * as FixedMath from './math.js';
+export * as FixedMath from './math/index.js';
 
 // Simulation
 export { simulateAndParse } from './simulate.js';
+
+// =============================================================================
+// Market tier: loaded chain objects, order intents, and float estimates.
+// Estimates render approximate numbers for display only; never feed a float
+// back into a transaction — parse user input with `parseAtomic`.
+// =============================================================================
+
+export * from './math/index.js';
+export * from './trading/index.js';
+
 
 // =============================================================================
 // Browser compatibility

@@ -1,75 +1,30 @@
-// Classes
-export { TradingContract } from './trading_contract.js';
-export { Position } from './trading_position.js';
-export { Market } from './trading_market.js';
-export { TradingConfig } from './trading_config.js';
+// The trading domain: loaded chain objects (Market, MarketUser,
+// MarketPosition), the order intents, and the float estimate tier. The
+// exact fill engine lives under ./internal/ and is deliberately NOT
+// re-exported here; it is reachable for advanced callers but carries no
+// API promises.
 
-// Contract types & enums
+export { loadTreasuryInstance, loadTreasuryRate } from './treasury.js';
+export { Price } from './price.js';
+export type { PriceInput } from './price.js';
+export { Market } from './market.js';
+export type { MarketContracts } from './market.js';
+export { MarketUser } from './user.js';
+export type { PendingOrder } from './user.js';
+export { MarketPosition } from './position.js';
 export {
-    ContractStatus,
-} from './trading_contract.js';
-
-export type {
-    PlaceLimitArgs,
-    OpenMarketArgs,
-    ClosePositionArgs,
-    SetTriggersArgs,
-    ModifyCollateralArgs,
-    ExecuteArgs,
-    DeployArgs,
-    TradingConfigArgs,
-    MarketConfigArgs,
-} from './trading_contract.js';
-
-// Position types
-export type {
-    FeeBreakdown,
-    PositionPnL,
-    PositionBreakdown,
-    PositionData,
-    PositionRaw,
-    ValidateOrderParams,
-    GrossCollateralParams,
-    GrossCollateralResult,
-} from './trading_position.js';
-
-export { OrderValidationError } from './trading_position.js';
-
-// Market types
-export type {
-    MarketConfig,
-    MarketData,
-} from './trading_market.js';
-
-// Config types
-export type {
-    TradingConfigData,
-    TradingInstanceData,
-} from './trading_config.js';
-
-// Events
-export {
-    TradingEventType,
-    decodeTradingEvent,
-} from './trading_events.js';
-
-export type {
-    BaseTradingEvent,
-    TradingSetConfigEvent,
-    TradingSetMarketEvent,
-    TradingDelMarketEvent,
-    TradingSetStatusEvent,
-    TradingOpenMarketEvent,
-    TradingPlaceLimitEvent,
-    TradingClosePositionEvent,
-    TradingFillLimitEvent,
-    TradingLiquidationEvent,
-    TradingTakeProfitEvent,
-    TradingStopLossEvent,
-    TradingModifyCollateralEvent,
-    TradingSetTriggersEvent,
-    TradingRefundPositionEvent,
-    TradingApplyFundingEvent,
-    TradingADLTriggeredEvent,
-    TradingEvent,
-} from './trading_events.js';
+    OrderIntent,
+    maxMarginForBalance,
+    previewOrder,
+    isDecreaseOrderKind,
+    isIncreaseOrderKind,
+    isMarketOrderKind,
+    isTriggerOrderKind,
+    orderPriceBound,
+} from './order.js';
+export type { OrderEstimate } from './order.js';
+export { estimateMarket } from './market_est.js';
+export type { MarketEstimate, SideRatesEstimate } from './market_est.js';
+export { estimatePosition } from './position_est.js';
+export type { PositionEstimate } from './position_est.js';
+export { VaultOrderIntent } from './vault_order.js';

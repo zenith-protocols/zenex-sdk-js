@@ -7,41 +7,56 @@ import {
     xdr,
 } from '@stellar/stellar-sdk';
 import { Network } from './index.js';
+import { parseError } from './response_parser.js';
 
 // Dummy account for simulations (doesn't need to exist on chain)
-const SIMULATION_ACCOUNT = 'GDMVSPSKEUOTRFSJH2SXVUNB2JGORKDTWBMOP5OZJZP4GKRQUQWFJO4Y';
+const SIMULATION_ACCOUNT =
+    'GDMVSPSKEUOTRFSJH2SXVUNB2JGORKDTWBMOP5OZJZP4GKRQUQWFJO4Y';
 const SIMULATION_SEQUENCE = '123';
 
 /**
- * Simulate a contract call and parse the result
- * @param network - Network configuration
- * @param operation - Base64 encoded XDR operation
- * @param parser - Function to parse the result
- * @returns Parsed result and latest ledger
+ * Simulate `operation` against `network` and decode the return value with
+ * `parser`.
+ *
+ * Throws when the simulation needs a state restore instead of returning a
+ * result. The caller must restore the archived ledger entries and retry.
+ * Throws with the decoded message when the simulation itself fails. Throws
+ * when the simulation succeeds but carries no return value.
+ * @param network - Network configuration and RPC connection.
+ * @param operation - The contract call, as a base64-encoded XDR operation.
+ * @param parser - Function that decodes the base64 XDR return value.
+ * @returns The parsed result and the ledger sequence the simulation ran
+ * against.
  */
 export async function simulateAndParse<T>(
     network: Network,
     operation: string,
-    parser: (result: string) => T
+    parser: (result: string) => T,
 ): Promise<{ result: T; latestLedger: number }> {
     const stellarRpc = new rpc.Server(network.rpc, network.opts);
-    const account = new Account(SIMULATION_ACCOUNT, SIMULATION_SEQUENCE);
+    const transaction = new TransactionBuilder(
+        new Account(SIMULATION_ACCOUNT, SIMULATION_SEQUENCE),
+        {
+            networkPassphrase: network.passphrase,
+            fee: BASE_FEE,
+            timebounds: { maxTime: TimeoutInfinite, minTime: 0 },
+        },
+    )
+        .addOperation(xdr.Operation.fromXDR(operation, 'base64'))
+        .build();
 
-    const txBuilder = new TransactionBuilder(account, {
-        networkPassphrase: network.passphrase,
-        fee: BASE_FEE,
-        timebounds: { maxTime: TimeoutInfinite, minTime: 0 },
-    }).addOperation(xdr.Operation.fromXDR(operation, 'base64'));
-
-    const transaction = txBuilder.build();
     const simulation = await stellarRpc.simulateTransaction(transaction);
-
-    if (rpc.Api.isSimulationSuccess(simulation) && simulation.result && simulation.result.retval) {
-        return {
-            result: parser(simulation.result.retval.toXDR('base64')),
-            latestLedger: simulation.latestLedger,
-        };
+    if (rpc.Api.isSimulationRestore(simulation)) {
+        throw new Error('Simulation failed: restore required');
     }
-
-    throw new Error(`Simulation failed: ${JSON.stringify(simulation)}`);
+    if (rpc.Api.isSimulationError(simulation)) {
+        throw new Error(`Simulation failed: ${parseError(simulation).message}`);
+    }
+    if (!simulation.result?.retval) {
+        throw new Error('Simulation failed: no return value');
+    }
+    return {
+        result: parser(simulation.result.retval.toXDR('base64')),
+        latestLedger: simulation.latestLedger,
+    };
 }

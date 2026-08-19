@@ -1,23 +1,39 @@
 import { rpc } from '@stellar/stellar-sdk';
-import { ContractError, ContractErrorType } from './errors.js';
+import {
+    ZenexError,
+    ZenexErrorCode,
+    zenexErrorFromCode,
+    parseContractErrorCode,
+} from './errors.js';
 
-export { ContractError, ContractErrorType } from './errors.js';
+export { ZenexError, ZenexErrorCode, zenexErrorFromCode } from './errors.js';
 
+/**
+ * Parse a failed simulation, send-transaction, or get-transaction response
+ * into a ZenexError.
+ *
+ * Never throws. Returns a ZenexError with type `UnknownError` when the
+ * response carries no recognizable contract error code.
+ */
 export function parseError(
     errorResponse:
         | rpc.Api.GetFailedTransactionResponse
         | rpc.Api.SendTransactionResponse
         | rpc.Api.SimulateTransactionErrorResponse
-): ContractError {
+): ZenexError {
+    const resolve = (code: number): ZenexError | undefined => {
+        const resolved = zenexErrorFromCode(code);
+        return resolved.code === ZenexErrorCode.UnknownError ? undefined : resolved;
+    };
+
     // Simulation Error
     if ('id' in errorResponse) {
-        const match = errorResponse.error.match(/Error\(Contract, #(\d+)\)/);
-        if (match) {
-            const errorValue = parseInt(match[1], 10);
-            if (errorValue in ContractErrorType)
-                return new ContractError(errorValue as ContractErrorType);
+        const code = parseContractErrorCode(errorResponse.error);
+        if (code !== undefined) {
+            const resolved = resolve(code);
+            if (resolved) return resolved;
         }
-        return new ContractError(ContractErrorType.UnknownError);
+        return new ZenexError(ZenexErrorCode.UnknownError);
     }
 
     // Send Transaction Error
@@ -31,14 +47,13 @@ export function parseError(
                     .tr()
                     .invokeHostFunctionResult()
                     .switch().value;
-                if (hostFunctionError in ContractErrorType)
-                    return new ContractError(hostFunctionError as ContractErrorType);
+                const resolved = resolve(hostFunctionError);
+                if (resolved) return resolved;
             }
         } else {
             const txErrorValue = errorResponse.errorResult.result().switch().value - 7;
-            if (txErrorValue in ContractErrorType) {
-                return new ContractError(txErrorValue as ContractErrorType);
-            }
+            const resolved = resolve(txErrorValue);
+            if (resolved) return resolved;
         }
     }
 
@@ -54,20 +69,24 @@ export function parseError(
                     .tr()
                     .invokeHostFunctionResult()
                     .switch().value;
-                if (hostFunctionError in ContractErrorType)
-                    return new ContractError(hostFunctionError as ContractErrorType);
+                const resolved = resolve(hostFunctionError);
+                if (resolved) return resolved;
             }
         } else {
             const txErrorValue = txResult.switch().value - 7;
-            if (txErrorValue in ContractErrorType) {
-                return new ContractError(txErrorValue as ContractErrorType);
-            }
+            const resolved = resolve(txErrorValue);
+            if (resolved) return resolved;
         }
     }
 
-    return new ContractError(ContractErrorType.UnknownError);
+    return new ZenexError(ZenexErrorCode.UnknownError);
 }
 
+/**
+ * Decode the return value of a successful simulation or transaction, using
+ * `parser` to decode the XDR. Returns `undefined` when the response carries
+ * no return value.
+ */
 export function parseResult<T>(
     response: rpc.Api.SimulateTransactionSuccessResponse | rpc.Api.GetSuccessfulTransactionResponse,
     parser: (xdr: string) => T
