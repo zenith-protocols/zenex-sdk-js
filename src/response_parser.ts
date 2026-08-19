@@ -3,6 +3,7 @@ import {
     ZenexError,
     ZenexErrorCode,
     zenexErrorFromCode,
+    parseContractErrorCode,
 } from './errors.js';
 
 export { ZenexError, ZenexErrorCode, zenexErrorFromCode } from './errors.js';
@@ -27,9 +28,9 @@ export function parseError(
 
     // Simulation Error
     if ('id' in errorResponse) {
-        const match = errorResponse.error.match(/Error\(Contract, #(\d+)\)/);
-        if (match) {
-            const resolved = resolve(parseInt(match[1], 10));
+        const code = parseContractErrorCode(errorResponse.error);
+        if (code !== undefined) {
+            const resolved = resolve(code);
             if (resolved) return resolved;
         }
         return new ZenexError(ZenexErrorCode.UnknownError);

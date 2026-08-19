@@ -73,7 +73,6 @@ function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
 
 function price(): PriceData {
     return {
-        feedId: Buffer.alloc(32, 1),
         bid: 1_000_000_000n,
         ask: 1_000_000_000n,
         publishTime: 1n,

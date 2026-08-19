@@ -139,7 +139,6 @@ describe('MarketUser.load', () => {
 
 describe('marketContext', () => {
     const price: PriceData = {
-        feedId: Buffer.alloc(32, 1),
         bid: 100n,
         ask: 101n,
         publishTime: 1_000n,

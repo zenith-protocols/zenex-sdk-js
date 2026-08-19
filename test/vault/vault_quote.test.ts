@@ -279,15 +279,8 @@ function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
     };
 }
 
-function feedId(id: bigint): Buffer {
-    const bytes = Buffer.alloc(32);
-    bytes.writeBigUInt64BE(id, 24);
-    return bytes;
-}
-
 function price(overrides: Partial<PriceData> = {}): PriceData {
     return {
-        feedId: feedId(1n),
         bid: 1_000_000_000n,
         ask: 1_000_000_000n,
         publishTime: 2n,
@@ -377,7 +370,6 @@ function marketContext(id: string): {
                 10_000_000_000_000n,
         }),
         price: price({
-            feedId: feedId(inputs.feed_id as bigint),
             bid: inputs.bid as bigint,
             ask: inputs.ask as bigint,
             publishTime: inputs.publish_time as bigint,

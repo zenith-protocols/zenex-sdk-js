@@ -169,10 +169,7 @@ function config(overrides: Partial<MarketConfig> = {}): MarketConfig {
 }
 
 function price(inputs: Record<string, unknown>): PriceData {
-    const feedId = Buffer.alloc(32);
-    feedId.writeBigUInt64BE(inputs.feed_id as bigint, 24);
     return {
-        feedId,
         bid: inputs.bid as bigint,
         ask: inputs.ask as bigint,
         publishTime: (inputs.publish_time ?? 1n) as bigint,

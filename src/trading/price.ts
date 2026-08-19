@@ -45,7 +45,6 @@ export type PriceInput = Price | bigint;
 export function resolvePrice(input: PriceInput): PriceData {
     const price = typeof input === 'bigint' ? Price.from(input) : input;
     return {
-        feedId: new Uint8Array(32),
         bid: price.bid,
         ask: price.ask,
         publishTime: price.publishTime,
