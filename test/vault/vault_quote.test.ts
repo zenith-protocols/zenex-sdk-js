@@ -455,6 +455,7 @@ describe('trading vault fill sequence', () => {
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
             reason: expect.stringContaining('#751'),
+            contractCode: 751,
         });
     });
 
@@ -469,6 +470,7 @@ describe('trading vault fill sequence', () => {
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
             reason: expect.stringContaining('#740'),
+            contractCode: 740,
         });
     });
 
@@ -483,6 +485,7 @@ describe('trading vault fill sequence', () => {
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
             reason: expect.stringContaining('#740'),
+            contractCode: 740,
         });
     });
 
@@ -507,6 +510,7 @@ describe('trading vault fill sequence', () => {
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
             reason: expect.stringContaining('#740'),
+            contractCode: 740,
         });
     });
 
@@ -521,6 +525,7 @@ describe('trading vault fill sequence', () => {
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
             reason: expect.stringContaining('#740'),
+            contractCode: 740,
         });
     });
 
@@ -535,6 +540,7 @@ describe('trading vault fill sequence', () => {
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
             reason: expect.stringContaining('#800'),
+            contractCode: 800,
         });
     });
 
@@ -589,6 +595,7 @@ describe('trading vault fill sequence', () => {
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
             reason: expect.stringContaining('#752'),
+            contractCode: 752,
         });
     });
 

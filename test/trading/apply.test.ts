@@ -470,7 +470,7 @@ describe('applyOrder gates and rests', () => {
 
         expect(result).toEqual({
             kind: 'gate',
-            code: 0,
+            code: -1001,
             reason: 'order side does not match the snapshot subject',
             ledger: 1_000,
         });

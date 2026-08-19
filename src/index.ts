@@ -218,12 +218,11 @@ export type {
 export {
     ContractError,
     ContractErrorType,
-    MarketError,
     contractErrorFromCode,
     parseError,
     parseResult,
 } from './response_parser.js';
-export { marketErrorMessages, parseContractErrorCode } from './errors.js';
+export { parseContractErrorCode } from './errors.js';
 
 // =============================================================================
 // Ledger Keys (direct storage reads)

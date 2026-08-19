@@ -98,7 +98,7 @@ export function evaluateVaultWithdrawGates(
 
 function caughtGateUnavailable<T>(error: unknown): QuoteResult<T> {
     if (error instanceof VaultProtocolGateError) {
-        return unavailable('CONTRACT_GATE', error.message);
+        return unavailable('CONTRACT_GATE', error.message, error.code);
     }
     if (
         error instanceof RangeError &&
@@ -483,7 +483,7 @@ function prepareContext(input: VaultQuoteContext): PreparedVaultContext {
 
 function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
     if (error instanceof VaultProtocolGateError) {
-        return unavailable('CONTRACT_GATE', error.message);
+        return unavailable('CONTRACT_GATE', error.message, error.code);
     }
     if (
         error instanceof RangeError &&

@@ -1,13 +1,21 @@
 /**
- * Non-market contract error codes: Soroban host and transaction codes, plus
- * the shared, token, vault, oracle, strategy-vault, governance, treasury and
- * fee-abstraction domains, plus the shared admin and OpenZeppelin
- * ownable/role-transfer domains. Market codes (700-772) live in `MarketError`
- * instead. Resolve a raw code with `contractErrorFromCode`. Do not match on
- * codes in this enum directly.
+ * Every error code the SDK can decode, one flat enum: Soroban host and
+ * transaction codes, the shared, token, vault, market, oracle,
+ * strategy-vault, governance, treasury, ownable/role-transfer and
+ * fee-abstraction domains, plus the SDK-side sentinels (negative, never on
+ * chain). Contract variant names are kept verbatim where they are unique
+ * across contracts; where two contracts reuse a name for different meanings
+ * (the oracle also has an `InvalidPrice`), the smaller domain carries a
+ * prefix naming its meaning. Resolve a raw code with
+ * `contractErrorFromCode`.
  */
 export enum ContractErrorType {
+    // SDK-side sentinels: negative, never emitted by a contract.
     UnknownError = -1000,
+    /** Quote/preview math rejected an input before any contract rule ran. */
+    QuoteInvalidInput = -1001,
+    /** A quoted settlement step left the i128 range; on chain this traps without a code. */
+    QuoteOverflow = -1002,
 
     // Transaction Submission Errors
     txSorobanInvalid = -24,
@@ -79,253 +87,7 @@ export enum ContractErrorType {
     VaultMaxDecimalsOffsetExceeded = 409,
     VaultMathOverflow = 410,
 
-    // Market Errors (700-772): kept out of this flat enum. Decode market
-    // errors with the dedicated `MarketError` enum instead (it mirrors
-    // the contract's `MarketError` exactly; see below). `contractErrorFromCode` falls
-    // through to it automatically.
-
-    // Shared admin (600): raised with the same name and meaning by every
-    // upgradeable contract (market, oracle, factory), so the bare code
-    // still names one condition.
-    UpgradeNotOwner = 600,
-
-    // Oracle Errors (780-793): the oracle owns the 78x/79x domain inherited
-    // from the price-verifier it replaces. Codes whose semantics carried over
-    // keep their numbers (780-783, 790, 793); the Lazer parser block
-    // (784-789) is retired, with 784 reassigned to the report-expiry reject
-    // that replaced that machinery.
-    OracleInvalidData = 780,
-    OracleInvalidPrice = 781,
-    OraclePriceStale = 782,
-    OracleInvalidStaleness = 783,
-    OracleReportExpired = 784,
-    OracleInvalidSpreadReduction = 785,
-    OracleFeedMismatch = 790,
-    OraclePriceAhead = 793,
-
-    // Strategy Vault Errors (800-801)
-    StrategyInvalidAmount = 800,
-    StrategyPnlExceedsAssets = 801,
-
-    // Governance Errors (810-812)
-    GovNotQueued = 810,
-    GovNotUnlocked = 811,
-    GovInvalidDelay = 812,
-
-    // Treasury Errors (900)
-    TreasuryInvalidRate = 900,
-
-    // OwnableError (2100-2102): OpenZeppelin ownable, raised by every
-    // owner-gated contract.
-    OwnerNotSet = 2100,
-    OwnershipTransferInProgress = 2101,
-    OwnerAlreadySet = 2102,
-
-    // RoleTransferError (2200-2203): OpenZeppelin two-step ownership
-    // transfer machinery.
-    NoPendingTransfer = 2200,
-    TransferInvalidLiveUntilLedger = 2201,
-    InvalidPendingAccount = 2202,
-    TransferExpired = 2203,
-
-    // Fee Abstraction Errors (5000-5006)
-    // Emitted by OpenZeppelin's stellar-fee-abstraction library inside the
-    // market router (the relay's fee-bump gateway); mirrored so relay
-    // simulations decode end-to-end.
-    FeeTokenNotAllowed = 5000,
-    FeeTokenAlreadyAllowed = 5001,
-    TokenCountOverflow = 5002,
-    FeeAbstractionInvalidFeeBounds = 5003,
-    NoTokensToSweep = 5004,
-    FeeAbstractionInvalidUser = 5005,
-    FeeAbstractionInvalidExpirationLedger = 5006,
-}
-
-const errorMessages: Record<number, string> = {
-    [-1000]: 'Unknown contract error',
-
-    // Transaction
-    [-24]: 'Transaction contains invalid Soroban operations',
-    [-23]: 'Transaction is malformed',
-    [-22]: 'Minimum sequence age or gap not met',
-    [-21]: 'Bad sponsorship configuration',
-    [-20]: 'Fee bump inner transaction failed',
-    [-19]: 'Transaction type not supported',
-    [-18]: 'Internal transaction processing error',
-    [-17]: 'Extra auth entries not allowed',
-    [-16]: 'Fee is below the network minimum',
-    [-15]: 'Source account does not exist',
-    [-14]: 'Insufficient balance to cover fees and operations',
-    [-13]: 'Transaction authentication failed',
-    [-12]: 'Bad sequence number; account may have pending transactions',
-    [-11]: 'Transaction has no operations',
-    [-10]: 'Transaction submitted after its validity window',
-    [-9]: 'Transaction submitted before its validity window',
-
-    // Host Function
-    [-5]: 'Insufficient refundable fee for host function execution',
-    [-4]: 'Contract entry has been archived; restore it first',
-    [-3]: 'Resource limit exceeded (CPU, memory, or storage)',
-    [-2]: 'Host function trapped; contract panicked',
-    [-1]: 'Malformed host function invocation',
-
-    // Common
-    [1]: 'Unauthorized caller or internal contract error',
-    [2]: 'Operation not supported by this contract',
-    [3]: 'Contract is already initialized',
-    [4]: 'Caller is not authorized for this operation',
-    [5]: 'Authentication failed',
-    [6]: 'Account not found',
-    [7]: 'Account is not a classic Stellar account',
-    [8]: 'Amount must be non-negative',
-    [9]: 'Allowance is insufficient for this operation',
-    [10]: 'Insufficient token balance',
-    [11]: 'Balance is deauthorized',
-    [12]: 'Arithmetic overflow',
-    [13]: 'Required trustline is missing',
-
-    // FungibleToken
-    [100]: 'Insufficient token balance',
-    [101]: 'Insufficient allowance',
-    [102]: 'Invalid live_until_ledger value',
-    [103]: 'Amount must be non-negative',
-    [104]: 'Token math overflow',
-    [105]: 'Token metadata not set',
-    [106]: 'Token cap exceeded',
-    [107]: 'Invalid token cap value',
-    [108]: 'Token cap not set',
-    [109]: 'Stellar Asset Contract address not set',
-    [110]: 'Stellar Asset Contract address mismatch',
-    [111]: 'Missing SAC function parameter',
-    [112]: 'Invalid SAC function parameter',
-    [113]: 'User not allowed',
-    [114]: 'User is blocked',
-
-    // VaultToken
-    [400]: 'Vault asset address not set',
-    [401]: 'Vault asset address already set',
-    [402]: 'Vault decimals offset already set',
-    [403]: 'Invalid asset amount for vault operation',
-    [404]: 'Invalid shares amount for vault operation',
-    [405]: 'Deposit exceeds maximum allowed',
-    [406]: 'Mint exceeds maximum allowed',
-    [407]: 'Withdrawal exceeds maximum allowed',
-    [408]: 'Redemption exceeds maximum allowed',
-    [409]: 'Decimals offset exceeds maximum (10)',
-    [410]: 'Vault math overflow',
-
-    // Market: the market messages live in `marketErrorMessages` below
-    // and resolve through the dedicated `MarketError` enum (see the note in
-    // ContractErrorType above).
-
-    // Oracle
-    [780]: 'Verified report body failed decoding',
-    [781]: 'Non-positive price side, crossed book (bid > ask), or int192 overflow',
-    [782]: 'Price observation is older than the selected staleness window (trade_staleness for fills, close_staleness for gap-closing calls)',
-    [783]: 'Staleness pair violates 3 <= trade_staleness <= 15 or trade_staleness <= close_staleness <= 120 seconds',
-    [784]: 'Ledger clock has passed the report expiresAt',
-    [785]: 'spread_reduction_factor outside [0, SCALAR_18]',
-    [790]: 'Report prices a different stream than the feed anchor',
-    [793]: 'Report validity window not open, or observation more than trade_staleness ahead of the ledger clock (the forward allowance never widens with the call class)',
-
-    // Strategy Vault
-    [800]: 'Invalid amount for strategy operation',
-    [801]: 'Strategy withdrawal exceeds the vault assets',
-
-    // Governance
-    [810]: 'Queued call not found or has expired',
-    [811]: 'Timelock delay has not yet passed',
-    [812]: 'Invalid delay value (must be between 1 second and 60 days)',
-
-    // Shared admin
-    [600]: 'upgrade called by an operator that is not the contract owner',
-
-    // Treasury
-    [900]: 'Fee rate out of range (must be between 0 and 50%)',
-
-    // Ownable
-    [2100]: 'Contract owner is not set',
-    [2101]: 'An ownership transfer is already in progress',
-    [2102]: 'Contract owner is already set',
-
-    // Role transfer
-    [2200]: 'No matching pending ownership transfer',
-    [2201]: 'Invalid live_until_ledger for the ownership transfer',
-    [2202]: 'Caller is not the pending owner',
-    [2203]: 'The pending ownership transfer has expired',
-
-    // Fee Abstraction (OpenZeppelin stellar-fee-abstraction)
-    [5000]: 'Fee token is not on the allowlist',
-    [5001]: 'Fee token is already on the allowlist',
-    [5002]: 'Fee token count overflow',
-    [5003]: 'Relayer fee is outside the signed fee bounds',
-    [5004]: 'No tokens to sweep',
-    [5005]: 'Invalid user for fee abstraction',
-    [5006]: 'Invalid expiration ledger for fee abstraction',
-};
-
-/**
- * An error decoded from a failed contract call or RPC response. `type`
- * carries the numeric code. The message defaults to the code's entry in
- * `errorMessages` or `marketErrorMessages`, or a fallback string when the
- * code is not recognized.
- */
-export class ContractError extends Error {
-    public type: ContractErrorType | MarketError;
-
-    constructor(type: ContractErrorType | MarketError, message?: string) {
-        super(message ?? errorMessages[type] ?? `Contract error ${type}`);
-        this.type = type;
-    }
-}
-
-/**
- * Resolve a raw on-chain error code to a ContractError.
- *
- * The per-contract code namespaces are disjoint (shared admin 600,
- * market 700-772, oracle 780-793, strategy-vault 800-801,
- * governance 810-812, treasury 900, ownable 2100-2102, role transfer
- * 2200-2203, fee-abstraction 5000-5006), so every code resolves without a
- * hint: from the merged `ContractErrorType` first, then the standalone
- * `MarketError` enum.
- */
-export function contractErrorFromCode(code: number): ContractError {
-    if (code in ContractErrorType) {
-        return new ContractError(code as ContractErrorType);
-    }
-    if (code in MarketError) {
-        return new ContractError(code as MarketError, marketErrorMessages[code]);
-    }
-    return new ContractError(ContractErrorType.UnknownError);
-}
-
-// Soroban contract error codes are u32; anything larger is not a real code.
-const MAXIMUM_ERROR_CODE = 4_294_967_295;
-
-// Strictly the host's `Error(Contract, #N)` shape. Bare `#N` fragments in
-// diagnostics are NOT trusted as contract codes.
-const CONTRACT_ERROR_PATTERN = /Error\(Contract, #(\d{1,10})\)/;
-
-/**
- * The contract error code inside a raw RPC simulation or diagnostic string,
- * or `undefined` when the strict `Error(Contract, #N)` shape is absent or the
- * number is not a valid u32. Feed the result to `contractErrorFromCode`.
- */
-export function parseContractErrorCode(rpcError: string): number | undefined {
-    const match = CONTRACT_ERROR_PATTERN.exec(rpcError);
-    if (match?.[1] === undefined) return undefined;
-    const code = Number(match[1]);
-    return Number.isSafeInteger(code) && code <= MAXIMUM_ERROR_CODE ? code : undefined;
-}
-
-/**
- * MarketError - exact mirror of the contract's `MarketError` enum.
- *
- * Kept as its own enum so the market domain (the largest error surface)
- * mirrors it one-to-one; `contractErrorFromCode` resolves market
- * codes through it automatically.
- */
-export enum MarketError {
+    // Market Errors (700-772): mirror market/src/errors.rs verbatim.
     // --- config / construction ---
     /** A config value is out of bounds, or a range/ordering invariant is violated. */
     InvalidConfig = 700,
@@ -415,10 +177,140 @@ export enum MarketError {
     AdlOvershoot = 771,
     /** ADL close did not reduce the side's pending PnL. */
     AdlNotEligible = 772,
+
+    // Shared admin (600): raised with the same name and meaning by every
+    // upgradeable contract (market, oracle, factory), so the bare code
+    // still names one condition.
+    UpgradeNotOwner = 600,
+
+    // Oracle Errors (780-793): the oracle owns the 78x/79x domain inherited
+    // from the price-verifier it replaces. Codes whose semantics carried over
+    // keep their numbers (780-783, 790, 793); the Lazer parser block
+    // (784-789) is retired, with 784 reassigned to the report-expiry reject
+    // that replaced that machinery.
+    OracleInvalidData = 780,
+    OracleInvalidPrice = 781,
+    OraclePriceStale = 782,
+    OracleInvalidStaleness = 783,
+    OracleReportExpired = 784,
+    OracleInvalidSpreadReduction = 785,
+    OracleFeedMismatch = 790,
+    OraclePriceAhead = 793,
+
+    // Strategy Vault Errors (800-801)
+    StrategyInvalidAmount = 800,
+    StrategyPnlExceedsAssets = 801,
+
+    // Governance Errors (810-812)
+    GovNotQueued = 810,
+    GovNotUnlocked = 811,
+    GovInvalidDelay = 812,
+
+    // Treasury Errors (900)
+    TreasuryInvalidRate = 900,
+
+    // OwnableError (2100-2102): OpenZeppelin ownable, raised by every
+    // owner-gated contract.
+    OwnerNotSet = 2100,
+    OwnershipTransferInProgress = 2101,
+    OwnerAlreadySet = 2102,
+
+    // RoleTransferError (2200-2203): OpenZeppelin two-step ownership
+    // transfer machinery.
+    NoPendingTransfer = 2200,
+    TransferInvalidLiveUntilLedger = 2201,
+    InvalidPendingAccount = 2202,
+    TransferExpired = 2203,
+
+    // Fee Abstraction Errors (5000-5006)
+    // Emitted by OpenZeppelin's stellar-fee-abstraction library inside the
+    // market router (the relay's fee-bump gateway); mirrored so relay
+    // simulations decode end-to-end.
+    FeeTokenNotAllowed = 5000,
+    FeeTokenAlreadyAllowed = 5001,
+    TokenCountOverflow = 5002,
+    FeeAbstractionInvalidFeeBounds = 5003,
+    NoTokensToSweep = 5004,
+    FeeAbstractionInvalidUser = 5005,
+    FeeAbstractionInvalidExpirationLedger = 5006,
 }
 
-/** Human-readable messages for the MarketError codes. */
-export const marketErrorMessages: Record<number, string> = {
+const errorMessages: Record<number, string> = {
+    [-1000]: 'Unknown contract error',
+    [-1001]: 'SDK rejected the input before contract math ran',
+    [-1002]: 'A quoted settlement step left the i128 range',
+
+    // Transaction
+    [-24]: 'Transaction contains invalid Soroban operations',
+    [-23]: 'Transaction is malformed',
+    [-22]: 'Minimum sequence age or gap not met',
+    [-21]: 'Bad sponsorship configuration',
+    [-20]: 'Fee bump inner transaction failed',
+    [-19]: 'Transaction type not supported',
+    [-18]: 'Internal transaction processing error',
+    [-17]: 'Extra auth entries not allowed',
+    [-16]: 'Fee is below the network minimum',
+    [-15]: 'Source account does not exist',
+    [-14]: 'Insufficient balance to cover fees and operations',
+    [-13]: 'Transaction authentication failed',
+    [-12]: 'Bad sequence number; account may have pending transactions',
+    [-11]: 'Transaction has no operations',
+    [-10]: 'Transaction submitted after its validity window',
+    [-9]: 'Transaction submitted before its validity window',
+
+    // Host Function
+    [-5]: 'Insufficient refundable fee for host function execution',
+    [-4]: 'Contract entry has been archived; restore it first',
+    [-3]: 'Resource limit exceeded (CPU, memory, or storage)',
+    [-2]: 'Host function trapped; contract panicked',
+    [-1]: 'Malformed host function invocation',
+
+    // Common
+    [1]: 'Unauthorized caller or internal contract error',
+    [2]: 'Operation not supported by this contract',
+    [3]: 'Contract is already initialized',
+    [4]: 'Caller is not authorized for this operation',
+    [5]: 'Authentication failed',
+    [6]: 'Account not found',
+    [7]: 'Account is not a classic Stellar account',
+    [8]: 'Amount must be non-negative',
+    [9]: 'Allowance is insufficient for this operation',
+    [10]: 'Insufficient token balance',
+    [11]: 'Balance is deauthorized',
+    [12]: 'Arithmetic overflow',
+    [13]: 'Required trustline is missing',
+
+    // FungibleToken
+    [100]: 'Insufficient token balance',
+    [101]: 'Insufficient allowance',
+    [102]: 'Invalid live_until_ledger value',
+    [103]: 'Amount must be non-negative',
+    [104]: 'Token math overflow',
+    [105]: 'Token metadata not set',
+    [106]: 'Token cap exceeded',
+    [107]: 'Invalid token cap value',
+    [108]: 'Token cap not set',
+    [109]: 'Stellar Asset Contract address not set',
+    [110]: 'Stellar Asset Contract address mismatch',
+    [111]: 'Missing SAC function parameter',
+    [112]: 'Invalid SAC function parameter',
+    [113]: 'User not allowed',
+    [114]: 'User is blocked',
+
+    // VaultToken
+    [400]: 'Vault asset address not set',
+    [401]: 'Vault asset address already set',
+    [402]: 'Vault decimals offset already set',
+    [403]: 'Invalid asset amount for vault operation',
+    [404]: 'Invalid shares amount for vault operation',
+    [405]: 'Deposit exceeds maximum allowed',
+    [406]: 'Mint exceeds maximum allowed',
+    [407]: 'Withdrawal exceeds maximum allowed',
+    [408]: 'Redemption exceeds maximum allowed',
+    [409]: 'Decimals offset exceeds maximum (10)',
+    [410]: 'Vault math overflow',
+
+    // Market
     [700]: 'Market config value out of bounds or invariant violated',
     [701]: 'Flat settlement price is not strictly positive',
     [702]: 'Illegal status transition or action requires a different status',
@@ -454,4 +346,99 @@ export const marketErrorMessages: Record<number, string> = {
     [770]: 'ADL execution attempted while the PnL ratio is at or below the trigger',
     [771]: 'ADL close left the pending PnL under the clear target',
     [772]: 'ADL close did not reduce the pending PnL',
+
+    // Oracle
+    [780]: 'Verified report body failed decoding',
+    [781]: 'Non-positive price side, crossed book (bid > ask), or int192 overflow',
+    [782]: 'Price observation is older than the selected staleness window (trade_staleness for fills, close_staleness for gap-closing calls)',
+    [783]: 'Staleness pair violates 3 <= trade_staleness <= 15 or trade_staleness <= close_staleness <= 120 seconds',
+    [784]: 'Ledger clock has passed the report expiresAt',
+    [785]: 'spread_reduction_factor outside [0, SCALAR_18]',
+    [790]: 'Report prices a different stream than the feed anchor',
+    [793]: 'Report validity window not open, or observation more than trade_staleness ahead of the ledger clock (the forward allowance never widens with the call class)',
+
+    // Strategy Vault
+    [800]: 'Invalid amount for strategy operation',
+    [801]: 'Strategy withdrawal exceeds the vault assets',
+
+    // Governance
+    [810]: 'Queued call not found or has expired',
+    [811]: 'Timelock delay has not yet passed',
+    [812]: 'Invalid delay value (must be between 1 second and 60 days)',
+
+    // Shared admin
+    [600]: 'upgrade called by an operator that is not the contract owner',
+
+    // Treasury
+    [900]: 'Fee rate out of range (must be between 0 and 50%)',
+
+    // Ownable
+    [2100]: 'Contract owner is not set',
+    [2101]: 'An ownership transfer is already in progress',
+    [2102]: 'Contract owner is already set',
+
+    // Role transfer
+    [2200]: 'No matching pending ownership transfer',
+    [2201]: 'Invalid live_until_ledger for the ownership transfer',
+    [2202]: 'Caller is not the pending owner',
+    [2203]: 'The pending ownership transfer has expired',
+
+    // Fee Abstraction (OpenZeppelin stellar-fee-abstraction)
+    [5000]: 'Fee token is not on the allowlist',
+    [5001]: 'Fee token is already on the allowlist',
+    [5002]: 'Fee token count overflow',
+    [5003]: 'Relayer fee is outside the signed fee bounds',
+    [5004]: 'No tokens to sweep',
+    [5005]: 'Invalid user for fee abstraction',
+    [5006]: 'Invalid expiration ledger for fee abstraction',
 };
+
+/**
+ * An error decoded from a failed contract call or RPC response. `type`
+ * carries the numeric code. The message defaults to the code's entry in
+ * `errorMessages`, or a fallback string when the code is not recognized.
+ */
+export class ContractError extends Error {
+    public type: ContractErrorType;
+
+    constructor(type: ContractErrorType, message?: string) {
+        super(message ?? errorMessages[type] ?? `Contract error ${type}`);
+        this.type = type;
+    }
+}
+
+/**
+ * Resolve a raw on-chain error code to a ContractError.
+ *
+ * The per-contract code namespaces are disjoint (shared admin 600,
+ * market 700-772, oracle 780-793, strategy-vault 800-801,
+ * governance 810-812, treasury 900, ownable 2100-2102, role transfer
+ * 2200-2203, fee-abstraction 5000-5006), so every code resolves without a
+ * hint.
+ */
+export function contractErrorFromCode(code: number): ContractError {
+    if (code in ContractErrorType) {
+        return new ContractError(code as ContractErrorType);
+    }
+    return new ContractError(ContractErrorType.UnknownError);
+}
+
+// Soroban contract error codes are u32; anything larger is not a real code.
+const MAXIMUM_ERROR_CODE = 4_294_967_295;
+
+// Strictly the host's `Error(Contract, #N)` shape. Bare `#N` fragments in
+// diagnostics are NOT trusted as contract codes.
+const CONTRACT_ERROR_PATTERN = /Error\(Contract, #(\d{1,10})\)/;
+
+/**
+ * The contract error code inside a raw RPC simulation or diagnostic string,
+ * or `undefined` when the strict `Error(Contract, #N)` shape is absent or the
+ * number is not a valid u32. Feed the result to `contractErrorFromCode`.
+ */
+export function parseContractErrorCode(rpcError: string): number | undefined {
+    const match = CONTRACT_ERROR_PATTERN.exec(rpcError);
+    if (match?.[1] === undefined) return undefined;
+    const code = Number(match[1]);
+    return Number.isSafeInteger(code) && code <= MAXIMUM_ERROR_CODE ? code : undefined;
+}
+

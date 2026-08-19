@@ -1,3 +1,4 @@
+import { ContractErrorType } from '../../errors.js';
 import type { OrderParams } from '../../contracts/router/types.js';
 import { FULL_CLOSE, OrderKind, Status } from '../../contracts/market/types.js';
 import type { AdlState, MarketData, Position, MarketConfig } from '../../contracts/market/types.js';
@@ -75,8 +76,10 @@ export type SubjectBoundMarketContext = MarketContext & {
  * `fills` carries the exact transition the chain would execute. `rests`
  * means the order creates but does not fill now (trigger orders, or a
  * market order whose price bound is not crossed at this price). `gate`
- * means the order can never fill as constructed. The contract gate code
- * says why (for example #713 when a decrease would break margin).
+ * means the order can never fill as constructed. The gate code says why:
+ * the mirrored contract error (for example #713 when a decrease would break
+ * margin), or an SDK sentinel (`ContractErrorType.QuoteInvalidInput` /
+ * `QuoteOverflow`) for a failure the contract never sees.
  */
 export type OrderApplication =
     | { kind: 'fills'; outcome: PositionActionOutcome; ledger: number }
@@ -127,11 +130,6 @@ function orderAction(order: OrderParams): PositionAction | undefined {
     return undefined;
 }
 
-function gateCode(reason: string): number {
-    const match = /#(\d+)/.exec(reason);
-    return match === null ? 0 : parseInt(match[1], 10);
-}
-
 /**
  * Apply one order to the snapshot's position and report whether it fills,
  * rests, or gates at the given price. This is the creation pre-flight: the
@@ -147,7 +145,7 @@ export function applyOrder(
     if (snapshot.subject && order.isLong !== snapshot.subject.isLong) {
         return {
             kind: 'gate',
-            code: 0,
+            code: ContractErrorType.QuoteInvalidInput,
             reason: 'order side does not match the snapshot subject',
             ledger,
         };
@@ -219,11 +217,20 @@ export function applyOrder(
     if (quote.kind === 'exact') {
         return { kind: 'fills', outcome: quote.value, ledger };
     }
-    const reason =
-        quote.kind === 'unavailable'
-            ? quote.reason
-            : 'exact transition is unavailable';
-    return { kind: 'gate', code: gateCode(reason), reason, ledger };
+    if (quote.kind === 'unavailable') {
+        const code =
+            quote.contractCode ??
+            (quote.code === 'CONTRACT_OVERFLOW'
+                ? ContractErrorType.QuoteOverflow
+                : ContractErrorType.QuoteInvalidInput);
+        return { kind: 'gate', code, reason: quote.reason, ledger };
+    }
+    return {
+        kind: 'gate',
+        code: ContractErrorType.QuoteInvalidInput,
+        reason: 'exact transition is unavailable',
+        ledger,
+    };
 }
 
 /**

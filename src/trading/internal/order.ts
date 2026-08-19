@@ -409,7 +409,7 @@ const ORDER_KINDS = new Set<number>([
  * several checks at once; `buildOrderOperation` only surfaces the first.
  */
 export interface OrderValidationIssue {
-    /** The market contract error code this failure maps to, or 0 for an input error the contract never sees. */
+    /** The market contract error code this failure maps to. */
     code: number;
     /** The `OrderParams` field at fault, or 'batch' when no single field is responsible. */
     field: keyof OrderParams | 'batch';

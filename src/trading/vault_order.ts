@@ -1,4 +1,5 @@
 import { VaultOrderKind } from '../contracts/market/types.js';
+import { ContractErrorType } from '../errors.js';
 import { MarketContract } from '../contracts/market/contract.js';
 import {
     BPS_DENOMINATOR,
@@ -19,8 +20,12 @@ import {
 
 /** Why a vault order would not fill right now. */
 export interface VaultOrderBlock {
-    /** Contract error code of the gate that would reject the fill; `0` when the reason carries no code. */
-    code: number;
+    /**
+     * The gate that would reject the fill: the mirrored contract error code,
+     * or an SDK-side sentinel (`QuoteInvalidInput`, `QuoteOverflow`) when
+     * the reason never reaches the contract.
+     */
+    code: ContractErrorType;
     /** Human-readable reason, for tooltips and logs. */
     reason: string;
 }
@@ -168,13 +173,14 @@ export class VaultOrderIntent {
                 : quoteVaultRedeemFill({ ...context, shares: this.amount });
 
         if (quoted.kind !== 'unavailable') return { fills: true };
-        const match = /#(\d+)/.exec(quoted.reason);
+        const code = quoted.contractCode !== undefined
+            ? (quoted.contractCode as ContractErrorType)
+            : quoted.code === 'CONTRACT_OVERFLOW'
+                ? ContractErrorType.QuoteOverflow
+                : ContractErrorType.QuoteInvalidInput;
         return {
             fills: false,
-            block: {
-                code: match === null ? 0 : parseInt(match[1], 10),
-                reason: quoted.reason,
-            },
+            block: { code, reason: quoted.reason },
         };
     }
 

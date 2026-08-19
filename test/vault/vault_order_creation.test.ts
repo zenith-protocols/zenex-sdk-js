@@ -217,6 +217,7 @@ describe('quoteVaultOrderCreation', () => {
                 kind: 'unavailable',
                 code,
                 reason: expect.stringContaining(reason),
+                contractCode: Number(reason.slice(1)),
             });
         },
     );

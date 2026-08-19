@@ -3,10 +3,8 @@ import { describe, it, expect } from 'vitest';
 import {
     ContractError,
     ContractErrorType,
-    MarketError,
     contractErrorFromCode,
     parseContractErrorCode,
-    marketErrorMessages,
 } from '../src/errors.js';
 
 // =============================================================================
@@ -19,82 +17,90 @@ import {
 //   treasury/src/lib.rs            (TreasuryError, 900)
 //   OpenZeppelin ownable           (OwnableError 2100-2102, RoleTransferError 2200-2203)
 //   OpenZeppelin fee-abstraction   (FeeAbstractionError, 5000-5006)
-// The namespaces are disjoint, so contractErrorFromCode takes no hint.
-// UpgradeNotOwner (600) is one shared code raised identically by market,
-// oracle and factory, so the bare code still names one condition.
+// The namespaces are disjoint, so contractErrorFromCode takes no hint and
+// every code lives in the one flat ContractErrorType enum. UpgradeNotOwner
+// (600) is one shared code raised identically by market, oracle and factory,
+// so the bare code still names one condition.
 // =============================================================================
 
-describe('MarketError (v2 trading/src/errors.rs)', () => {
+describe('market codes inside ContractErrorType (market/src/errors.rs)', () => {
     it('matches every v2 market error code exactly', () => {
         // config / construction
-        expect(MarketError.InvalidConfig).toBe(700);
-        expect(MarketError.InvalidPrice).toBe(701);
-        expect(MarketError.InvalidStatus).toBe(702);
-        expect(MarketError.MarketNotAccrued).toBe(703);
-        expect(MarketError.MarketFrozen).toBe(704);
-        expect(MarketError.IncreaseHalted).toBe(705);
-        expect(MarketError.MarketNotCleared).toBe(706);
+        expect(ContractErrorType.InvalidConfig).toBe(700);
+        expect(ContractErrorType.InvalidPrice).toBe(701);
+        expect(ContractErrorType.InvalidStatus).toBe(702);
+        expect(ContractErrorType.MarketNotAccrued).toBe(703);
+        expect(ContractErrorType.MarketFrozen).toBe(704);
+        expect(ContractErrorType.IncreaseHalted).toBe(705);
+        expect(ContractErrorType.MarketNotCleared).toBe(706);
         // general
-        expect(MarketError.NegativeValueNotAllowed).toBe(710);
+        expect(ContractErrorType.NegativeValueNotAllowed).toBe(710);
         // position sizing / margin
-        expect(MarketError.NotionalBelowMinimum).toBe(711);
-        expect(MarketError.NotionalAboveMaximum).toBe(712);
-        expect(MarketError.InsufficientMargin).toBe(713);
-        expect(MarketError.UtilizationExceeded).toBe(714);
-        expect(MarketError.OpenInterestExceeded).toBe(715);
+        expect(ContractErrorType.NotionalBelowMinimum).toBe(711);
+        expect(ContractErrorType.NotionalAboveMaximum).toBe(712);
+        expect(ContractErrorType.InsufficientMargin).toBe(713);
+        expect(ContractErrorType.UtilizationExceeded).toBe(714);
+        expect(ContractErrorType.OpenInterestExceeded).toBe(715);
         // position lifecycle
-        expect(MarketError.PositionNotFound).toBe(720);
-        expect(MarketError.NotionalLocked).toBe(721);
-        expect(MarketError.NotLiquidatable).toBe(722);
-        expect(MarketError.PositionLiquidatable).toBe(723);
+        expect(ContractErrorType.PositionNotFound).toBe(720);
+        expect(ContractErrorType.NotionalLocked).toBe(721);
+        expect(ContractErrorType.NotLiquidatable).toBe(722);
+        expect(ContractErrorType.PositionLiquidatable).toBe(723);
         // orders / price
-        expect(MarketError.OrderNotFound).toBe(730);
-        expect(MarketError.OrderExpired).toBe(731);
-        expect(MarketError.InvalidOrder).toBe(732);
-        expect(MarketError.TooManyOrders).toBe(733);
-        expect(MarketError.UnknownKind).toBe(734);
-        expect(MarketError.StalePrice).toBe(740);
-        expect(MarketError.PriceBoundExceeded).toBe(741);
-        expect(MarketError.TriggerNotMet).toBe(742);
+        expect(ContractErrorType.OrderNotFound).toBe(730);
+        expect(ContractErrorType.OrderExpired).toBe(731);
+        expect(ContractErrorType.InvalidOrder).toBe(732);
+        expect(ContractErrorType.TooManyOrders).toBe(733);
+        expect(ContractErrorType.UnknownKind).toBe(734);
+        expect(ContractErrorType.StalePrice).toBe(740);
+        expect(ContractErrorType.PriceBoundExceeded).toBe(741);
+        expect(ContractErrorType.TriggerNotMet).toBe(742);
         // vault orders
-        expect(MarketError.VaultOrderNotFound).toBe(750);
-        expect(MarketError.VaultOrderLocked).toBe(751);
-        expect(MarketError.MinOutNotMet).toBe(752);
-        expect(MarketError.VaultBalanceExceeded).toBe(753);
-        expect(MarketError.PendingPnlExceeded).toBe(754);
-        expect(MarketError.VaultInsolvent).toBe(755);
+        expect(ContractErrorType.VaultOrderNotFound).toBe(750);
+        expect(ContractErrorType.VaultOrderLocked).toBe(751);
+        expect(ContractErrorType.MinOutNotMet).toBe(752);
+        expect(ContractErrorType.VaultBalanceExceeded).toBe(753);
+        expect(ContractErrorType.PendingPnlExceeded).toBe(754);
+        expect(ContractErrorType.VaultInsolvent).toBe(755);
         // funding
-        expect(MarketError.NothingToClaim).toBe(760);
+        expect(ContractErrorType.NothingToClaim).toBe(760);
         // ADL
-        expect(MarketError.AdlNotTriggered).toBe(770);
-        expect(MarketError.AdlOvershoot).toBe(771);
-        expect(MarketError.AdlNotEligible).toBe(772);
+        expect(ContractErrorType.AdlNotTriggered).toBe(770);
+        expect(ContractErrorType.AdlOvershoot).toBe(771);
+        expect(ContractErrorType.AdlNotEligible).toBe(772);
     });
 
-    it('has exactly 35 members (the full errors.rs surface, no stale codes)', () => {
+    it('carries exactly 35 market members (the full errors.rs surface, no stale codes)', () => {
         // Hand count from errors.rs: 700-706 (7) + 710 (1) + 711-715 (5)
         // + 720-723 (4) + 730-734 (5) + 740-742 (3) + 750-755 (6) + 760 (1)
         // + 770-772 (3) = 35.
-        const numericValues = Object.values(MarketError).filter((value) => typeof value === 'number');
-        expect(numericValues).toHaveLength(35);
+        const marketCodes = Object.values(ContractErrorType).filter(
+            (value): value is number =>
+                typeof value === 'number' && value >= 700 && value <= 772,
+        );
+        expect(marketCodes).toHaveLength(35);
     });
 
     it('752 means MinOutNotMet, and PendingPnlExceeded moved to 754', () => {
-        expect(MarketError[752]).toBe('MinOutNotMet');
-        expect(MarketError[754]).toBe('PendingPnlExceeded');
+        expect(ContractErrorType[752]).toBe('MinOutNotMet');
+        expect(ContractErrorType[754]).toBe('PendingPnlExceeded');
     });
 
     it('723 and 755 are the settlement-rail rejects added on v2 main', () => {
-        expect(MarketError[723]).toBe('PositionLiquidatable');
-        expect(MarketError[755]).toBe('VaultInsolvent');
+        expect(ContractErrorType[723]).toBe('PositionLiquidatable');
+        expect(ContractErrorType[755]).toBe('VaultInsolvent');
     });
 
-    it('every market code has a human-readable message', () => {
-        const numericValues = Object.values(MarketError).filter(
-            (value): value is number => typeof value === 'number'
+    it('every market code resolves with a human-readable message', () => {
+        const marketCodes = Object.values(ContractErrorType).filter(
+            (value): value is number =>
+                typeof value === 'number' && value >= 700 && value <= 772,
         );
-        for (const code of numericValues) {
-            expect(marketErrorMessages[code], `message for code ${code}`).toBeTruthy();
+        for (const code of marketCodes) {
+            expect(
+                contractErrorFromCode(code).message,
+                `message for code ${code}`,
+            ).not.toBe(`Contract error ${code}`);
         }
     });
 });
@@ -167,12 +173,9 @@ describe('ContractErrorType periphery codes (v2 contracts)', () => {
         expect(ContractErrorType.TreasuryInvalidRate).toBe(900);
     });
 
-    it('no ContractErrorType member sits in the market 700-772 range', () => {
-        const numericValues = Object.values(ContractErrorType).filter(
-            (value): value is number => typeof value === 'number'
-        );
-        const inMarketRange = numericValues.filter((code) => code >= 700 && code <= 772);
-        expect(inMarketRange).toEqual([]);
+    it('the market 700-772 range lives inside the one flat enum', () => {
+        expect(ContractErrorType[700]).toBe('InvalidConfig');
+        expect(ContractErrorType[772]).toBe('AdlNotEligible');
     });
 
     it('the stale names are gone (v1 market, old strategy-vault 790-793, governance 770-772 aliases)', () => {
@@ -182,10 +185,10 @@ describe('ContractErrorType periphery codes (v2 contracts)', () => {
         expect(memberNames.LeverageAboveMaximum).toBeUndefined();
         expect(memberNames.ContractFrozen).toBeUndefined();
         expect(memberNames.SharesLocked).toBeUndefined();
-        // 770-772 no longer resolve inside the merged enum (the market enum owns them)
-        expect((ContractErrorType as unknown as Record<number, string>)[770]).toBeUndefined();
-        expect((ContractErrorType as unknown as Record<number, string>)[771]).toBeUndefined();
-        expect((ContractErrorType as unknown as Record<number, string>)[772]).toBeUndefined();
+        // 770-772 are the market ADL codes, not the old governance aliases
+        expect(ContractErrorType[770]).toBe('AdlNotTriggered');
+        expect(ContractErrorType[771]).toBe('AdlOvershoot');
+        expect(ContractErrorType[772]).toBe('AdlNotEligible');
     });
 });
 
@@ -195,24 +198,24 @@ describe('contractErrorFromCode (hint-free resolution)', () => {
     });
 
     it('resolves the new market codes', () => {
-        expect(contractErrorFromCode(723).type).toBe(MarketError.PositionLiquidatable);
-        expect(contractErrorFromCode(733).type).toBe(MarketError.TooManyOrders);
-        expect(contractErrorFromCode(734).type).toBe(MarketError.UnknownKind);
-        expect(contractErrorFromCode(742).type).toBe(MarketError.TriggerNotMet);
-        expect(contractErrorFromCode(752).type).toBe(MarketError.MinOutNotMet);
-        expect(contractErrorFromCode(754).type).toBe(MarketError.PendingPnlExceeded);
-        expect(contractErrorFromCode(755).type).toBe(MarketError.VaultInsolvent);
-        expect(contractErrorFromCode(760).type).toBe(MarketError.NothingToClaim);
+        expect(contractErrorFromCode(723).type).toBe(ContractErrorType.PositionLiquidatable);
+        expect(contractErrorFromCode(733).type).toBe(ContractErrorType.TooManyOrders);
+        expect(contractErrorFromCode(734).type).toBe(ContractErrorType.UnknownKind);
+        expect(contractErrorFromCode(742).type).toBe(ContractErrorType.TriggerNotMet);
+        expect(contractErrorFromCode(752).type).toBe(ContractErrorType.MinOutNotMet);
+        expect(contractErrorFromCode(754).type).toBe(ContractErrorType.PendingPnlExceeded);
+        expect(contractErrorFromCode(755).type).toBe(ContractErrorType.VaultInsolvent);
+        expect(contractErrorFromCode(760).type).toBe(ContractErrorType.NothingToClaim);
     });
 
     it('resolves 770-772 unhinted to the market ADL errors with ADL messages', () => {
         const adlNotTriggered = contractErrorFromCode(770);
-        expect(adlNotTriggered.type).toBe(MarketError.AdlNotTriggered);
+        expect(adlNotTriggered.type).toBe(ContractErrorType.AdlNotTriggered);
         expect(adlNotTriggered.message).toMatch(/ADL/);
         expect(adlNotTriggered.message).not.toMatch(/queued/i);
 
-        expect(contractErrorFromCode(771).type).toBe(MarketError.AdlOvershoot);
-        expect(contractErrorFromCode(772).type).toBe(MarketError.AdlNotEligible);
+        expect(contractErrorFromCode(771).type).toBe(ContractErrorType.AdlOvershoot);
+        expect(contractErrorFromCode(772).type).toBe(ContractErrorType.AdlNotEligible);
     });
 
     it('resolves governance 810-812 with the queue/timelock messages', () => {

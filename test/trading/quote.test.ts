@@ -661,6 +661,7 @@ describe('exact position action transitions', () => {
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
             reason: `contract error #${expected.error_code}: position liquidatable`,
+            contractCode: Number(expected.error_code),
         });
     });
 
@@ -775,6 +776,7 @@ describe('exact position action transitions', () => {
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
             reason: 'contract error #740: stale price',
+            contractCode: 740,
         });
     });
 });

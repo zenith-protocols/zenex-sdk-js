@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { rpc } from '@stellar/stellar-sdk';
 import { parseError } from '../src/response_parser.js';
-import { ContractError, ContractErrorType, MarketError } from '../src/errors.js';
+import { ContractError, ContractErrorType } from '../src/errors.js';
 
 // =============================================================================
 // parseError code resolution against the disjoint v2 namespaces:
@@ -29,7 +29,7 @@ describe('parseError: collision-hint machinery is gone', () => {
             legacyHint?: string
         ) => ContractError;
         expect(parseWithExtraArgument(simulationError(770), 'governance').type).toBe(
-            MarketError.AdlNotTriggered
+            ContractErrorType.AdlNotTriggered
         );
         expect(parseWithExtraArgument(simulationError(810), 'market').type).toBe(
             ContractErrorType.GovNotQueued
@@ -39,41 +39,41 @@ describe('parseError: collision-hint machinery is gone', () => {
 
 describe('parseError: new market codes resolve unhinted', () => {
     it('733 -> TooManyOrders', () => {
-        expect(parseError(simulationError(733)).type).toBe(MarketError.TooManyOrders);
+        expect(parseError(simulationError(733)).type).toBe(ContractErrorType.TooManyOrders);
     });
 
     it('734 -> UnknownKind', () => {
-        expect(parseError(simulationError(734)).type).toBe(MarketError.UnknownKind);
+        expect(parseError(simulationError(734)).type).toBe(ContractErrorType.UnknownKind);
     });
 
     it('742 -> TriggerNotMet', () => {
-        expect(parseError(simulationError(742)).type).toBe(MarketError.TriggerNotMet);
+        expect(parseError(simulationError(742)).type).toBe(ContractErrorType.TriggerNotMet);
     });
 
     it('752 -> MinOutNotMet (the min_out slippage gate, not the old pending-PnL meaning)', () => {
         const error = parseError(simulationError(752));
-        expect(error.type).toBe(MarketError.MinOutNotMet);
+        expect(error.type).toBe(ContractErrorType.MinOutNotMet);
         expect(error.message).toMatch(/min_out/);
     });
 
     it('754 -> PendingPnlExceeded', () => {
         const error = parseError(simulationError(754));
-        expect(error.type).toBe(MarketError.PendingPnlExceeded);
+        expect(error.type).toBe(ContractErrorType.PendingPnlExceeded);
         expect(error.message).toMatch(/PnL/i);
     });
 
     it('760 -> NothingToClaim', () => {
-        expect(parseError(simulationError(760)).type).toBe(MarketError.NothingToClaim);
+        expect(parseError(simulationError(760)).type).toBe(ContractErrorType.NothingToClaim);
     });
 
     it('770-772 resolve unhinted to the market ADL errors', () => {
         const adlNotTriggered = parseError(simulationError(770));
-        expect(adlNotTriggered.type).toBe(MarketError.AdlNotTriggered);
+        expect(adlNotTriggered.type).toBe(ContractErrorType.AdlNotTriggered);
         expect(adlNotTriggered.message).toMatch(/ADL/);
         expect(adlNotTriggered.message).not.toMatch(/queued/i);
 
-        expect(parseError(simulationError(771)).type).toBe(MarketError.AdlOvershoot);
-        expect(parseError(simulationError(772)).type).toBe(MarketError.AdlNotEligible);
+        expect(parseError(simulationError(771)).type).toBe(ContractErrorType.AdlOvershoot);
+        expect(parseError(simulationError(772)).type).toBe(ContractErrorType.AdlNotEligible);
     });
 });
 
@@ -118,7 +118,7 @@ describe('parseError: periphery namespaces resolve unhinted', () => {
 describe('parseError: fallbacks', () => {
     it('a non-colliding market code resolves with its message (704 -> MarketFrozen)', () => {
         const error = parseError(simulationError(704));
-        expect(error.type).toBe(MarketError.MarketFrozen);
+        expect(error.type).toBe(ContractErrorType.MarketFrozen);
         expect(error.type).toBe(704);
         expect(error.message).not.toContain('Unknown');
     });

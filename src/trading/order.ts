@@ -1,4 +1,5 @@
 import type { OrderParams } from '../contracts/router/types.js';
+import type { ContractErrorType } from '../errors.js';
 import { OrderKind } from '../contracts/market/types.js';
 import { SCALAR_18, mulDivFloor } from '../math/fixed.js';
 import { formatPrice, formatToken, formatTokenFloor } from '../float.js';
@@ -225,8 +226,13 @@ export function orderPriceBound(
 export interface OrderEstimate {
     /** `fills`: exact transition below. `rests`: creates but does not fill at this price. `gate`: can never fill. */
     outcome: 'fills' | 'rests' | 'gate';
-    /** Contract gate code (e.g. 713) when `outcome === 'gate'`, else `undefined`. */
-    gateCode: number | undefined;
+    /**
+     * The gate when `outcome === 'gate'`, else `undefined`: the mirrored
+     * contract error code (e.g. 713), or an SDK sentinel
+     * (`QuoteInvalidInput`, `QuoteOverflow`) for a failure the contract
+     * never sees.
+     */
+    gateCode: ContractErrorType | undefined;
     /** Human-readable reason for a `rests` or `gate` outcome. */
     reason: string | undefined;
     /** Skew-split base fee, token units. */
@@ -327,7 +333,7 @@ export function previewOrder(
     if (applied.kind === 'gate') {
         return {
             outcome: 'gate',
-            gateCode: applied.code,
+            gateCode: applied.code as ContractErrorType,
             reason: applied.reason,
             ...empty,
         };

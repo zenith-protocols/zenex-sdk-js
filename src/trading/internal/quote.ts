@@ -35,12 +35,18 @@ export type QuoteUnavailableCode =
  * sequence. `estimate` is a caller-side preview; `assumptions` lists the
  * facts it took as true, and any of them can change before a fill.
  * `unavailable` carries a `code` to branch on and a `reason` string for logs,
- * not for parsing.
+ * not for parsing. When `code` is `CONTRACT_GATE`, `contractCode` carries
+ * the mirrored contract error number.
  */
 export type QuoteResult<T> =
     | { kind: 'exact'; value: T; ledger: number }
     | { kind: 'estimate'; value: T; assumptions: string[] }
-    | { kind: 'unavailable'; code: QuoteUnavailableCode; reason: string };
+    | {
+          kind: 'unavailable';
+          code: QuoteUnavailableCode;
+          reason: string;
+          contractCode?: number;
+      };
 
 /**
  * Check that `value` is a valid ledger sequence and return it as a `number`.
@@ -79,8 +85,14 @@ export function estimate<T>(value: T, assumptions: string[]): QuoteResult<T> {
 }
 
 /** Wrap `code` and `reason` as an unavailable quote. Never throws. */
-export function unavailable<T>(code: QuoteUnavailableCode, reason: string): QuoteResult<T> {
-    return { kind: 'unavailable', code, reason };
+export function unavailable<T>(
+    code: QuoteUnavailableCode,
+    reason: string,
+    contractCode?: number,
+): QuoteResult<T> {
+    return contractCode === undefined
+        ? { kind: 'unavailable', code, reason }
+        : { kind: 'unavailable', code, reason, contractCode };
 }
 
 const U64_MAX = 2n ** 64n - 1n;
@@ -885,7 +897,7 @@ function runTransition(input: PositionActionInput): TransitionResult {
 
 function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
     if (error instanceof ProtocolGateError) {
-        return unavailable('CONTRACT_GATE', error.message);
+        return unavailable('CONTRACT_GATE', error.message, error.code);
     }
     if (
         error instanceof RangeError &&
