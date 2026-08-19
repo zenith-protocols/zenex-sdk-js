@@ -274,12 +274,10 @@ export function marketContext(
         market: market.data,
         position,
         price: resolvePrice(price),
-        priceUpdate: new Uint8Array(),
         vault: market.vaultAtomic(),
         treasuryRate: 0n,
         adl: market.adl,
         retirement: market.retirement,
-        collateralToken: market.token,
     };
 }
 

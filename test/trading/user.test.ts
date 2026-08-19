@@ -196,7 +196,6 @@ describe('marketContext', () => {
         expect(context.vault).toEqual(market.vaultAtomic());
         expect(context.treasuryRate).toBe(0n);
         expect(context.adl).toEqual({ long: false, short: true });
-        expect(context.collateralToken).toBe(TOKEN);
     });
 
     it('falls back to the wall clock, which the entries read cannot supply', async () => {

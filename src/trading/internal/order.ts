@@ -437,11 +437,6 @@ export interface OrderValidationContext {
      */
     price?: PriceData;
     /**
-     * Serialized update submitted when `price` was loaded; terminal markets
-     * ignore the payload by contract design.
-     */
-    priceUpdate?: Uint8Array;
-    /**
      * The side's stored position. When present, a decrease kind preflights
      * the `MAX_ORDERS_PER_SIDE` pending-decrease cap (contract error #733)
      * that `create_order` enforces when it appends to `decrease_orders`.

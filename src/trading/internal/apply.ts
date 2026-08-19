@@ -40,12 +40,6 @@ export interface MarketContext {
     position: Position;
     /** Verified mark used to price the action. */
     price: PriceData;
-    /**
-     * Opaque execution-price payload carried onto a built order and spliced at
-     * fill time. In the relay path the relay supplies its own signed update, so
-     * this is a caller placeholder. This quote never inspects or checks it.
-     */
-    priceUpdate: Uint8Array;
     /** Atomic vault state backing PnL and withdrawal capacity. */
     vault: VaultAtomicState;
     /** Protocol fee rate (SCALAR_18); apportions fees, never charges them. */
@@ -57,16 +51,7 @@ export interface MarketContext {
      * price_scalar, `delistedAt` is unix seconds.
      */
     retirement?: readonly [bigint, bigint];
-    /** Settlement token, when the context carries it. */
-    collateralToken?: string;
 }
-
-/** A {@link MarketContext} known to describe a specific subject and side. */
-export type SubjectBoundMarketContext = MarketContext & {
-    readonly subject: MarketSubject;
-    readonly adl: AdlState;
-    readonly collateralToken: string;
-};
 
 
 /**
@@ -157,7 +142,6 @@ export function applyOrder(
         status: snapshot.status,
         config: snapshot.config,
         price,
-        priceUpdate: snapshot.priceUpdate,
         position: snapshot.position,
     });
     // A real gate outranks the bound-not-crossed signal: rests only when the

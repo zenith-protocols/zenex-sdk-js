@@ -152,7 +152,6 @@ function snapshot(overrides: Partial<MarketContext> = {}): MarketContext {
         market: marketFor(open),
         position: open,
         price: price(),
-        priceUpdate: new Uint8Array([1, 2, 3]),
         vault: {
             totalAssets: 100_000_000_000n,
             totalSupply: 100_000_000_000n,
