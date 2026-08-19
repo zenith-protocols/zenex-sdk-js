@@ -168,6 +168,39 @@ export function exactPositionPnl(
 }
 
 /**
+ * Signed per-second funding rate each side's trader pays (SCALAR_18;
+ * positive = the side pays, negative = it receives). Mirrors
+ * `MarketData::accrue_funding`'s conservation exactly: the payer side is
+ * charged the `funding_min`-floored magnitude on its own notional; the
+ * receiver side is credited the payer's charge re-spread over its own
+ * notional (`payer_notional / receiver_notional`, floored), or nothing when
+ * it has no notional (the paid total pools instead of crediting anyone).
+ * A zero stored rate accrues nothing on either side.
+ */
+export function marketFundingRatesPerSide(
+    data: MarketData,
+    config: MarketConfig,
+): SidePair {
+    if (data.fundingRate === 0n) return { long: 0n, short: 0n };
+    const longsPay = data.fundingRate > 0n;
+    const magnitude =
+        data.fundingRate < 0n ? -data.fundingRate : data.fundingRate;
+    const charged =
+        magnitude > config.fundingMin ? magnitude : config.fundingMin;
+    const payerNotional = longsPay ? data.notional.long : data.notional.short;
+    const receiverNotional = longsPay
+        ? data.notional.short
+        : data.notional.long;
+    const receiverDelta =
+        receiverNotional > 0n
+            ? mulDivFloor(charged, payerNotional, receiverNotional)
+            : 0n;
+    return longsPay
+        ? { long: charged, short: -receiverDelta }
+        : { long: -receiverDelta, short: charged };
+}
+
+/**
  * Signed unrealized PnL of every position on `isLong`'s side, token-dec.
  *
  * A loss floors at the side's posted margin, because no more than that can
