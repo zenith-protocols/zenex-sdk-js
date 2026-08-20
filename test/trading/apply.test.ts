@@ -12,6 +12,7 @@ import type {
     PositionActionInput,
 } from '../../src/trading/internal/quote.js';
 import { orderExecutionPrice } from '../../src/trading/internal/order.js';
+import { ZenexErrorCode } from '../../src/errors.js';
 import type { MarketContext } from '../../src/trading/internal/apply.js';
 import type { PriceData } from '../../src/trading/internal/math.js';
 import {
@@ -393,6 +394,22 @@ describe('applyOrder gates and rests', () => {
         // A zero-notional increase adds only margin and stays available for
         // margin defense when opens are halted.
         expect(marginOnly.kind).toBe('fills');
+    });
+
+    it('gates a malformed snapshot price with the SDK sentinel, not #740', () => {
+        const result = applyOrder(
+            snapshot({ price: price({ bid: 1_100_000_000n }) }),
+            order(),
+        );
+
+        // bid > ask is an SDK input error the contract never sees; #740
+        // (StalePrice) must not be minted for it.
+        expect(result).toEqual({
+            kind: 'gate',
+            code: ZenexErrorCode.QuoteInvalidInput,
+            reason: 'market price is malformed',
+            ledger: 1_000,
+        });
     });
 
     it('gates a ninth pending decrease with code 733', () => {

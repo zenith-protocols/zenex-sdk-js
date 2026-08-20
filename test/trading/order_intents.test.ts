@@ -48,8 +48,8 @@ function encoded(params: OrderParams): unknown[] {
 
 describe('order intents', () => {
     it('carries the target contract so the params are self-describing', () => {
-        // `trading` is the field `buildOrderOperation` routes on; an intent is
-        // useless without it, which is why it is not defaulted.
+        // `market` is the field submission routes on; an intent is useless
+        // without it, which is why it is not defaulted.
         expect(openMarketParams({ ...base, notional: 100n, margin: 10n, priceBound: 5n }).market)
             .toBe(TRADING);
     });

@@ -2,6 +2,7 @@ import type { Call, OrderParams } from '../../contracts/router/types.js';
 import { FULL_CLOSE, MAX_ORDERS_PER_SIDE, OrderKind, Status, VaultOrderKind } from '../../contracts/market/types.js';
 import type { Position, MarketConfig } from '../../contracts/market/types.js';
 import type { i128, u32 } from '../../index.js';
+import { ZenexErrorCode } from '../../errors.js';
 import { checkedI128 } from '../../math/fixed.js';
 import type { PriceData } from './math.js';
 import { decodeLedgerSequence } from './quote.js';
@@ -100,8 +101,9 @@ export function orderKindFiresAbove(
 
 /**
  * Fields every position order carries, whatever its kind. Every builder below
- * returns `OrderParams` data, not XDR. Pass the result to `buildOrderOperation`,
- * which validates it against a ledger snapshot before submission.
+ * returns `OrderParams` data, not XDR. Preview the result with `applyOrder`
+ * (or `previewOrder`), which validates it against a ledger snapshot before
+ * submission.
  */
 export interface OrderIntentBase {
     /** The market contract the order is created on. */
@@ -405,11 +407,16 @@ const ORDER_KINDS = new Set<number>([
 ]);
 
 /**
- * One failed check returned by `validateOrder`. A batch order can fail
- * several checks at once; `buildOrderOperation` only surfaces the first.
+ * One failed check returned by `validateOrder`. An order can fail several
+ * checks at once; `applyOrder` only surfaces the first.
  */
 export interface OrderValidationIssue {
-    /** The market contract error code this failure maps to. */
+    /**
+     * The market contract error code this failure maps to, or a sentinel
+     * for an input error the contract never sees: `0` for an invalid
+     * snapshot ledger, `ZenexErrorCode.QuoteInvalidInput` for a malformed
+     * snapshot price.
+     */
     code: number;
     /** The `OrderParams` field at fault, or 'batch' when no single field is responsible. */
     field: keyof OrderParams | 'batch';
@@ -502,7 +509,7 @@ function validatePrice(price: PriceData): OrderValidationIssue[] {
     if (price.bid <= 0n || price.ask <= 0n || price.bid > price.ask) {
         return [
             issue(
-                740,
+                ZenexErrorCode.QuoteInvalidInput,
                 'batch',
                 'market price is malformed',
             ),
@@ -540,11 +547,10 @@ function validatePrice(price: PriceData): OrderValidationIssue[] {
  *   `context.position` already holds `MAX_ORDERS_PER_SIDE` pending
  *   decrease orders.
  * - 734 (`UnknownKind`): `kind` is not one of the six `OrderKind` values.
- * - 740: `context.price` is set and its `bid` or `ask` is not positive, or
- *   `bid` exceeds `ask`. This code number coincides with
- *   `MarketError::StalePrice` but does not test staleness. A malformed
- *   price never reaches the market contract, since the oracle verifier
- *   rejects it first.
+ * - `ZenexErrorCode.QuoteInvalidInput` (-1001): `context.price` is set and
+ *   its `bid` or `ask` is not positive, or `bid` exceeds `ask`. An SDK
+ *   sentinel, not a contract code: a malformed price never reaches the
+ *   market contract, since the oracle verifier rejects it first.
  * - 741 (`PriceBoundExceeded`): `context.price` is set, `kind` is a market
  *   kind, `priceBound` is positive, and the execution price would cross
  *   it.

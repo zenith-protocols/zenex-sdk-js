@@ -246,8 +246,7 @@ export class MarketRouterContract extends Contract {
      *   fill is reported in the appended outcome, not thrown.
      *
      * @deprecated Low-level ABI compatibility only. User-facing instant
-     * execution should use `buildOrderOperation` with `fillOrKill`, which
-     * selects the strict `create_and_fill` path.
+     * execution should use `createAndFill`, the strict fill-or-kill path.
      */
     createAndTryFill(
         calls: Call[],
@@ -326,8 +325,8 @@ export class MarketRouterContract extends Contract {
      * - `fee_collected`: the fee moved from `user` to `feeRecipient`.
      *
      * @deprecated Low-level ABI compatibility only. Relayed instant
-     * execution should use `buildOrderOperation` with `fillOrKill`, which
-     * selects the strict `create_and_fill_with_fee` path.
+     * execution should use `createAndFillWithFee`, the strict fill-or-kill
+     * path.
      */
     createAndTryFillWithFee(args: CreateAndFillWithFeeArgs): string {
         return this.call(

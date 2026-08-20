@@ -237,13 +237,16 @@ describe('estimateMarket', () => {
     });
 
     it('carries the snapshot facts: raws, vault totals, and the price echo', () => {
+        // Distinct bid/ask and a fixed publish time, so each echoed field is
+        // asserted against its own exact source and a swap cannot cancel out.
+        const price = new Price(px(10), px(11), 1_234n);
         const est = estimateMarket(
             loadedMarket({
                 notional: pair(unit(100), unit(50)),
                 margin: pair(unit(10), unit(5)),
                 tokens: pair(unit(10), unit(5)),
             }),
-            px(10),
+            price,
         );
         expect(est.long.notional).toBeCloseTo(100, 6);
         expect(est.short.notional).toBeCloseTo(50, 6);
@@ -251,9 +254,9 @@ describe('estimateMarket', () => {
         expect(est.short.margin).toBeCloseTo(5, 6);
         expect(est.vaultAssets).toBeGreaterThan(0);
         expect(est.vaultSupply).toBeGreaterThan(0);
-        expect(est.bid).toBeCloseTo(10, 6);
-        expect(est.ask).toBeCloseTo(10, 6);
-        expect(est.publishTime).toBeGreaterThanOrEqual(0);
+        expect(est.bid).toBe(10);
+        expect(est.ask).toBe(11);
+        expect(est.publishTime).toBe(1234);
     });
 
     it('reports open interest and capacity per side', () => {

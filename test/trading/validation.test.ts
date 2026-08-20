@@ -1,6 +1,7 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import { describe, expect, it } from 'vitest';
 import { validateOrder } from '../../src/trading/internal/order.js';
+import { ZenexErrorCode } from '../../src/errors.js';
 import { OrderKind, Status } from '../../src/contracts/market/types.js';
 import type {
     Position,
@@ -149,11 +150,33 @@ describe('validateOrder', () => {
         );
     });
 
-    it('fails closed for a malformed market price', () => {
+    it('fails closed for a malformed market price with the SDK sentinel', () => {
+        const inverted = validateOrder(order(), {
+            ...context(),
+            price: { ...context().price, bid: 106n, ask: 105n },
+        });
+
+        // An SDK input error, not a contract gate: no issue may carry a
+        // contract code (the oracle rejects a malformed price with its own
+        // codes before the market contract ever sees it, so #740 in
+        // particular would be a lie).
+        expect(inverted).toContainEqual(
+            expect.objectContaining({
+                code: ZenexErrorCode.QuoteInvalidInput,
+                field: 'batch',
+            }),
+        );
+        expect(inverted.map((entry) => entry.code)).not.toContain(740);
+
         expect(
             issueCodes(order(), {
-                price: { ...context().price, bid: 106n, ask: 105n },
+                price: { ...context().price, bid: 0n },
             }),
-        ).toContain(740);
+        ).toContain(ZenexErrorCode.QuoteInvalidInput);
+        expect(
+            issueCodes(order(), {
+                price: { ...context().price, bid: -1n, ask: -1n },
+            }),
+        ).toContain(ZenexErrorCode.QuoteInvalidInput);
     });
 });
