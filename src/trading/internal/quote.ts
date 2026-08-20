@@ -10,21 +10,16 @@ const U32_MAX = 4_294_967_295;
 /**
  * Why a `QuoteResult` came back `unavailable` instead of a value.
  * `MISSING_STATE` is a state argument the quote needed but the caller did not
- * supply. `INCONSISTENT_LEDGER` is chain state read at mismatched ledgers.
- * `STALE_PRICE` is a price argument outside the quote's freshness window.
- * `INVALID_INPUT` is an argument the SDK rejected before contract math ran.
- * `CONTRACT_OVERFLOW` is a value outside the i128 range. `CONTRACT_GATE`
- * mirrors a contract error; the `reason` string on the result names which one.
- * `NO_WITHDRAWABLE_MARGIN` is a position with no margin free to withdraw.
+ * supply. `INVALID_INPUT` is an argument the SDK rejected before contract
+ * math ran. `CONTRACT_OVERFLOW` is a value outside the i128 range.
+ * `CONTRACT_GATE` mirrors a contract error; the `reason` string on the
+ * result names which one, and `contractCode` carries its number.
  */
 export type QuoteUnavailableCode =
     | 'MISSING_STATE'
-    | 'INCONSISTENT_LEDGER'
-    | 'STALE_PRICE'
     | 'INVALID_INPUT'
     | 'CONTRACT_OVERFLOW'
-    | 'CONTRACT_GATE'
-    | 'NO_WITHDRAWABLE_MARGIN';
+    | 'CONTRACT_GATE';
 
 /**
  * The outcome of a quote call across the quoting API. Check `kind` before you
@@ -221,6 +216,16 @@ export interface PositionActionOutcome {
      * `relayFee`, which settle outside this simulation.
      */
     walletPayout: bigint;
+    /**
+     * Token-dec, never negative. The shortfall the vault absorbs when a
+     * close settles at negative equity, or a partial decrease's remaining
+     * margin floors at zero. Mirrors the `bad_debt` leg of the fill
+     * receipts. On the voluntary path this quote models, the liquidatable
+     * gate (#723) and the margin gates (#713) close before equity turns
+     * negative, so this reads zero except under a degenerate config with
+     * zeroed margin requirements.
+     */
+    badDebt: bigint;
     /** Token-dec. The amount this action added to the trader's claimable funding balance, not the running total. */
     claimableFundingDelta: bigint;
     /** The margin gates evaluated against `postPosition` and `postMarket`, at the input price and vault assets. */
@@ -982,6 +987,7 @@ export function quotePositionAction(
                 fees: transition.fees,
                 realizedPnl: transition.realizedPnl,
                 walletPayout: transition.walletPayout,
+                badDebt: transition.badDebt,
                 claimableFundingDelta: transition.claimableFundingDelta,
                 margin: marginState(
                     transition.position,

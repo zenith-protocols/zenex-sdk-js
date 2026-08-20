@@ -619,6 +619,7 @@ describe('exact position action transitions', () => {
         expect(result.value.fees.impact).toBe(expected.impact_fee);
         expect(result.value.walletPayout).toBe(expected.returned);
         expect(result.value.realizedPnl).toBe(0n);
+        expect(result.value.badDebt).toBe(0n);
     });
 
     it('matches the contract-derived full close and canonical zero state', () => {
@@ -643,6 +644,7 @@ describe('exact position action transitions', () => {
         expect(result.value.walletPayout).toBe(expected.returned);
         expect(result.value.fees.base).toBe(expected.base_fee);
         expect(result.value.fees.impact).toBe(expected.impact_fee);
+        expect(result.value.badDebt).toBe(expected.bad_debt);
     });
 
     it('rejects the contract-derived voluntary underwater full close with code 723', () => {
@@ -706,6 +708,43 @@ describe('exact position action transitions', () => {
         expect(result.value.walletPayout).toBe(expected.returned);
         expect(result.value.fees.base).toBe(expected.base_fee);
         expect(result.value.fees.impact).toBe(expected.impact_fee);
+    });
+
+    it('surfaces bad debt when a margin overdraw slips the zeroed gates', () => {
+        // The only voluntary path where `bad_debt` can settle nonzero: a
+        // partial decrease withdrawing 150_000_000n from a position holding
+        // 100_000_000n, under a degenerate config whose zeroed margin
+        // requirements let the survivor pass `require_valid` (a sliver of
+        // profit keeps its settled equity above the ceil-rounded impact
+        // fee). The margin floors at zero and the vault absorbs the
+        // 50_000_000n excess.
+        const quoteInput = positionVectorInput('position.partial_decrease.flat');
+        quoteInput.config.feeDom = 0n;
+        quoteInput.config.feeNonDom = 0n;
+        quoteInput.config.impactScalar = 10n ** 30n;
+        quoteInput.config.initMargin = 0n;
+        quoteInput.config.maintenanceMargin = 0n;
+        quoteInput.price = {
+            bid: 1_002_000_000n,
+            ask: 1_002_000_000n,
+            publishTime: 1n,
+        };
+        quoteInput.action = {
+            kind: 'decrease',
+            notional: 500_000_000n,
+            margin: 150_000_000n,
+        };
+        const result = quotePositionAction(quoteInput);
+
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        expect(result.value.badDebt).toBe(50_000_000n);
+        // Withdrawal plus the closed fraction's 1_000_000n profit, less the
+        // ceil-rounded 1n impact fee.
+        expect(result.value.walletPayout).toBe(150_999_999n);
+        expect(result.value.postPosition.margin).toBe(0n);
+        // The market aggregate sheds only the margin the position held.
+        expect(result.value.postMarket.margin.long).toBe(0n);
     });
 
     it('rejects a dust-band decrease with locked notional with code 721', () => {

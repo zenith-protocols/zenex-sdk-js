@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
     QuoteResult,
+    QuoteUnavailableCode,
     decodeLedgerSequence,
     estimate,
     exact,
@@ -63,5 +64,14 @@ describe('quote results and provenance', () => {
         });
         expect(describeResult(estimated)).toBe('market accrual not advanced:7');
         expect(describeResult(missing)).toBe('MISSING_STATE:market state is absent');
+    });
+
+    it('declares only unavailable codes the SDK actually produces', () => {
+        // Every variant must have a producer in src/; a dead variant is a
+        // branch consumers write for nothing. Extending this union requires
+        // a new call site that emits the code.
+        expectTypeOf<QuoteUnavailableCode>().toEqualTypeOf<
+            'MISSING_STATE' | 'INVALID_INPUT' | 'CONTRACT_OVERFLOW' | 'CONTRACT_GATE'
+        >();
     });
 });
