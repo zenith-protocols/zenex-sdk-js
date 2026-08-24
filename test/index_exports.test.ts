@@ -93,8 +93,7 @@ describe('package root exports', () => {
         expect(SDK.MarketEventType.DepositFill).toBe('deposit_fill');
         expect(SDK.MarketEventType.RedeemFill).toBe('redeem_fill');
         expect(SDK.MarketEventType.CloseFill).toBe('close_fill');
-        expect(SDK.MarketEventType.FundingAccrual).toBe('funding_accrual');
-        expect(SDK.MarketEventType.BorrowingAccrual).toBe('borrowing_accrual');
+        expect(SDK.MarketEventType.AccrualUpdate).toBe('accrual_update');
         expect(SDK.MarketEventType.IncreaseFill).toBe('increase_fill');
         expect(SDK.MarketEventType.DecreaseFill).toBe('decrease_fill');
         expect(SDK.MarketEventType.Liquidation).toBe('liquidation');
