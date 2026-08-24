@@ -221,21 +221,21 @@ const marginCases: Record<string, ContractCase> = {
             funding: 2n,
             borrowing: 1n,
             debit: 3n,
-            covered: 2n,
-            uncovered: 1n,
-            collateral_change: -3n,
+            covered: 0n,
+            uncovered: 3n,
+            collateral_change: -5n,
         },
         expected: {
             position_notional: 40n,
             position_tokens: 40_000_000_000n,
-            position_collateral: 17n,
+            position_collateral: 15n,
             post_position_funding_idx: 25_000_000_000_000_001n,
             post_position_borrowing_idx: 25_000_000_000_000_000n,
             funding_pool_delta: 2n,
             funding_owed_delta: 0n,
             claimable_funding_delta: 0n,
             gross_collateral: 2n,
-            trader_return: 0n,
+            trader_return: 2n,
         },
     },
     'margin.fixed_withdraw.equal_accrued_debit': {
@@ -263,21 +263,21 @@ const marginCases: Record<string, ContractCase> = {
             funding: 2n,
             borrowing: 1n,
             debit: 3n,
-            covered: 3n,
-            uncovered: 0n,
-            collateral_change: -3n,
+            covered: 0n,
+            uncovered: 3n,
+            collateral_change: -6n,
         },
         expected: {
             position_notional: 40n,
             position_tokens: 40_000_000_000n,
-            position_collateral: 17n,
+            position_collateral: 14n,
             post_position_funding_idx: 25_000_000_000_000_001n,
             post_position_borrowing_idx: 25_000_000_000_000_000n,
             funding_pool_delta: 2n,
             funding_owed_delta: 0n,
             claimable_funding_delta: 0n,
             gross_collateral: 3n,
-            trader_return: 0n,
+            trader_return: 3n,
         },
     },
     'margin.fixed_withdraw.above_accrued_debit': {
@@ -305,21 +305,21 @@ const marginCases: Record<string, ContractCase> = {
             funding: 2n,
             borrowing: 1n,
             debit: 3n,
-            covered: 3n,
-            uncovered: 0n,
-            collateral_change: -4n,
+            covered: 0n,
+            uncovered: 3n,
+            collateral_change: -7n,
         },
         expected: {
             position_notional: 40n,
             position_tokens: 40_000_000_000n,
-            position_collateral: 16n,
+            position_collateral: 13n,
             post_position_funding_idx: 25_000_000_000_000_001n,
             post_position_borrowing_idx: 25_000_000_000_000_000n,
             funding_pool_delta: 2n,
             funding_owed_delta: 0n,
             claimable_funding_delta: 0n,
             gross_collateral: 4n,
-            trader_return: 1n,
+            trader_return: 4n,
         },
     },
 };
@@ -710,14 +710,14 @@ describe('exact position action transitions', () => {
         expect(result.value.fees.impact).toBe(expected.impact_fee);
     });
 
-    it('surfaces bad debt when a margin overdraw slips the zeroed gates', () => {
-        // The only voluntary path where `bad_debt` can settle nonzero: a
-        // partial decrease withdrawing 150_000_000n from a position holding
-        // 100_000_000n, under a degenerate config whose zeroed margin
-        // requirements let the survivor pass `require_valid` (a sliver of
-        // profit keeps its settled equity above the ceil-rounded impact
-        // fee). The margin floors at zero and the vault absorbs the
-        // 50_000_000n excess.
+    it('caps a margin overdraw at the surviving margin, minting no bad debt', () => {
+        // A partial decrease withdrawing 150_000_000n from a position
+        // holding 100_000_000n, under a degenerate config whose zeroed
+        // margin requirements let the survivor pass `require_valid`. Before
+        // the GMX V2-parity priority, this overdraw floored the margin at
+        // zero and drew 50_000_000n of bad debt from the vault. Now the
+        // withdrawal claims last and caps at the surviving margin, so the
+        // full 100_000_000n pays out and the vault absorbs nothing.
         const quoteInput = positionVectorInput('position.partial_decrease.flat');
         quoteInput.config.feeDom = 0n;
         quoteInput.config.feeNonDom = 0n;
@@ -738,10 +738,11 @@ describe('exact position action transitions', () => {
 
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
-        expect(result.value.badDebt).toBe(50_000_000n);
-        // Withdrawal plus the closed fraction's 1_000_000n profit, less the
-        // ceil-rounded 1n impact fee.
-        expect(result.value.walletPayout).toBe(150_999_999n);
+        expect(result.value.badDebt).toBe(0n);
+        // The capped 100_000_000n withdrawal plus the closed fraction's
+        // 1_000_000n profit, less the ceil-rounded 1n impact fee the profit
+        // covers.
+        expect(result.value.walletPayout).toBe(100_999_999n);
         expect(result.value.postPosition.margin).toBe(0n);
         // The market aggregate sheds only the margin the position held.
         expect(result.value.postMarket.margin.long).toBe(0n);
@@ -850,7 +851,7 @@ describe('funding, borrowing, and margin-only actions', () => {
         'margin.fixed_withdraw.equal_accrued_debit',
         'margin.fixed_withdraw.above_accrued_debit',
     ])(
-        '$id settles paid accrual before returning withdrawal proceeds',
+        '$id pays the withdrawal in full and debits the accrual from margin',
         (id) => {
             const golden = vector(marginCases, id);
             const work = golden.work ?? {};

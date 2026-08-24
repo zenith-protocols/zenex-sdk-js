@@ -212,18 +212,22 @@ export interface PositionActionOutcome {
     realizedPnl: bigint;
     /**
      * Token-dec. What the trader is owed back to their wallet, net of the
-     * settled fees. Zero on an increase. Excludes `executionFee` and
-     * `relayFee`, which settle outside this simulation.
+     * settled fees. Zero on an increase. On a partial decrease, the paid
+     * withdrawal plus the profit the fees did not consume: fees pay from
+     * profit first, and the withdrawal caps at the margin that survives the
+     * loss and the uncovered fees. Excludes `executionFee` and `relayFee`,
+     * which settle outside this simulation.
      */
     walletPayout: bigint;
     /**
      * Token-dec, never negative. The shortfall the vault absorbs when a
-     * close settles at negative equity, or a partial decrease's remaining
-     * margin floors at zero. Mirrors the `bad_debt` leg of the fill
-     * receipts. On the voluntary path this quote models, the liquidatable
-     * gate (#723) and the margin gates (#713) close before equity turns
-     * negative, so this reads zero except under a degenerate config with
-     * zeroed margin requirements.
+     * close settles at negative equity, or a partial decrease's loss and
+     * uncovered fees exceed its margin. The withdrawal itself can no longer
+     * mint bad debt: it caps at the margin that survives. Mirrors the
+     * `bad_debt` leg of the fill receipts. On the voluntary path this quote
+     * models, the liquidatable gate (#723) and the margin gates (#713)
+     * close before equity turns negative, so this reads zero except under a
+     * degenerate config with zeroed margin requirements.
      */
     badDebt: bigint;
     /** Token-dec. The amount this action added to the trader's claimable funding balance, not the running total. */
@@ -730,10 +734,16 @@ function partialDecreaseTransition(
     );
     const profit = pnl > 0n ? pnl : 0n;
     const loss = pnl < 0n ? pnl : 0n;
-    const proceeds = addI128(margin, profit);
-    const covered = marginDebit < proceeds ? marginDebit : proceeds;
+    // The fees pay from the realized profit first. The margin pays the
+    // uncovered rest, so a fee never reduces the withdrawal.
+    const covered = marginDebit < profit ? marginDebit : profit;
     const uncovered = subI128(marginDebit, covered);
-    const marginChange = subI128(subI128(loss, margin), uncovered);
+    // The withdrawal claims last: it caps at the margin that survives the
+    // loss and the uncovered fees, so it never mints bad debt.
+    const room = addI128(position.margin, subI128(loss, uncovered));
+    const cap = room > 0n ? room : 0n;
+    const withdrawal = margin < cap ? margin : cap;
+    const marginChange = subI128(subI128(loss, uncovered), withdrawal);
 
     // Margin floors at zero; the excess is bad debt drawn from the vault.
     const nextMargin = addI128(position.margin, marginChange);
@@ -765,7 +775,7 @@ function partialDecreaseTransition(
         fees,
         executionPrice: exitPrice(input.price, input.isLong),
         realizedPnl: pnl,
-        walletPayout: subI128(proceeds, covered),
+        walletPayout: addI128(withdrawal, subI128(profit, covered)),
         badDebt,
         claimableFundingDelta: settled.claimableFundingDelta,
         settlementVaultLeg: subI128(feeLeg, addI128(pnl, badDebt)),

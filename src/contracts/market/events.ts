@@ -1,8 +1,8 @@
-import { i128, u32, u64 } from '../../index.js';
+import { i128, u32 } from '../../index.js';
 import { ZenexContractType, BaseZenexEvent } from '../../base_event.js';
 import {
-    Order, VaultOrder, SidePair, MarketConfig,
-    parseOrder, parseVaultOrder, parseSidePair, parseMarketConfig,
+    Order, VaultOrder, MarketConfig,
+    parseOrder, parseVaultOrder, parseMarketConfig,
 } from './types.js';
 
 /** Discriminates a decoded {@link MarketEvent}. */
@@ -15,8 +15,7 @@ export enum MarketEventType {
     RedeemFill = 'redeem_fill',
     ClaimFunding = 'claim_funding',
     AdlUpdate = 'adl_update',
-    FundingAccrual = 'funding_accrual',
-    BorrowingAccrual = 'borrowing_accrual',
+    AccrualUpdate = 'accrual_update',
     StatusUpdate = 'status_update',
     ConfigUpdate = 'config_update',
     TerminalPriceUpdate = 'terminal_price_update',
@@ -133,24 +132,13 @@ export interface MarketAdlUpdateEvent extends BaseMarketEvent {
     short: boolean;
 }
 
-/** The market's post-accrual funding state, emitted by the `accrue` entry. */
-export interface MarketFundingAccrualEvent extends BaseMarketEvent {
-    eventType: MarketEventType.FundingAccrual;
-    /** Signed funding rate, + = longs pay (SCALAR_18, per second). */
-    fundingRate: i128;
-    /** Cumulative funding index per side (SCALAR_18). */
-    fundingIdx: SidePair;
-    /** Accrual timestamp, seconds. */
-    timestamp: u64;
-}
-
-/** The market's post-accrual borrowing state, emitted by `accrue`. */
-export interface MarketBorrowingAccrualEvent extends BaseMarketEvent {
-    eventType: MarketEventType.BorrowingAccrual;
-    /** Cumulative borrowing index per side (SCALAR_18). */
-    borrowingIdx: SidePair;
-    /** Accrual timestamp, seconds. */
-    timestamp: u64;
+/**
+ * A keeper advanced the accrual indices via `accrue`. The event only marks
+ * the poke and carries no payload. Read the post-accrual funding and
+ * borrowing state from `get_market_data`.
+ */
+export interface MarketAccrualUpdateEvent extends BaseMarketEvent {
+    eventType: MarketEventType.AccrualUpdate;
 }
 
 /** Operational status changed via `set_status`. */
@@ -247,7 +235,7 @@ export interface MarketDecreaseFillEvent extends BaseMarketEvent {
     notional: i128;
     /** Base size closed, base-dec. */
     tokens: i128;
-    /** Requested margin withdrawal, gross of the itemized fees, token-dec. */
+    /** The requested margin withdrawal, token-dec. The paid amount caps at the surviving margin; see `returned`. */
     margin: i128;
     /** Realized PnL on the closed fraction (post-haircut), gross of settled costs, token-dec. */
     pnl: i128;
@@ -259,7 +247,7 @@ export interface MarketDecreaseFillEvent extends BaseMarketEvent {
     funding: i128;
     /** Settled borrowing fee, token-dec. */
     borrowing: i128;
-    /** Amount transferred to the trader, token-dec. It is the withdrawal plus the profit leg, less the fees they cover. A realized loss debits the surviving margin, not this payout. */
+    /** Amount transferred to the trader, token-dec. The paid withdrawal plus the profit the fees did not consume: fees pay from profit first, the margin absorbs the uncovered rest, and the withdrawal caps at the margin that survives. */
     returned: i128;
 }
 
@@ -345,8 +333,7 @@ export type MarketEvent =
     | MarketRedeemFillEvent
     | MarketClaimFundingEvent
     | MarketAdlUpdateEvent
-    | MarketFundingAccrualEvent
-    | MarketBorrowingAccrualEvent
+    | MarketAccrualUpdateEvent
     | MarketStatusUpdateEvent
     | MarketConfigUpdateEvent
     | MarketTerminalPriceUpdateEvent

@@ -625,6 +625,9 @@ export class MarketContract extends Contract {
      *
      * @param price - The keeper's signed price update for this market's feed.
      *
+     * Emits a payload-free `accrual_update` marker event; read the
+     * post-accrual state from the returned market data or `get_market_data`.
+     *
      * # Returns
      * - The accrued market data.
      *
