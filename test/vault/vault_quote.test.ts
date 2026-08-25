@@ -232,8 +232,8 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
         borrowingIdx: pair(),
         fundingRate: 0n,
         accruedAt: 2n,
-        fundingPool: 0n,
-        fundingOwed: 0n,
+        creditPool: 0n,
+        creditOwed: 0n,
         lastPriceTime: 0n,
         ...overrides,
     };

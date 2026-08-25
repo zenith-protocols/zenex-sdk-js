@@ -64,7 +64,7 @@ export class MarketContract extends Contract {
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         cancelVaultOrder: (result: string): i128 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        claimFunding: (result: string): i128 =>
+        claimCredit: (result: string): i128 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         executeOrder: (result: string): i128 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
@@ -74,7 +74,7 @@ export class MarketContract extends Contract {
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         executeVaultOrder: (result: string): i128 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        getClaimableFunding: (result: string): i128 =>
+        getClaimableCredit: (result: string): i128 =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
         // --- struct-decoding views ---
         updateAdlState: (result: string): AdlState =>
@@ -420,7 +420,8 @@ export class MarketContract extends Contract {
     }
 
     /**
-     * Pay out `user`'s accrued claimable funding balance from the pool.
+     * Pay out `user`'s accrued claimable credit balance from the pool
+     * (earned funding, plus any payout whose direct transfer failed).
      * `user` authorizes.
      *
      * # Returns
@@ -430,9 +431,9 @@ export class MarketContract extends Contract {
      * - MarketFrozen (704) if the market status is `Frozen`.
      * - NothingToClaim (760) if `user` has no claimable balance.
      */
-    claimFunding(user: string): string {
+    claimCredit(user: string): string {
         return this.call(
-            'claim_funding',
+            'claim_credit',
             Address.fromString(user).toScVal(),
         ).toXDR('base64');
     }
@@ -730,14 +731,15 @@ export class MarketContract extends Contract {
     }
 
     /**
-     * Read `user`'s claimable funding balance.
+     * Read `user`'s claimable credit balance.
      *
      * # Returns
-     * - The funding owed to `user`, `0` if none (token-dec).
+     * - The funding owed to `user`, plus any payout whose direct transfer
+     *   failed, `0` if none (token-dec).
      */
-    getClaimableFunding(user: string): string {
+    getClaimableCredit(user: string): string {
         return this.call(
-            'get_claimable_funding',
+            'get_claimable_credit',
             Address.fromString(user).toScVal(),
         ).toXDR('base64');
     }

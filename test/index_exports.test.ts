@@ -186,7 +186,7 @@ describe('package root exports', () => {
         expect(SDK.marketPositionLedgerKey).toBeTypeOf('function');
         expect(SDK.marketVaultOrderLedgerKey).toBeTypeOf('function');
         expect(SDK.marketOrderCounterLedgerKey).toBeTypeOf('function');
-        expect(SDK.marketClaimableFundingLedgerKey).toBeTypeOf('function');
+        expect(SDK.marketClaimableCreditLedgerKey).toBeTypeOf('function');
         expect(SDK.marketOrderLedgerKey).toBeTypeOf('function');
     });
 

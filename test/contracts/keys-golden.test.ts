@@ -7,7 +7,7 @@ import {
     marketPositionLedgerKey,
     marketVaultOrderLedgerKey,
     marketOrderCounterLedgerKey,
-    marketClaimableFundingLedgerKey,
+    marketClaimableCreditLedgerKey,
     marketOrderLedgerKey,
 } from '../../src/contracts/market/keys.js';
 import { tokenBalanceLedgerKey } from '../../src/token.js';
@@ -88,7 +88,7 @@ const dataKey = unionSpec('DataKey', [
     tupleCase('VaultOrder', [ADDRESS, U32]),
     tupleCase('Order', [ADDRESS, U32]),
     tupleCase('OrderCounter', [ADDRESS]),
-    tupleCase('ClaimableFunding', [ADDRESS]),
+    tupleCase('ClaimableCredit', [ADDRESS]),
 ]);
 
 // The OZ fungible-token `Balance(Address)` persistent slot.
@@ -173,7 +173,7 @@ describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () =
         );
     });
 
-    it('OrderCounter / ClaimableFunding (user) keys match the spec encoder', () => {
+    it('OrderCounter / ClaimableCredit (user) keys match the spec encoder', () => {
         expect(b64(marketOrderCounterLedgerKey(MARKET, ACCOUNT_USER))).toBe(
             b64(
                 expectedContractDataKey(
@@ -182,11 +182,11 @@ describe('golden ledger-key encoding vs @stellar/stellar-sdk spec encoder', () =
                 ),
             ),
         );
-        expect(b64(marketClaimableFundingLedgerKey(MARKET, ACCOUNT_USER))).toBe(
+        expect(b64(marketClaimableCreditLedgerKey(MARKET, ACCOUNT_USER))).toBe(
             b64(
                 expectedContractDataKey(
                     MARKET,
-                    specScVal(dataKey, 'ClaimableFunding', [ACCOUNT_USER]),
+                    specScVal(dataKey, 'ClaimableCredit', [ACCOUNT_USER]),
                 ),
             ),
         );

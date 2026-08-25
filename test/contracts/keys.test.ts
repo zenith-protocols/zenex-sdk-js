@@ -12,7 +12,7 @@ import {
     marketPositionLedgerKey,
     marketVaultOrderLedgerKey,
     marketOrderCounterLedgerKey,
-    marketClaimableFundingLedgerKey,
+    marketClaimableCreditLedgerKey,
     marketOrderLedgerKey,
 } from '../../src/contracts/market/keys.js';
 import { tokenBalanceLedgerKey } from '../../src/token.js';
@@ -73,10 +73,10 @@ describe('contract keys: trading DataKey mirror (market/src/storage.rs)', () => 
         expect(decodeKeyVec(orderCounterKey.contractData().key())).toEqual(['OrderCounter', USER]);
     });
 
-    it('ClaimableFunding(user) builds [Symbol("ClaimableFunding"), user]', () => {
-        const claimableFundingKey = marketClaimableFundingLedgerKey(CONTRACT_ID, USER);
-        expect(claimableFundingKey.contractData().durability().name).toBe('persistent');
-        expect(decodeKeyVec(claimableFundingKey.contractData().key())).toEqual(['ClaimableFunding', USER]);
+    it('ClaimableCredit(user) builds [Symbol("ClaimableCredit"), user]', () => {
+        const claimableCreditKey = marketClaimableCreditLedgerKey(CONTRACT_ID, USER);
+        expect(claimableCreditKey.contractData().durability().name).toBe('persistent');
+        expect(decodeKeyVec(claimableCreditKey.contractData().key())).toEqual(['ClaimableCredit', USER]);
     });
 
     it('persistent keys target the requested contract', () => {

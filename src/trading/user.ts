@@ -3,7 +3,7 @@ import type { Network } from '../index.js';
 import type { Order, VaultOrder } from '../contracts/market/types.js';
 import { parseOrder, parsePosition, parseVaultOrder } from '../contracts/market/types.js';
 import {
-    marketClaimableFundingLedgerKey,
+    marketClaimableCreditLedgerKey,
     marketOrderCounterLedgerKey,
     marketOrderLedgerKey,
     marketPositionLedgerKey,
@@ -49,12 +49,12 @@ export class MarketUser {
         public short: MarketPosition,
         /** Next order id for this user (trade + vault), allocated from 1. */
         public orderCounter: number,
-        /** Funding owed to the user, token-dec. */
-        public claimableFunding: bigint,
+        /** Funding owed to the user, plus any parked failed payout, token-dec. */
+        public claimableCredit: bigint,
     ) {}
 
     /**
-     * Read one subject's positions, counter, and claimable funding. One
+     * Read one subject's positions, counter, and claimable credit. One
      * `getLedgerEntries`, four keys.
      */
     static async load(
@@ -67,7 +67,7 @@ export class MarketUser {
             keys.long,
             keys.short,
             keys.orderCounter,
-            keys.claimableFunding,
+            keys.claimableCredit,
         ]);
         return decodeUser(marketId, userId, batch);
     }
@@ -144,15 +144,15 @@ export class MarketUser {
     }
 
     /**
-     * What a `claim_funding` call would pay out right now, token-dec:
-     * {@link MarketUser.claimableFunding} capped at what the market's
-     * funding pool holds — the contract pays the minimum and keeps the
+     * What a `claim_credit` call would pay out right now, token-dec:
+     * {@link MarketUser.claimableCredit} capped at what the market's
+     * credit pool holds — the contract pays the minimum and keeps the
      * remainder claimable for a later call.
      */
     claimable(market: Market): bigint {
-        const pool = market.data.fundingPool;
+        const pool = market.data.creditPool;
         const amount =
-            this.claimableFunding < pool ? this.claimableFunding : pool;
+            this.claimableCredit < pool ? this.claimableCredit : pool;
         return amount > 0n ? amount : 0n;
     }
 }
@@ -165,13 +165,13 @@ export function marketUserKeys(
     long: xdr.LedgerKey;
     short: xdr.LedgerKey;
     orderCounter: xdr.LedgerKey;
-    claimableFunding: xdr.LedgerKey;
+    claimableCredit: xdr.LedgerKey;
 } {
     return {
         long: marketPositionLedgerKey(marketId, userId, true),
         short: marketPositionLedgerKey(marketId, userId, false),
         orderCounter: marketOrderCounterLedgerKey(marketId, userId),
-        claimableFunding: marketClaimableFundingLedgerKey(marketId, userId),
+        claimableCredit: marketClaimableCreditLedgerKey(marketId, userId),
     };
 }
 
@@ -197,9 +197,9 @@ export function decodeUser(
         keys.orderCounter,
         `order counter for ${userId} on ${marketId}`,
     );
-    const funding = batch.at(
-        keys.claimableFunding,
-        `claimable funding for ${userId} on ${marketId}`,
+    const credit = batch.at(
+        keys.claimableCredit,
+        `claimable credit for ${userId} on ${marketId}`,
     );
 
     return new MarketUser(
@@ -210,6 +210,6 @@ export function decodeUser(
         // Absent counter means the user has never created an order; the
         // contract allocates from 1, so 0 is the correct "none yet".
         counter ? Number(scValToNative(counter)) : 0,
-        funding ? (scValToNative(funding) as bigint) : 0n,
+        credit ? (scValToNative(credit) as bigint) : 0n,
     );
 }

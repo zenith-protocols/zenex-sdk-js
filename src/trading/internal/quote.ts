@@ -388,9 +388,9 @@ function settleFees(
     const { funding } = quoted.fees;
     const earnedFunding = quoted.claimableFundingDelta;
 
-    if (funding > 0n) market.fundingPool = addI128(market.fundingPool, funding);
+    if (funding > 0n) market.creditPool = addI128(market.creditPool, funding);
     if (earnedFunding > 0n)
-        market.fundingOwed = addI128(market.fundingOwed, earnedFunding);
+        market.creditOwed = addI128(market.creditOwed, earnedFunding);
     position.fundingIdx = pairValue(market.fundingIdx, isLong);
     position.borrowingIdx = pairValue(market.borrowingIdx, isLong);
 

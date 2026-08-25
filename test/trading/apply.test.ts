@@ -76,8 +76,8 @@ function marketFor(open: Position, isLong = true): MarketData {
         borrowingIdx: pair(),
         fundingRate: 0n,
         accruedAt: 1n,
-        fundingPool: 0n,
-        fundingOwed: 0n,
+        creditPool: 0n,
+        creditOwed: 0n,
     };
 }
 

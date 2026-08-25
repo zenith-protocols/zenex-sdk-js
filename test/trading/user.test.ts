@@ -8,7 +8,7 @@ import { loadTokenBalance, loadTokenBalances } from '../../src/token.js';
 import { loadTreasuryInstance, loadTreasuryRate } from '../../src/trading/treasury.js';
 import { contractInstanceLedgerKey } from '../../src/contracts/keys.js';
 import {
-    marketClaimableFundingLedgerKey,
+    marketClaimableCreditLedgerKey,
     marketDataLedgerKey,
     marketOrderCounterLedgerKey,
     marketPositionLedgerKey,
@@ -51,7 +51,7 @@ function mockEntries(entries: unknown[], latestLedger = 4242) {
 
 function userEntries(
     user: string,
-    opts: { long?: boolean; short?: boolean; counter?: number; funding?: bigint } = {},
+    opts: { long?: boolean; short?: boolean; counter?: number; credit?: bigint } = {},
 ) {
     const entries = [];
     if (opts.long !== false) {
@@ -72,11 +72,11 @@ function userEntries(
             ),
         );
     }
-    if (opts.funding !== undefined) {
+    if (opts.credit !== undefined) {
         entries.push(
             ledgerEntryFor(
-                marketClaimableFundingLedgerKey(MARKET, user),
-                nativeToScVal(opts.funding, { type: 'i128' }),
+                marketClaimableCreditLedgerKey(MARKET, user),
+                nativeToScVal(opts.credit, { type: 'i128' }),
             ),
         );
     }
@@ -88,9 +88,9 @@ afterEach(() => {
 });
 
 describe('MarketUser.load', () => {
-    it('reads both sides, the counter and claimable funding in one call', async () => {
+    it('reads both sides, the counter and claimable credit in one call', async () => {
         const spy = mockEntries(
-            userEntries(USER, { short: true, counter: 7, funding: 250n }),
+            userEntries(USER, { short: true, counter: 7, credit: 250n }),
         );
         const user = await MarketUser.load(network, MARKET, USER);
 
@@ -99,7 +99,7 @@ describe('MarketUser.load', () => {
         expect(user.userId).toBe(USER);
         expect(user.marketId).toBe(MARKET);
         expect(user.orderCounter).toBe(7);
-        expect(user.claimableFunding).toBe(250n);
+        expect(user.claimableCredit).toBe(250n);
         expect(user.long.isOpen()).toBe(true);
         expect(user.short.isOpen()).toBe(true);
     });
@@ -126,7 +126,7 @@ describe('MarketUser.load', () => {
         mockEntries(userEntries(USER));
         const user = await MarketUser.load(network, MARKET, USER);
         expect(user.orderCounter).toBe(0);
-        expect(user.claimableFunding).toBe(0n);
+        expect(user.claimableCredit).toBe(0n);
     });
 
     it('stamps each side with the key it was read from', async () => {
@@ -217,12 +217,12 @@ describe('marketContext', () => {
 });
 
 describe('MarketUser.claimable', () => {
-    it('caps the payout at what the funding pool holds', async () => {
-        mockEntries(userEntries(USER, { funding: 250n }));
+    it('caps the payout at what the credit pool holds', async () => {
+        mockEntries(userEntries(USER, { credit: 250n }));
         const user = await MarketUser.load(network, MARKET, USER);
-        const poor = { data: { fundingPool: 40n } } as never;
-        const rich = { data: { fundingPool: 1_000n } } as never;
-        const drained = { data: { fundingPool: -5n } } as never;
+        const poor = { data: { creditPool: 40n } } as never;
+        const rich = { data: { creditPool: 1_000n } } as never;
+        const drained = { data: { creditPool: -5n } } as never;
         expect(user.claimable(poor)).toBe(40n);
         expect(user.claimable(rich)).toBe(250n);
         expect(user.claimable(drained)).toBe(0n);

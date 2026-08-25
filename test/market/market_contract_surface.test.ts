@@ -53,10 +53,10 @@ const sidePair = (long: bigint, short: bigint) =>
 const marketDataScVal = () => xdr.ScVal.scvMap([
     entry('accrued_at', u64(3n)),
     entry('borrowing_idx', sidePair(1n, 2n)),
+    entry('credit_owed', i128(8n)),
+    entry('credit_pool', i128(9n)),
     entry('margin', sidePair(4n, 5n)),
     entry('funding_idx', sidePair(6n, 7n)),
-    entry('funding_owed', i128(8n)),
-    entry('funding_pool', i128(9n)),
     entry('funding_rate', i128(10n)),
     entry('notional', sidePair(12n, 13n)),
     entry('tokens', sidePair(14n, 15n)),
@@ -96,7 +96,7 @@ describe('MarketContract full surface', () => {
         expect(setTerminalPrice.args).toEqual([123n]);
     });
 
-    it('builds trader ops (vault orders, funding claim, cancels)', () => {
+    it('builds trader ops (vault orders, credit claim, cancels)', () => {
         const createVaultOrder = decodeInvoke(contract.createVaultOrder(USER, VaultOrderKind.Deposit, 100n, 5n));
         expect(createVaultOrder.fn).toBe('create_vault_order');
         expect(createVaultOrder.args).toEqual([USER, 0, 100n, 5n]);
@@ -109,9 +109,9 @@ describe('MarketContract full surface', () => {
         expect(cancelVaultOrder.fn).toBe('cancel_vault_order');
         expect(cancelVaultOrder.args).toEqual([USER, 3]);
 
-        const claimFunding = decodeInvoke(contract.claimFunding(USER));
-        expect(claimFunding.fn).toBe('claim_funding');
-        expect(claimFunding.args).toEqual([USER]);
+        const claimCredit = decodeInvoke(contract.claimCredit(USER));
+        expect(claimCredit.fn).toBe('claim_credit');
+        expect(claimCredit.args).toEqual([USER]);
     });
 
     it('builds keeper ops with Buffer and Uint8Array price payloads', () => {
@@ -152,7 +152,7 @@ describe('MarketContract full surface', () => {
         expect(orderCounter.fn).toBe('get_order_counter');
         expect(orderCounter.args).toEqual([USER]);
         expect(decodeInvoke(contract.getAdl()).fn).toBe('get_adl');
-        expect(decodeInvoke(contract.getClaimableFunding(USER)).args).toEqual([USER]);
+        expect(decodeInvoke(contract.getClaimableCredit(USER)).args).toEqual([USER]);
         expect(decodeInvoke(contract.getToken()).fn).toBe('get_token');
         expect(decodeInvoke(contract.getVault()).fn).toBe('get_vault');
         expect(decodeInvoke(contract.getTreasury()).fn).toBe('get_treasury');
@@ -195,12 +195,12 @@ describe('MarketContract full surface', () => {
             expect(parsers.createVaultOrder(xdr.ScVal.scvU32(5).toXDR('base64'))).toBe(5);
             expect(parsers.cancelOrder(i128(9n).toXDR('base64'))).toBe(9n);
             expect(parsers.cancelVaultOrder(i128(10n).toXDR('base64'))).toBe(10n);
-            expect(parsers.claimFunding(i128(11n).toXDR('base64'))).toBe(11n);
+            expect(parsers.claimCredit(i128(11n).toXDR('base64'))).toBe(11n);
             expect(parsers.executeOrder(i128(12n).toXDR('base64'))).toBe(12n);
             expect(parsers.executeLiquidation(i128(13n).toXDR('base64'))).toBe(13n);
             expect(parsers.executeAdl(i128(14n).toXDR('base64'))).toBe(14n);
             expect(parsers.executeVaultOrder(i128(15n).toXDR('base64'))).toBe(15n);
-            expect(parsers.getClaimableFunding(i128(16n).toXDR('base64'))).toBe(16n);
+            expect(parsers.getClaimableCredit(i128(16n).toXDR('base64'))).toBe(16n);
             expect(parsers.getStatus(xdr.ScVal.scvU32(3).toXDR('base64'))).toBe(3);
             expect(parsers.getOrderCounter(xdr.ScVal.scvU32(6).toXDR('base64'))).toBe(6);
             expect(parsers.getToken(Address.fromString(TOKEN).toScVal().toXDR('base64'))).toBe(TOKEN);
@@ -232,7 +232,7 @@ describe('MarketContract full surface', () => {
             expect(parsedMarketData.notional).toEqual({ long: 12n, short: 13n });
             expect(parsedMarketData.fundingRate).toBe(10n);
             expect('lastPriceTime' in parsedMarketData).toBe(false);
-            expect(parsers.accrue(marketData).fundingOwed).toBe(8n);
+            expect(parsers.accrue(marketData).creditOwed).toBe(8n);
 
             const position = xdr.ScVal.scvMap([
                 entry('borrowing_idx', i128(1n)),

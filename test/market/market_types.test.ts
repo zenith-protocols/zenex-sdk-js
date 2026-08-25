@@ -236,8 +236,8 @@ describe('trading_types', () => {
             notional: { long: 1n, short: 2n }, margin: { long: 3n, short: 4n },
             tokens: { long: 5n, short: 6n }, funding_idx: { long: 7n, short: 8n },
             borrowing_idx: { long: 9n, short: 10n }, funding_rate: 11n,
-            accrued_at: 12n, funding_pool: 14n,
-            funding_owed: 15n,
+            accrued_at: 12n, credit_pool: 14n,
+            credit_owed: 15n,
         });
         expect(marketData).toEqual({
             notional: { long: 1n, short: 2n },
@@ -247,8 +247,8 @@ describe('trading_types', () => {
             borrowingIdx: { long: 9n, short: 10n },
             fundingRate: 11n,
             accruedAt: 12n,
-            fundingPool: 14n,
-            fundingOwed: 15n,
+            creditPool: 14n,
+            creditOwed: 15n,
         });
         expect('lastPriceTime' in marketData).toBe(false);
     });
