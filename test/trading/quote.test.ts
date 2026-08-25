@@ -191,8 +191,8 @@ const marginCases: Record<string, ContractCase> = {
             position_collateral: 11n,
             post_position_funding_idx: 0n,
             post_position_borrowing_idx: 1n,
-            funding_pool_delta: 0n,
-            funding_owed_delta: 1n,
+            credit_pool_delta: 0n,
+            credit_owed_delta: 1n,
             claimable_funding_delta: 1n,
         },
     },
@@ -231,8 +231,8 @@ const marginCases: Record<string, ContractCase> = {
             position_collateral: 15n,
             post_position_funding_idx: 25_000_000_000_000_001n,
             post_position_borrowing_idx: 25_000_000_000_000_000n,
-            funding_pool_delta: 2n,
-            funding_owed_delta: 0n,
+            credit_pool_delta: 2n,
+            credit_owed_delta: 0n,
             claimable_funding_delta: 0n,
             gross_collateral: 2n,
             trader_return: 2n,
@@ -273,8 +273,8 @@ const marginCases: Record<string, ContractCase> = {
             position_collateral: 14n,
             post_position_funding_idx: 25_000_000_000_000_001n,
             post_position_borrowing_idx: 25_000_000_000_000_000n,
-            funding_pool_delta: 2n,
-            funding_owed_delta: 0n,
+            credit_pool_delta: 2n,
+            credit_owed_delta: 0n,
             claimable_funding_delta: 0n,
             gross_collateral: 3n,
             trader_return: 3n,
@@ -315,8 +315,8 @@ const marginCases: Record<string, ContractCase> = {
             position_collateral: 13n,
             post_position_funding_idx: 25_000_000_000_000_001n,
             post_position_borrowing_idx: 25_000_000_000_000_000n,
-            funding_pool_delta: 2n,
-            funding_owed_delta: 0n,
+            credit_pool_delta: 2n,
+            credit_owed_delta: 0n,
             claimable_funding_delta: 0n,
             gross_collateral: 4n,
             trader_return: 4n,
@@ -352,8 +352,8 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
         borrowingIdx: pair(),
         fundingRate: 0n,
         accruedAt: 0n,
-        fundingPool: 0n,
-        fundingOwed: 0n,
+        creditPool: 0n,
+        creditOwed: 0n,
         ...overrides,
     };
 }
@@ -829,8 +829,8 @@ describe('funding, borrowing, and margin-only actions', () => {
             fundingIdx: expected.post_position_funding_idx,
             borrowingIdx: expected.post_position_borrowing_idx,
         });
-        expect(result.value.postMarket.fundingOwed).toBe(
-            expected.funding_owed_delta,
+        expect(result.value.postMarket.creditOwed).toBe(
+            expected.credit_owed_delta,
         );
         expect(result.value.postMarket.margin.long).toBe(11n);
         expect(result.value.claimableFundingDelta).toBe(
@@ -869,8 +869,8 @@ describe('funding, borrowing, and margin-only actions', () => {
             expect(result.value.postPosition.borrowingIdx).toBe(
                 expected.post_position_borrowing_idx,
             );
-            expect(result.value.postMarket.fundingPool).toBe(
-                expected.funding_pool_delta,
+            expect(result.value.postMarket.creditPool).toBe(
+                expected.credit_pool_delta,
             );
             expect(result.value.claimableFundingDelta).toBe(
                 expected.claimable_funding_delta,

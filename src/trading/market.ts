@@ -168,7 +168,7 @@ export class Market {
             userKeys.long,
             userKeys.short,
             userKeys.orderCounter,
-            userKeys.claimableFunding,
+            userKeys.claimableCredit,
         ]);
         return {
             market: decodeMarket(network, contracts, batch),

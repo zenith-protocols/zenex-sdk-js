@@ -69,7 +69,7 @@ export type {
     MarketCancelVaultOrderEvent,
     MarketDepositFillEvent,
     MarketRedeemFillEvent,
-    MarketClaimFundingEvent,
+    MarketClaimCreditEvent,
     MarketAdlUpdateEvent,
     MarketAccrualUpdateEvent,
     MarketStatusUpdateEvent,
@@ -240,7 +240,7 @@ export {
     marketPositionLedgerKey,
     marketVaultOrderLedgerKey,
     marketOrderCounterLedgerKey,
-    marketClaimableFundingLedgerKey,
+    marketClaimableCreditLedgerKey,
     marketOrderLedgerKey,
 } from './contracts/market/keys.js';
 

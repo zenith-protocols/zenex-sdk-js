@@ -2,7 +2,7 @@ import { Address, xdr } from '@stellar/stellar-sdk';
 
 /**
  * Create a storage key for an enum variant with an Address.
- * E.g., StorageKey::Balance(Address) or DataKey::ClaimableFunding(Address)
+ * E.g., StorageKey::Balance(Address) or DataKey::ClaimableCredit(Address)
  * @param variant - The enum variant name
  * @param address - The address value
  * @returns ScVal representing the enum key with address

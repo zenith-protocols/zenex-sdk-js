@@ -13,7 +13,7 @@ export enum MarketEventType {
     CancelVaultOrder = 'cancel_vault_order',
     DepositFill = 'deposit_fill',
     RedeemFill = 'redeem_fill',
-    ClaimFunding = 'claim_funding',
+    ClaimCredit = 'claim_credit',
     AdlUpdate = 'adl_update',
     AccrualUpdate = 'accrual_update',
     StatusUpdate = 'status_update',
@@ -115,9 +115,9 @@ export interface MarketRedeemFillEvent extends BaseMarketEvent {
     netPnl: i128;
 }
 
-/** Claimable funding balance paid out via `claim_funding`. */
-export interface MarketClaimFundingEvent extends BaseMarketEvent {
-    eventType: MarketEventType.ClaimFunding;
+/** Claimable credit balance paid out via `claim_credit`. */
+export interface MarketClaimCreditEvent extends BaseMarketEvent {
+    eventType: MarketEventType.ClaimCredit;
     user: string;
     /** Paid claimable balance, token-dec. */
     amount: i128;
@@ -331,7 +331,7 @@ export type MarketEvent =
     | MarketCancelVaultOrderEvent
     | MarketDepositFillEvent
     | MarketRedeemFillEvent
-    | MarketClaimFundingEvent
+    | MarketClaimCreditEvent
     | MarketAdlUpdateEvent
     | MarketAccrualUpdateEvent
     | MarketStatusUpdateEvent

@@ -48,7 +48,7 @@ export type {
     MarketCancelVaultOrderEvent,
     MarketDepositFillEvent,
     MarketRedeemFillEvent,
-    MarketClaimFundingEvent,
+    MarketClaimCreditEvent,
     MarketAdlUpdateEvent,
     MarketAccrualUpdateEvent,
     MarketStatusUpdateEvent,

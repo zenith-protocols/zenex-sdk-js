@@ -120,7 +120,7 @@ export interface SidePair {
     short: i128;
 }
 
-/** Market state, stored in its own persistent entry. Pool surplus is `fundingPool - fundingOwed`. */
+/** Market state, stored in its own persistent entry. Pool surplus is `creditPool - creditOwed`. */
 export interface MarketData {
     /** Open interest per side, token-dec. */
     notional: SidePair;
@@ -136,10 +136,10 @@ export interface MarketData {
     fundingRate: i128;
     /** Last accrual timestamp, unix seconds, shared by both indices. */
     accruedAt: u64;
-    /** Internal funding pool, token-dec. */
-    fundingPool: i128;
-    /** Total funding owed to traders, token-dec. */
-    fundingOwed: i128;
+    /** Internal claimable-credit pool, including parked failed payouts, token-dec. */
+    creditPool: i128;
+    /** Total funding and parked failed payouts owed to traders, token-dec. */
+    creditOwed: i128;
 }
 
 /** ADL state (instance storage singleton): the per-side enable flags driving the open-stop. */
@@ -330,8 +330,8 @@ export function parseMarketData(raw: Record<string, unknown>): MarketData {
         borrowingIdx: parseSidePair(raw.borrowing_idx as Record<string, unknown>),
         fundingRate: big(raw.funding_rate),
         accruedAt: big(raw.accrued_at),
-        fundingPool: big(raw.funding_pool),
-        fundingOwed: big(raw.funding_owed),
+        creditPool: big(raw.credit_pool),
+        creditOwed: big(raw.credit_owed),
     };
 }
 

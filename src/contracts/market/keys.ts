@@ -67,9 +67,9 @@ export function marketOrderCounterLedgerKey(contractId: string, user: string | A
     return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('OrderCounter'), toAddressScVal(user)]);
 }
 
-/** `DataKey::ClaimableFunding(user)` -> i128: funding owed to the user, in token-dec (persistent user tier). */
-export function marketClaimableFundingLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
-    return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('ClaimableFunding'), toAddressScVal(user)]);
+/** `DataKey::ClaimableCredit(user)` -> i128: funding owed to the user, plus any parked failed payout, in token-dec (persistent user tier). */
+export function marketClaimableCreditLedgerKey(contractId: string, user: string | Address): xdr.LedgerKey {
+    return persistentLedgerKey(contractId, [xdr.ScVal.scvSymbol('ClaimableCredit'), toAddressScVal(user)]);
 }
 
 /** `DataKey::Order(user, id)` -> Order: pending keeper order (persistent user tier, 100/120-day TTL). */
