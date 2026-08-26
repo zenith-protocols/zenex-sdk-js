@@ -47,7 +47,7 @@ export interface QuotedPositionFees {
      * Earned funding credited to the trader's claimable balance. `0` when
      * `fees.funding` is paid rather than earned.
      */
-    claimableFundingDelta: bigint;
+    claimableCreditDelta: bigint;
 }
 
 /** Input to {@link quotePositionFees}: the fill and the state it prices against. */
@@ -139,7 +139,7 @@ export function quotePositionFees(
             relay: input.relayFee,
             marginDebit,
         },
-        claimableFundingDelta: earnedFunding,
+        claimableCreditDelta: earnedFunding,
     };
 }
 

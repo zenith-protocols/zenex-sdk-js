@@ -193,7 +193,7 @@ const marginCases: Record<string, ContractCase> = {
             post_position_borrowing_idx: 1n,
             credit_pool_delta: 0n,
             credit_owed_delta: 1n,
-            claimable_funding_delta: 1n,
+            claimable_credit_delta: 1n,
         },
     },
     'margin.fixed_withdraw.below_accrued_debit': {
@@ -233,7 +233,7 @@ const marginCases: Record<string, ContractCase> = {
             post_position_borrowing_idx: 25_000_000_000_000_000n,
             credit_pool_delta: 2n,
             credit_owed_delta: 0n,
-            claimable_funding_delta: 0n,
+            claimable_credit_delta: 0n,
             gross_collateral: 2n,
             trader_return: 2n,
         },
@@ -275,7 +275,7 @@ const marginCases: Record<string, ContractCase> = {
             post_position_borrowing_idx: 25_000_000_000_000_000n,
             credit_pool_delta: 2n,
             credit_owed_delta: 0n,
-            claimable_funding_delta: 0n,
+            claimable_credit_delta: 0n,
             gross_collateral: 3n,
             trader_return: 3n,
         },
@@ -317,7 +317,7 @@ const marginCases: Record<string, ContractCase> = {
             post_position_borrowing_idx: 25_000_000_000_000_000n,
             credit_pool_delta: 2n,
             credit_owed_delta: 0n,
-            claimable_funding_delta: 0n,
+            claimable_credit_delta: 0n,
             gross_collateral: 4n,
             trader_return: 4n,
         },
@@ -833,8 +833,8 @@ describe('funding, borrowing, and margin-only actions', () => {
             expected.credit_owed_delta,
         );
         expect(result.value.postMarket.margin.long).toBe(11n);
-        expect(result.value.claimableFundingDelta).toBe(
-            expected.claimable_funding_delta,
+        expect(result.value.claimableCreditDelta).toBe(
+            expected.claimable_credit_delta,
         );
         expect(result.value.fees).toMatchObject({
             funding: -1n,
@@ -872,8 +872,8 @@ describe('funding, borrowing, and margin-only actions', () => {
             expect(result.value.postMarket.creditPool).toBe(
                 expected.credit_pool_delta,
             );
-            expect(result.value.claimableFundingDelta).toBe(
-                expected.claimable_funding_delta,
+            expect(result.value.claimableCreditDelta).toBe(
+                expected.claimable_credit_delta,
             );
             expect(result.value.fees.marginDebit).toBe(work.debit);
             expect(result.value.walletPayout).toBe(expected.trader_return);

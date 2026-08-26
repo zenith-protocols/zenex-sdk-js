@@ -346,6 +346,27 @@ describe('applyOrder gates and rests', () => {
         });
     });
 
+    it('gates an increase that leaves the survivor liquidatable with code 723', () => {
+        // 600 long from entry 1.0 marked at 0.90 carries -60 PnL. The added
+        // margin keeps the initial gate happy (80 posted vs 66 required on
+        // 660) while settled equity sits under the maintenance line, the
+        // post-action breach the contract reports as PositionLiquidatable.
+        const snap = snapshot({
+            position: openPosition(),
+            price: price({ bid: 900_000_000n, ask: 900_000_000n }),
+        });
+        const result = applyOrder(
+            snap,
+            order({
+                kind: OrderKind.MarketIncrease,
+                notional: 60_000_000n,
+                margin: 10_000_000n,
+            }),
+        );
+
+        expect(result).toMatchObject({ kind: 'gate', code: 723 });
+    });
+
     it('gates a notional below the order dust floor with code 732', () => {
         const snap = snapshot({
             config: config({ minOrderNotional: 1_000_000n }),
