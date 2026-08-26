@@ -152,8 +152,8 @@ export type PositionAction =
 /**
  * Ports the contract's `Fees`: the itemized costs one action settles, all
  * token-dec. `funding` is signed. Positive means the position paid into the
- * funding pool; negative means it earned funding, matching
- * `claimableFundingDelta`. `execution` and `relay` are the input fees
+ * credit pool; negative means it earned funding credit, matching
+ * `claimableCreditDelta`. `execution` and `relay` are the input fees
  * echoed unchanged; they are not part of `marginDebit` and settle outside
  * this simulation.
  */
@@ -230,8 +230,8 @@ export interface PositionActionOutcome {
      * degenerate config with zeroed margin requirements.
      */
     badDebt: bigint;
-    /** Token-dec. The amount this action added to the trader's claimable funding balance, not the running total. */
-    claimableFundingDelta: bigint;
+    /** Token-dec. The amount this action added to the trader's claimable credit balance, not the running total. */
+    claimableCreditDelta: bigint;
     /** The margin gates evaluated against `postPosition` and `postMarket`, at the input price and vault assets. */
     margin: MarginState;
 }
@@ -293,7 +293,7 @@ export interface PositionActionInput extends PositionQuoteContext {
 
 interface SettledFees {
     fees: FeeBreakdown;
-    claimableFundingDelta: bigint;
+    claimableCreditDelta: bigint;
 }
 
 interface TransitionResult {
@@ -304,7 +304,7 @@ interface TransitionResult {
     realizedPnl: bigint;
     walletPayout: bigint;
     badDebt: bigint;
-    claimableFundingDelta: bigint;
+    claimableCreditDelta: bigint;
     settlementVaultLeg: bigint;
 }
 
@@ -386,7 +386,7 @@ function settleFees(
         relayFee,
     });
     const { funding } = quoted.fees;
-    const earnedFunding = quoted.claimableFundingDelta;
+    const earnedFunding = quoted.claimableCreditDelta;
 
     if (funding > 0n) market.creditPool = addI128(market.creditPool, funding);
     if (earnedFunding > 0n)
@@ -396,7 +396,7 @@ function settleFees(
 
     return {
         fees: quoted.fees,
-        claimableFundingDelta: earnedFunding,
+        claimableCreditDelta: earnedFunding,
     };
 }
 
@@ -534,7 +534,9 @@ function requireValidPosition(
         throw new ProtocolGateError(713);
     // Ports `require_valid`'s second settle: no action may leave a
     // liquidatable (settled equity below maintenance) position behind.
-    if (margin.maintenanceHeadroom < 0n) throw new ProtocolGateError(713);
+    // The contract reports it as PositionLiquidatable (#723), the same
+    // code as the pre-action gate.
+    if (margin.maintenanceHeadroom < 0n) throw new ProtocolGateError(723);
 }
 
 function increaseTransition(
@@ -598,7 +600,7 @@ function increaseTransition(
         realizedPnl: 0n,
         walletPayout: 0n,
         badDebt: 0n,
-        claimableFundingDelta: settled.claimableFundingDelta,
+        claimableCreditDelta: settled.claimableCreditDelta,
         settlementVaultLeg: feeVaultLeg(
             settled.fees,
             input.config,
@@ -609,7 +611,7 @@ function increaseTransition(
 
 interface SettledClose {
     fees: FeeBreakdown;
-    claimableFundingDelta: bigint;
+    claimableCreditDelta: bigint;
     pnl: bigint;
     equity: bigint;
 }
@@ -644,7 +646,7 @@ function settleToClose(
     );
     return {
         fees: settled.fees,
-        claimableFundingDelta: settled.claimableFundingDelta,
+        claimableCreditDelta: settled.claimableCreditDelta,
         pnl,
         equity: addI128(
             subI128(position.margin, settled.fees.marginDebit),
@@ -680,7 +682,7 @@ function closeSettledTransition(
         realizedPnl: settled.pnl,
         walletPayout: returned,
         badDebt,
-        claimableFundingDelta: settled.claimableFundingDelta,
+        claimableCreditDelta: settled.claimableCreditDelta,
         settlementVaultLeg: subI128(feeLeg, addI128(settled.pnl, badDebt)),
     };
 }
@@ -777,7 +779,7 @@ function partialDecreaseTransition(
         realizedPnl: pnl,
         walletPayout: addI128(withdrawal, subI128(profit, covered)),
         badDebt,
-        claimableFundingDelta: settled.claimableFundingDelta,
+        claimableCreditDelta: settled.claimableCreditDelta,
         settlementVaultLeg: subI128(feeLeg, addI128(pnl, badDebt)),
     };
 }
@@ -998,7 +1000,7 @@ export function quotePositionAction(
                 realizedPnl: transition.realizedPnl,
                 walletPayout: transition.walletPayout,
                 badDebt: transition.badDebt,
-                claimableFundingDelta: transition.claimableFundingDelta,
+                claimableCreditDelta: transition.claimableCreditDelta,
                 margin: marginState(
                     transition.position,
                     transition.market,

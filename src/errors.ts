@@ -127,8 +127,9 @@ export enum ZenexErrorCode {
     NotionalLocked = 721,
     /** Liquidation attempted while equity is still above maintenance margin. */
     NotLiquidatable = 722,
-    /** Decrease or ADL attempted while settled equity is below maintenance
-     * margin: a liquidatable position's only legal transition is `liquidate`. */
+    /** Settled equity below maintenance margin, before a decrease or ADL
+     * close or left on the surviving position by any fill: a liquidatable
+     * position's only legal transition is `liquidate`. */
     PositionLiquidatable = 723,
 
     // --- orders / price ---
@@ -167,7 +168,7 @@ export enum ZenexErrorCode {
     VaultInsolvent = 755,
 
     // --- funding ---
-    /** Claim attempted with no claimable funding balance. */
+    /** Claim attempted with no claimable credit balance. */
     NothingToClaim = 760,
 
     // --- ADL ---
@@ -327,7 +328,7 @@ const errorMessages: Record<number, string> = {
     [720]: 'No position exists for (user, is_long)',
     [721]: 'Requested close exceeds the unlocked notional',
     [722]: 'Liquidation attempted while equity is above maintenance margin',
-    [723]: 'Decrease or ADL attempted on a liquidatable position (equity below maintenance margin)',
+    [723]: 'Settled equity below maintenance margin: before a decrease or ADL close, or left on the surviving position by a fill',
     [730]: 'No keeper order exists for (user, id)',
     [731]: 'Order expiration is behind the current ledger sequence',
     [732]: 'Invalid order (no-op shape, dust floor, missing trigger price, or escrow-sum overflow)',
@@ -342,7 +343,7 @@ const errorMessages: Record<number, string> = {
     [753]: 'Deposit fill would push the vault balance above max_vault_balance',
     [754]: 'Redeem fill would leave pending PnL above the max_pnl_withdraw gate',
     [755]: 'Settlement vault draw exceeds the vault balance',
-    [760]: 'Claim attempted with no claimable funding balance',
+    [760]: 'Claim attempted with no claimable credit balance',
     [770]: 'ADL execution attempted while the PnL ratio is at or below the trigger',
     [771]: 'ADL close left the pending PnL under the clear target',
     [772]: 'ADL close did not reduce the pending PnL',
