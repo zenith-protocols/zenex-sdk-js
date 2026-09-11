@@ -985,6 +985,59 @@ describe('haircuts and protocol gates', () => {
         });
     });
 
+    // At a mark of SCALAR_18 a side reserves its own notional, so a 100n
+    // book against 200n of vault assets sits over the 80n side capacity.
+    function overCapBook(overLong: boolean): MarketData {
+        const sides = overLong ? pair(100n, 0n) : pair(0n, 100n);
+        return market({
+            notional: { ...sides },
+            tokens: { ...sides },
+            margin: { ...sides },
+            accruedAt: 1n,
+        });
+    }
+
+    function increaseAgainst(
+        overLong: boolean,
+        notional: bigint,
+    ): PositionActionInput {
+        return input({
+            isLong: !overLong,
+            config: config({ maxUtilOpen: 800_000_000_000_000_000n }),
+            vaultAssets: 200n,
+            market: overCapBook(overLong),
+            action: { kind: 'increase', notional, margin: 100n },
+        });
+    }
+
+    it.each([true, false])(
+        'fills an increase on the under-cap side (over-long: $0)',
+        (overLong) => {
+            const result = quotePositionAction(increaseAgainst(overLong, 10n));
+
+            expect(result.kind).toBe('exact');
+            if (result.kind !== 'exact') return;
+            const post = result.value.postMarket.notional;
+            expect(overLong ? post.short : post.long).toBe(10n);
+            expect(overLong ? post.long : post.short).toBe(100n);
+        },
+    );
+
+    it.each([true, false])(
+        'rejects an increase one atom over its own cap (over-long: $0)',
+        (overLong) => {
+            const atCap = quotePositionAction(increaseAgainst(overLong, 80n));
+            const overCap = quotePositionAction(increaseAgainst(overLong, 81n));
+
+            expect(atCap.kind).toBe('exact');
+            expect(overCap).toMatchObject({
+                kind: 'unavailable',
+                code: 'CONTRACT_GATE',
+                reason: expect.stringContaining('714'),
+            });
+        },
+    );
+
     it('uses fee settlement for reserve backing while keeping execution and relay external', () => {
         const quoteInput = input({
             config: config({

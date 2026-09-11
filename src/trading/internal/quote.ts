@@ -901,9 +901,11 @@ function runTransition(input: PositionActionInput): TransitionResult {
             postVaultAssets,
             input.config.maxUtilOpen,
         );
+        // Only the side that grows is gated. A price move can leave the
+        // opposite side above its cap, and that must not block this fill.
         if (
-            sideReserved(transition.market, input.price, true) > capacity ||
-            sideReserved(transition.market, input.price, false) > capacity
+            sideReserved(transition.market, input.price, input.isLong) >
+            capacity
         ) {
             throw new ProtocolGateError(714);
         }
@@ -963,8 +965,9 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
  * - InsufficientMargin (713) if margin falls under the initial requirement,
  *   or settled equity under the maintenance requirement. Same exemption as
  *   #711.
- * - UtilizationExceeded (714) on an increase that adds notional, if either
- *   side's reserved value exceeds the post-fill utilization cap.
+ * - UtilizationExceeded (714) on an increase that adds notional, if the
+ *   increased side's reserved value exceeds the post-fill utilization cap.
+ *   The opposite side is not checked.
  * - OpenInterestExceeded (715) on an increase that adds notional, if the
  *   side's open interest exceeds `config.maxOpenInterest`.
  * - PositionNotFound (720) if a decrease, close, or margin `withdraw`
