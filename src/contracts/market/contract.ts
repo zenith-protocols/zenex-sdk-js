@@ -468,7 +468,8 @@ export class MarketContract extends Contract {
      * - VaultInsolvent (755) if a decrease settlement's vault draw exceeds the vault balance.
      * - NotionalAboveMaximum (712) if the resulting position exceeds the size ceiling.
      * - OpenInterestExceeded (715) if the side's open interest would exceed `maxOpenInterest`.
-     * - UtilizationExceeded (714) if the reserved value would exceed the utilization cap.
+     * - UtilizationExceeded (714) if an increase leaves the increased side's
+     *   reserve above the utilization cap. The opposite side is not checked.
      * - InsufficientMargin (713) if margin falls below the initial-margin
      *   requirement or equity below the maintenance requirement.
      * - NotionalLocked (721) if the close exceeds the position's unlocked notional.
