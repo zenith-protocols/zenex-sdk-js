@@ -41,6 +41,7 @@ describe('market codes inside ZenexErrorCode (market/src/errors.rs)', () => {
         expect(ZenexErrorCode.InsufficientMargin).toBe(713);
         expect(ZenexErrorCode.UtilizationExceeded).toBe(714);
         expect(ZenexErrorCode.OpenInterestExceeded).toBe(715);
+        expect(ZenexErrorCode.SizeRoundsToZero).toBe(716);
         // position lifecycle
         expect(ZenexErrorCode.PositionNotFound).toBe(720);
         expect(ZenexErrorCode.NotionalLocked).toBe(721);
@@ -70,15 +71,15 @@ describe('market codes inside ZenexErrorCode (market/src/errors.rs)', () => {
         expect(ZenexErrorCode.AdlNotEligible).toBe(772);
     });
 
-    it('carries exactly 35 market members (the full errors.rs surface, no stale codes)', () => {
-        // Hand count from errors.rs: 700-706 (7) + 710 (1) + 711-715 (5)
+    it('carries exactly 36 market members (the full errors.rs surface, no stale codes)', () => {
+        // Hand count from errors.rs: 700-706 (7) + 710 (1) + 711-716 (6)
         // + 720-723 (4) + 730-734 (5) + 740-742 (3) + 750-755 (6) + 760 (1)
-        // + 770-772 (3) = 35.
+        // + 770-772 (3) = 36.
         const marketCodes = Object.values(ZenexErrorCode).filter(
             (value): value is number =>
                 typeof value === 'number' && value >= 700 && value <= 772,
         );
-        expect(marketCodes).toHaveLength(35);
+        expect(marketCodes).toHaveLength(36);
     });
 
     it('752 means MinOutNotMet, and PendingPnlExceeded moved to 754', () => {
@@ -201,6 +202,7 @@ describe('zenexErrorFromCode (hint-free resolution)', () => {
         expect(zenexErrorFromCode(723).code).toBe(ZenexErrorCode.PositionLiquidatable);
         expect(zenexErrorFromCode(733).code).toBe(ZenexErrorCode.TooManyOrders);
         expect(zenexErrorFromCode(734).code).toBe(ZenexErrorCode.UnknownKind);
+        expect(zenexErrorFromCode(716).code).toBe(ZenexErrorCode.SizeRoundsToZero);
         expect(zenexErrorFromCode(742).code).toBe(ZenexErrorCode.TriggerNotMet);
         expect(zenexErrorFromCode(752).code).toBe(ZenexErrorCode.MinOutNotMet);
         expect(zenexErrorFromCode(754).code).toBe(ZenexErrorCode.PendingPnlExceeded);

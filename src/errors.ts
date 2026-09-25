@@ -119,6 +119,8 @@ export enum ZenexErrorCode {
     UtilizationExceeded = 714,
     /** A side's open interest would exceed the `max_open_interest` ceiling. */
     OpenInterestExceeded = 715,
+    /** An increase's notional buys no base size at the entry price. */
+    SizeRoundsToZero = 716,
 
     // --- position lifecycle ---
     /** No position exists for `(user, is_long)`. */
@@ -325,6 +327,7 @@ const errorMessages: Record<number, string> = {
     [713]: 'Equity below the initial-margin floor',
     [714]: 'Open interest would exceed the utilization cap',
     [715]: 'Open interest would exceed the max_open_interest ceiling',
+    [716]: 'Increase notional buys no base size at the entry price',
     [720]: 'No position exists for (user, is_long)',
     [721]: 'Requested close exceeds the unlocked notional',
     [722]: 'Liquidation attempted while equity is above maintenance margin',
