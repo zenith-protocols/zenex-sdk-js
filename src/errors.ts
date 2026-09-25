@@ -159,8 +159,9 @@ export enum ZenexErrorCode {
     VaultOrderNotFound = 750,
     /** Vault order filled before its kind's lock cooldown elapsed. */
     VaultOrderLocked = 751,
-    /** Vault order fill returned less than the order's `min_out`. */
-    MinOutNotMet = 752,
+    // 752 is retired: a fill quoted below the order's `min_out` no longer
+    // reverts. `execute_vault_order` rejects the order instead and emits
+    // `reject_vault_order`.
     /** Deposit fill would push the vault balance above `max_vault_balance`. */
     VaultBalanceExceeded = 753,
     /** Redeem fill while a side's pending PnL exceeds `max_pnl_withdraw` of
@@ -342,7 +343,6 @@ const errorMessages: Record<number, string> = {
     [742]: 'Order trigger_price has not been crossed at the verified price',
     [750]: 'No vault order exists for (user, id)',
     [751]: 'Vault order filled before its lock cooldown elapsed',
-    [752]: 'Vault order fill returned less than the order min_out',
     [753]: 'Deposit fill would push the vault balance above max_vault_balance',
     [754]: 'Redeem fill would leave pending PnL above the max_pnl_withdraw gate',
     [755]: 'Settlement vault draw exceeds the vault balance',

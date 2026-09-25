@@ -59,7 +59,6 @@ describe('market codes inside ZenexErrorCode (market/src/errors.rs)', () => {
         // vault orders
         expect(ZenexErrorCode.VaultOrderNotFound).toBe(750);
         expect(ZenexErrorCode.VaultOrderLocked).toBe(751);
-        expect(ZenexErrorCode.MinOutNotMet).toBe(752);
         expect(ZenexErrorCode.VaultBalanceExceeded).toBe(753);
         expect(ZenexErrorCode.PendingPnlExceeded).toBe(754);
         expect(ZenexErrorCode.VaultInsolvent).toBe(755);
@@ -71,19 +70,26 @@ describe('market codes inside ZenexErrorCode (market/src/errors.rs)', () => {
         expect(ZenexErrorCode.AdlNotEligible).toBe(772);
     });
 
-    it('carries exactly 36 market members (the full errors.rs surface, no stale codes)', () => {
+    it('carries exactly 35 market members (the full errors.rs surface, no stale codes)', () => {
         // Hand count from errors.rs: 700-706 (7) + 710 (1) + 711-716 (6)
-        // + 720-723 (4) + 730-734 (5) + 740-742 (3) + 750-755 (6) + 760 (1)
-        // + 770-772 (3) = 36.
+        // + 720-723 (4) + 730-734 (5) + 740-742 (3) + 750-751 (2)
+        // + 753-755 (3) + 760 (1) + 770-772 (3) = 35.
         const marketCodes = Object.values(ZenexErrorCode).filter(
             (value): value is number =>
                 typeof value === 'number' && value >= 700 && value <= 772,
         );
-        expect(marketCodes).toHaveLength(36);
+        expect(marketCodes).toHaveLength(35);
     });
 
-    it('752 means MinOutNotMet, and PendingPnlExceeded moved to 754', () => {
-        expect(ZenexErrorCode[752]).toBe('MinOutNotMet');
+    it('752 is retired: a missed min_out rejects the order instead of reverting', () => {
+        expect(ZenexErrorCode[752]).toBeUndefined();
+        expect(
+            (ZenexErrorCode as unknown as Record<string, unknown>).MinOutNotMet,
+        ).toBeUndefined();
+        expect(zenexErrorFromCode(752).code).toBe(ZenexErrorCode.UnknownError);
+        // The neighbors keep their numbers.
+        expect(ZenexErrorCode[751]).toBe('VaultOrderLocked');
+        expect(ZenexErrorCode[753]).toBe('VaultBalanceExceeded');
         expect(ZenexErrorCode[754]).toBe('PendingPnlExceeded');
     });
 
@@ -204,7 +210,6 @@ describe('zenexErrorFromCode (hint-free resolution)', () => {
         expect(zenexErrorFromCode(734).code).toBe(ZenexErrorCode.UnknownKind);
         expect(zenexErrorFromCode(716).code).toBe(ZenexErrorCode.SizeRoundsToZero);
         expect(zenexErrorFromCode(742).code).toBe(ZenexErrorCode.TriggerNotMet);
-        expect(zenexErrorFromCode(752).code).toBe(ZenexErrorCode.MinOutNotMet);
         expect(zenexErrorFromCode(754).code).toBe(ZenexErrorCode.PendingPnlExceeded);
         expect(zenexErrorFromCode(755).code).toBe(ZenexErrorCode.VaultInsolvent);
         expect(zenexErrorFromCode(760).code).toBe(ZenexErrorCode.NothingToClaim);

@@ -7,6 +7,7 @@ import {
 import type {
     MarketCancelOrderEvent,
     MarketLiquidationEvent,
+    MarketRejectVaultOrderEvent,
 } from '../src/contracts/market/events.js';
 import { VaultEventType } from '../src/contracts/vault/events.js';
 import type { VaultDepositEvent, VaultWithdrawEvent } from '../src/contracts/vault/events.js';
@@ -43,6 +44,29 @@ describe('market event surface', () => {
             refund: 500n,
         };
         expect(event.refund).toBe(500n);
+    });
+
+    it('reject_vault_order carries the missed quote and joins the union', () => {
+        expect(MarketEventType.RejectVaultOrder).toBe('reject_vault_order');
+        const event: MarketRejectVaultOrderEvent = {
+            ...base,
+            contractType: ZenexContractType.Market,
+            eventType: MarketEventType.RejectVaultOrder,
+            user: 'G-depositor',
+            orderId: 3,
+            keeper: 'G-keeper',
+            quoted: 991n,
+            netPnl: -20n,
+        };
+        // Compile-time: the rejection is assignable to the union.
+        const union: ZenexEvent = event;
+        expect(union.contractType).toBe(ZenexContractType.Market);
+        // The principal and exec fee live on the create_vault_order row,
+        // so the receipt carries no fill amounts.
+        type RejectKeys = keyof MarketRejectVaultOrderEvent;
+        const notAKey: Exclude<'shares' | 'assets' | 'fee', RejectKeys> = 'shares';
+        expect(notAKey).toBe('shares');
+        expect(event.quoted).toBe(991n);
     });
 
     it('liquidation itemizes liqFee; forfeit is gone', () => {

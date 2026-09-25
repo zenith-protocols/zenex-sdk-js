@@ -159,7 +159,6 @@ const ORDER_GATE_REASONS: Readonly<Record<number, string>> = {
     732: 'invalid order',
     740: 'stale price',
     751: 'vault order locked',
-    752: 'minimum output not met',
     753: 'vault balance exceeded',
     800: 'invalid strategy amount',
     801: 'pending PnL exceeds vault assets',
@@ -219,7 +218,7 @@ export interface VaultOrderCreationQuoteInput {
     action: 'deposit' | 'redeem';
     /** Assets to deposit (token-dec) or shares to redeem (share-dec). */
     amount: bigint;
-    /** Slippage bound applied at fill: shares for a deposit or assets for a redeem. `0` means unset. */
+    /** Slippage bound applied at fill, net of the vault fee: shares for a deposit or assets for a redeem. `0` means unset. A fill quoted below it rejects the order. */
     minOut: bigint;
     /** Required only for a Retired market redeem, which executes directly. */
     vault?: VaultAtomicState;
@@ -232,7 +231,7 @@ export interface VaultRestingOrderCreation {
     action: 'deposit' | 'redeem';
     /** Assets escrowed (deposit, token-dec) or shares escrowed (redeem, share-dec). */
     amount: bigint;
-    /** Slippage bound carried into the fill. `0` means unset. */
+    /** Slippage bound carried into the fill. `0` means unset. A fill quoted below it rejects the order. */
     minOut: bigint;
     /** Flat keeper fee escrowed alongside the order, settlement token, token-dec. */
     executionFee: bigint;
@@ -286,10 +285,10 @@ export interface ExactVaultRestingOrderCreationQuote extends ExactVaultOrderCrea
 }
 
 /**
- * Result of `quoteVaultDepositFill` or `quoteVaultRedeemFill`, mirroring the
- * `DepositFill` and `RedeemFill` receipts `execute_vault_order` emits.
+ * A keeper fill that lands, mirroring the `DepositFill` and `RedeemFill`
+ * receipts `execute_vault_order` emits.
  */
-export interface VaultQuoteOutcome {
+export interface VaultFillOutcome {
     kind: 'deposit' | 'redeem';
     /** Assets deposited or shares redeemed, before fees: token-dec for a deposit, share-dec for a redeem. */
     input: bigint;
@@ -312,6 +311,39 @@ export interface VaultQuoteOutcome {
     valuation: 'transactionQuoteMarkedNav';
 }
 
+/**
+ * A mature order whose quote falls below its `minOut`, mirroring the
+ * `RejectVaultOrder` receipt. `execute_vault_order` succeeds and settles the
+ * order without filling it: the order is removed, the principal returns to
+ * the user, and the escrowed execution fee pays the keeper. Nothing moves
+ * through the vault.
+ */
+export interface VaultRejectOutcome {
+    kind: 'rejected';
+    action: 'deposit' | 'redeem';
+    /** The fill's quote, below `minOut`: the shares a deposit would mint (share-dec), or a redeem's assets net of the vault fee (token-dec). */
+    quoted: bigint;
+    /** The order's slippage bound the quote missed, in the unit of `quoted`. */
+    minOut: bigint;
+    /** Principal returned to the user: the escrowed assets (deposit, token-dec) or shares (redeem, share-dec). A deposit refund the user cannot receive parks as claimable credit. */
+    refund: bigint;
+    /** Flat keeper fee escrowed at order creation, token-dec: the keeper's whole payout on a rejection. */
+    executionFee: bigint;
+    /** Pending trader PnL the quote priced against, capped and signed, token-dec. */
+    netPnl: bigint;
+    /** Vault backing after the rejection, token-dec: unchanged. */
+    postVaultAssets: bigint;
+    valuation: 'transactionQuoteMarkedNav';
+}
+
+/**
+ * Result of `quoteVaultDepositFill` or `quoteVaultRedeemFill`: the fill lands
+ * (`kind` is `'deposit'` or `'redeem'`), or its quote misses `minOut` and the
+ * keeper's call rejects the order (`kind` is `'rejected'`). Narrow on `kind`
+ * before reading the fill fields.
+ */
+export type VaultQuoteOutcome = VaultFillOutcome | VaultRejectOutcome;
+
 /** Shared inputs for `quoteVaultDepositFill` and `quoteVaultRedeemFill`: the market and vault state a fill prices against. */
 export interface VaultQuoteContext {
     ledger: number;
@@ -324,7 +356,7 @@ export interface VaultQuoteContext {
     treasuryRate: bigint;
     /** Flat keeper fee escrowed on the order, settlement token, token-dec. */
     executionFee: bigint;
-    /** Slippage bound from the resting order. `0` means unset. */
+    /** Slippage bound from the resting order. `0` means unset. A quote below it rejects the order. */
     minOut: bigint;
 }
 
@@ -481,6 +513,30 @@ function prepareContext(input: VaultQuoteContext): PreparedVaultContext {
     };
 }
 
+/**
+ * Mirror `keeper.rs` `reject`: the principal goes back to the user, the
+ * escrowed execution fee is the keeper's only leg, and the vault is untouched.
+ */
+function rejection(
+    action: 'deposit' | 'redeem',
+    quoted: bigint,
+    refund: bigint,
+    prepared: PreparedVaultContext,
+    netPnl: bigint,
+): VaultRejectOutcome {
+    return {
+        kind: 'rejected',
+        action,
+        quoted,
+        minOut: prepared.minOut,
+        refund,
+        executionFee: prepared.executionFee,
+        netPnl,
+        postVaultAssets: prepared.vault.totalAssets,
+        valuation: 'transactionQuoteMarkedNav',
+    };
+}
+
 function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
     if (error instanceof VaultProtocolGateError) {
         return unavailable('CONTRACT_GATE', error.message, error.code);
@@ -501,6 +557,12 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
  * Derive an atomic vault-order minimum from a caller-supplied fill estimate.
  * The arithmetic is exact, but the result retains estimate provenance because
  * the keeper prices the eventual fill against later state.
+ *
+ * Pass the fee-net output `execute_vault_order` checks `minOut` against:
+ * the shares the post-`depositFee` assets mint, or the redeemed assets after
+ * the `redeemFee` cut (the `output` of `quoteVaultDepositFill` or
+ * `quoteVaultRedeemFill`). A fill quoted below the minimum rejects the order
+ * and pays its execution fee to the keeper.
  */
 export function deriveVaultMinimumOutput(
     input: DeriveVaultMinimumOutputInput,
@@ -645,13 +707,16 @@ export function quoteVaultOrderCreation(
  * The keeper, treasury, and vault split of `vaultFee` only changes
  * `postVaultAssets`; it does not change the shares minted.
  *
+ * A set `minOut` is checked first, against the shares the post-fee assets
+ * mint. A quote below it returns an exact `rejected` outcome instead of a
+ * fill: the keeper's call removes the order, refunds `assets`, and pays
+ * `executionFee` to the keeper. The vault balance cap is never reached.
+ *
  * Returns `unavailable` with `CONTRACT_GATE`:
  * - 740 if `price.publishTime` predates `createdAt`, or the fill runs in the
  *   creation ledger.
  * - 800 if `assets`, or the post-fee deposit amount, is not positive.
  * - 801 if the capped pending trader PnL exceeds `vault.totalAssets`.
- * - 752 if the minted shares fall under `minOut`. Retry with a lower `minOut`
- *   or wait for a better price.
  * - 753 if the projected `postVaultAssets` would exceed `config.maxVaultBalance`.
  *   Wait for the vault to free up room, or deposit less.
  */
@@ -666,12 +731,6 @@ export function quoteVaultDepositFill(
 
         const vaultFee = mulDivFloor(assets, input.config.depositFee, SCALAR_18);
         const depositAssets = subI128(assets, vaultFee);
-        if (depositAssets <= 0n) throw new VaultQuoteGateError(800);
-        const split = feeSplit(
-            vaultFee,
-            input.config.keeperRate,
-            prepared.treasuryRate,
-        );
         const netPnl = cappedNetPnl(
             prepared.market,
             input.config,
@@ -679,14 +738,33 @@ export function quoteVaultDepositFill(
             prepared.vault.totalAssets,
             false,
         );
+        // The slippage bound reads the vault's own quote of the post-fee
+        // assets before anything moves, so a miss rejects the order ahead of
+        // every fill gate.
+        if (prepared.minOut > 0n) {
+            const quoted = convertVaultAssetsToShares(
+                prepared.vault,
+                depositAssets,
+                netPnl,
+            );
+            if (quoted < prepared.minOut) {
+                return exact(
+                    rejection('deposit', quoted, assets, prepared, netPnl),
+                    input.ledger,
+                );
+            }
+        }
+        if (depositAssets <= 0n) throw new VaultQuoteGateError(800);
+        const split = feeSplit(
+            vaultFee,
+            input.config.keeperRate,
+            prepared.treasuryRate,
+        );
         const shares = convertVaultAssetsToShares(
             prepared.vault,
             depositAssets,
             netPnl,
         );
-        if (prepared.minOut > 0n && shares < prepared.minOut) {
-            throw new VaultQuoteGateError(752);
-        }
         const postVaultAssets = addI128(
             addI128(prepared.vault.totalAssets, depositAssets),
             split.vault,
@@ -730,14 +808,18 @@ function saturatingTimestampAdd(left: bigint, right: bigint): bigint {
  * changes `postVaultAssets`; it does not change the assets paid to the
  * redeemer.
  *
+ * Once the redeem lock has passed, a set `minOut` is checked against the
+ * assets paid net of the redeem fee. A quote below it returns an exact
+ * `rejected` outcome instead of a fill: the keeper's call removes the order,
+ * returns `shares`, and pays `executionFee` to the keeper. The withdraw
+ * gates are never reached.
+ *
  * Returns `unavailable` with `CONTRACT_GATE`:
  * - 740 if `price.publishTime` predates `createdAt`, or the fill runs in the
  *   creation ledger.
  * - 751 if the `config.redeemLock` cooldown from `createdAt` has not
  *   elapsed. Wait and requote.
  * - 732 if `shares` is not positive.
- * - 752 if the assets paid fall under `minOut`. Retry with a lower `minOut`
- *   or wait for a better price.
  * - 714 or 754 if the withdraw gates block the fill; see
  *   `evaluateVaultWithdrawGates` for the condition and what clears it.
  */
@@ -771,19 +853,25 @@ export function quoteVaultRedeemFill(
             shares,
             netPnl,
         );
+        const vaultFee = mulDivFloor(grossAssets, input.config.redeemFee, SCALAR_18);
+        const output = subI128(grossAssets, vaultFee);
+        // The slippage bound reads the vault's own quote net of the redeem
+        // fee before anything burns, so a miss rejects the order ahead of the
+        // burn and the exit gates.
+        if (prepared.minOut > 0n && output < prepared.minOut) {
+            return exact(
+                rejection('redeem', output, shares, prepared, netPnl),
+                input.ledger,
+            );
+        }
         if (grossAssets > prepared.vault.totalAssets) {
             throw new RangeError('redeem exceeds raw vault assets');
         }
-        const vaultFee = mulDivFloor(grossAssets, input.config.redeemFee, SCALAR_18);
-        const output = subI128(grossAssets, vaultFee);
         const split = feeSplit(
             vaultFee,
             input.config.keeperRate,
             prepared.treasuryRate,
         );
-        if (prepared.minOut > 0n && output < prepared.minOut) {
-            throw new VaultQuoteGateError(752);
-        }
         const postVaultAssets = addI128(
             subI128(prepared.vault.totalAssets, grossAssets),
             split.vault,

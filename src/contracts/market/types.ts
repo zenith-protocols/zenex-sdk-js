@@ -82,7 +82,7 @@ export interface VaultOrder {
     kind: VaultOrderKind;
     /** Escrowed assets (deposit, token-dec) or shares (redeem, vault share decimals = asset decimals + decimalsOffset). */
     amount: i128;
-    /** Minimum received at fill, net of the vault fee: shares (deposit, share-dec) or assets (redeem, token-dec); 0 = unset. */
+    /** Minimum received at fill, net of the vault fee: shares (deposit, share-dec) or assets (redeem, token-dec); 0 = unset. A fill quoted below it rejects the order. */
     minOut: i128;
     /** Keeper execution fee escrowed at creation, token-dec. */
     execFee: i128;
