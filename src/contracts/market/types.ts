@@ -211,7 +211,7 @@ export interface MarketConfig {
     adlClearTarget: i128;
     /** Realized-profit haircut threshold: while side pending PnL exceeds this fraction of half the vault, close payouts scale by allowance / side PnL. >= adlMaxPnl and < 1 (SCALAR_18). */
     maxPnlTrader: i128;
-    /** Redeem gate: redeems blocked while a side's pending PnL exceeds this fraction of half the post-redeem balance; in (0, adlMaxPnl] (SCALAR_18). */
+    /** Redeem gate: redeems blocked while a side's pending PnL exceeds this fraction of half the post-redeem balance; in (0, adlClearTarget] (SCALAR_18), so a permitted redeem leaves every side at or below the ADL clear target. */
     maxPnlWithdraw: i128;
     /** Redeem cooldown from a vault order's createdAt, seconds; up to 2,592,000 (30 days). 0 = fill as soon as a post-creation price exists. */
     redeemLock: u64;
