@@ -1151,3 +1151,45 @@ describe('typed public quote failures', () => {
         });
     });
 });
+
+// Ports contracts a243f49: entry size rounds against the trader, so a long
+// floors and a short ceils, and a sized increase that buys no base unit
+// traps with SizeRoundsToZero.
+describe('entry sizing', () => {
+    const three = { bid: 3n * SCALAR_18, ask: 3n * SCALAR_18, publishTime: 1n };
+
+    function open(isLong: boolean, notional: bigint): PositionActionInput {
+        return input({
+            isLong,
+            price: three,
+            action: { kind: 'increase', notional, margin: 10n },
+        });
+    }
+
+    it.each([
+        [true, 3n],
+        [false, 4n],
+    ])('10 notional at a price of 3 buys the rounded size (long: %s)', (isLong, tokens) => {
+        const result = quotePositionAction(open(isLong, 10n));
+
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        expect(result.value.postPosition.tokens).toBe(tokens);
+    });
+
+    it('rejects a long whose notional floors to no base unit', () => {
+        expect(quotePositionAction(open(true, 1n))).toMatchObject({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            contractCode: 716,
+        });
+    });
+
+    it('sizes a short one base unit up where a long floors to zero', () => {
+        const result = quotePositionAction(open(false, 1n));
+
+        expect(result.kind).toBe('exact');
+        if (result.kind !== 'exact') return;
+        expect(result.value.postPosition.tokens).toBe(1n);
+    });
+});

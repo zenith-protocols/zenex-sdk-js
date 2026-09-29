@@ -1,6 +1,6 @@
 import type { MarketData, Position, SidePair, MarketConfig } from '../../contracts/market/types.js';
 import { SCALAR_18, addI128, checkedI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
-import { advanceMarketAccruals, entryPrice, exactPositionPnl, exitPrice, marketSidePnl, quoteTradeFees, sideCapacity, sideReserved } from './math.js';
+import { advanceMarketAccruals, entryPrice, entryTokens, exactPositionPnl, exitPrice, marketSidePnl, quoteTradeFees, sideCapacity, sideReserved } from './math.js';
 import type { PriceData } from './math.js';
 import { quotePositionFees } from './position.js';
 import type { PositionFeeBreakdown } from './position.js';
@@ -101,6 +101,7 @@ const GATE_REASONS: Readonly<Record<number, string>> = {
     713: 'insufficient margin',
     714: 'utilization exceeded',
     715: 'open interest exceeded',
+    716: 'size rounds to zero',
     720: 'position not found',
     721: 'notional locked',
     722: 'not liquidatable',
@@ -547,7 +548,10 @@ function increaseTransition(
     margin: bigint,
 ): TransitionResult {
     const executionPrice = entryPrice(input.price, input.isLong);
-    const tokensAdded = mulDivFloor(notional, SCALAR_18, executionPrice);
+    const tokensAdded = entryTokens(notional, executionPrice, input.isLong);
+    // A sized increase that buys no base unit traps. A margin-only top-up
+    // carries no notional and passes.
+    if (notional > 0n && tokensAdded === 0n) throw new ProtocolGateError(716);
     const settled = settleFees(
         position,
         market,

@@ -96,7 +96,7 @@ export interface Position {
     margin: i128;
     /** Size in quote, token-dec. */
     notional: i128;
-    /** Size in base, base-dec. Not SCALAR_18: `to_tokens` floors a token-dec notional divided by a price_scalar price. Entry price is `notional / tokens`. */
+    /** Size in base, base-dec. Not SCALAR_18: entry sizing divides a token-dec notional by a price_scalar price, flooring for a long and ceiling for a short. Entry price is `notional / tokens`. */
     tokens: i128;
     /** Funding index snapshot at last change (SCALAR_18). */
     fundingIdx: i128;
