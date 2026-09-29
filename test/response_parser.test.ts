@@ -50,10 +50,8 @@ describe('parseError: new market codes resolve unhinted', () => {
         expect(parseError(simulationError(742)).code).toBe(ZenexErrorCode.TriggerNotMet);
     });
 
-    it('752 -> MinOutNotMet (the min_out slippage gate, not the old pending-PnL meaning)', () => {
-        const error = parseError(simulationError(752));
-        expect(error.code).toBe(ZenexErrorCode.MinOutNotMet);
-        expect(error.message).toMatch(/min_out/);
+    it('752 -> UnknownError (retired: a missed min_out rejects the order, it does not revert)', () => {
+        expect(parseError(simulationError(752)).code).toBe(ZenexErrorCode.UnknownError);
     });
 
     it('754 -> PendingPnlExceeded', () => {

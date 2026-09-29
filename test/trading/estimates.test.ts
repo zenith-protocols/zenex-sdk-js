@@ -7,7 +7,7 @@ import type {
     SidePair,
     MarketConfig,
 } from '../../src/contracts/market/types.js';
-import { OrderKind, Status } from '../../src/contracts/market/types.js';
+import { OrderKind, Status, VaultOrderKind } from '../../src/contracts/market/types.js';
 import { Market } from '../../src/trading/market.js';
 import { MarketPosition } from '../../src/trading/position.js';
 import { Price } from '../../src/trading/price.js';
@@ -498,5 +498,52 @@ describe('VaultOrderIntent', () => {
         const intent = VaultOrderIntent.create(market, USER, 0, unit(100));
         const verdict = intent.fills(market, px(10), 1_000n);
         expect('fills' in verdict).toBe(true);
+    });
+
+    it('quotes a deposit net of the deposit fee, so a pre-fee minOut rejects', () => {
+        // A 0.2% fee on 100 leaves 99.8 to mint at 1:1 on the empty book.
+        const amount = unit(100);
+        const expected = new VaultOrderIntent(
+            MARKET, USER, VaultOrderKind.Deposit, amount, 0n,
+        ).expectedOut(market, px(10));
+        expect(expected).toBe(998_000_000n);
+
+        const atBound = new VaultOrderIntent(
+            MARKET, USER, VaultOrderKind.Deposit, amount, expected,
+        );
+        expect(atBound.fills(market, px(10), 1_000n)).toEqual({ fills: true });
+
+        // The pre-fee conversion overshoots the fee-net quote: a keeper
+        // fill rejects the order rather than leaving it to rest.
+        const preFee = market.assetsToShares(amount, px(10));
+        expect(preFee).toBe(amount);
+        const tooTight = new VaultOrderIntent(
+            MARKET, USER, VaultOrderKind.Deposit, amount, preFee,
+        );
+        expect(tooTight.fills(market, px(10), 1_000n)).toEqual({
+            fills: false,
+            rejected: { quoted: expected },
+        });
+    });
+
+    it('advises a redeem rejection past its lock when the net quote misses minOut', () => {
+        // 100 shares redeem 100 gross, 99.75 after the 0.25% fee.
+        const shares = unit(100);
+        const expected = new VaultOrderIntent(
+            MARKET, USER, VaultOrderKind.Redeem, shares, 0n,
+        ).expectedOut(market, px(10));
+        expect(expected).toBe(997_500_000n);
+
+        const atBound = new VaultOrderIntent(
+            MARKET, USER, VaultOrderKind.Redeem, shares, expected,
+        );
+        expect(atBound.fills(market, px(10), 1_000n)).toEqual({ fills: true });
+        const above = new VaultOrderIntent(
+            MARKET, USER, VaultOrderKind.Redeem, shares, expected + 1n,
+        );
+        expect(above.fills(market, px(10), 1_000n)).toEqual({
+            fills: false,
+            rejected: { quoted: expected },
+        });
     });
 });

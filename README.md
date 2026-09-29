@@ -147,6 +147,15 @@ const execution = buildVaultActionExecution(
 if (execution.kind === 'unavailable') throw new Error(execution.reason);
 ```
 
+`minOut` is the minimum received net of the vault fee: the shares a deposit
+mints after the `depositFee` cut, or the assets a redeem pays after the
+`redeemFee` cut. Cut it from that fee-net quote (`VaultOrderIntent.expectedOut`),
+not from a pre-fee conversion such as `Market.assetsToShares`. A keeper fill
+quoted below `minOut` does not wait: `execute_vault_order` rejects the order
+and emits `reject_vault_order`, returning the principal and paying the
+escrowed execution fee to the keeper. Capacity gates (the vault balance cap,
+the redeem exit gates) still revert and leave the order resting.
+
 Active, OnIce, and Delisted vault actions create resting orders. A Retired
 redeem is a distinct direct-only action. It charges no execution fee and does
 not apply the estimate-derived minimum output.

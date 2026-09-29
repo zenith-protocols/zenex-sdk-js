@@ -344,7 +344,8 @@ export class MarketContract extends Contract {
      *   (share-dec: token-dec plus the vault's decimals offset).
      * @param minOut - Minimum received at fill, net of the vault fee: shares
      *   for a deposit (share-dec), assets for a redeem (token-dec). `0`
-     *   means unset.
+     *   means unset. A fill quoted below it rejects the order rather than
+     *   leaving it to wait.
      *
      * # Returns
      * - The allocated vault order id, or `0` for a Retired-market instant redeem.
@@ -589,10 +590,19 @@ export class MarketContract extends Contract {
      * vault fill fee (the `depositFee` or `redeemFee` cut of the moved assets
      * by kind), split between the keeper, the treasury, and the vault.
      *
+     * A fill quoted below the order's `minOut` rejects the order instead and
+     * emits `reject_vault_order` with no fill receipt: the order is removed,
+     * the principal returns to `user` (a deposit refund `user` cannot receive
+     * parks as claimable credit), and the escrowed `execFee` pays the keeper.
+     * The capacity gates (753, 714, 754) revert instead and leave the order
+     * pending.
+     *
      * @param price - The keeper's signed price update for this market's feed.
      *
      * # Returns
-     * - The keeper's payout: the `keeperRate` cut of the vault fill fee (token-dec).
+     * - The keeper's payout, token-dec: the `keeperRate` cut of the vault
+     *   fill fee plus the order's `execFee`, or the `execFee` alone on a
+     *   rejection.
      *
      * # Errors
      * - MarketFrozen (704) if the market status is `Frozen` or `Retired`.
@@ -601,7 +611,6 @@ export class MarketContract extends Contract {
      *   order's `createdAt`, or the fill runs in the order's creation ledger.
      * - VaultOrderLocked (751) if a redeem's `redeemLock` cooldown from
      *   `createdAt` has not elapsed.
-     * - MinOutNotMet (752) if the fill returns less than the order's `minOut`.
      * - VaultBalanceExceeded (753) if a deposit would push the vault above `maxVaultBalance`.
      * - UtilizationExceeded (714) if a redeem would leave the vault under-reserved.
      * - PendingPnlExceeded (754) if a redeem would leave a side's pending PnL

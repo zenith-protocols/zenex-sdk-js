@@ -82,7 +82,7 @@ export interface VaultOrder {
     kind: VaultOrderKind;
     /** Escrowed assets (deposit, token-dec) or shares (redeem, vault share decimals = asset decimals + decimalsOffset). */
     amount: i128;
-    /** Minimum received at fill, net of the vault fee: shares (deposit, share-dec) or assets (redeem, token-dec); 0 = unset. */
+    /** Minimum received at fill, net of the vault fee: shares (deposit, share-dec) or assets (redeem, token-dec); 0 = unset. A fill quoted below it rejects the order. */
     minOut: i128;
     /** Keeper execution fee escrowed at creation, token-dec. */
     execFee: i128;
@@ -211,7 +211,7 @@ export interface MarketConfig {
     adlClearTarget: i128;
     /** Realized-profit haircut threshold: while side pending PnL exceeds this fraction of half the vault, close payouts scale by allowance / side PnL. >= adlMaxPnl and < 1 (SCALAR_18). */
     maxPnlTrader: i128;
-    /** Redeem gate: redeems blocked while a side's pending PnL exceeds this fraction of half the post-redeem balance; in (0, adlMaxPnl] (SCALAR_18). */
+    /** Redeem gate: redeems blocked while a side's pending PnL exceeds this fraction of half the post-redeem balance; in (0, adlClearTarget] (SCALAR_18), so a permitted redeem leaves every side at or below the ADL clear target. */
     maxPnlWithdraw: i128;
     /** Redeem cooldown from a vault order's createdAt, seconds; up to 2,592,000 (30 days). 0 = fill as soon as a post-creation price exists. */
     redeemLock: u64;

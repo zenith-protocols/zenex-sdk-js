@@ -13,6 +13,7 @@ export enum MarketEventType {
     CancelVaultOrder = 'cancel_vault_order',
     DepositFill = 'deposit_fill',
     RedeemFill = 'redeem_fill',
+    RejectVaultOrder = 'reject_vault_order',
     ClaimCredit = 'claim_credit',
     AdlUpdate = 'adl_update',
     AccrualUpdate = 'accrual_update',
@@ -62,7 +63,7 @@ export interface MarketCancelOrderEvent extends BaseMarketEvent {
 /**
  * Vault deposit or redeem order created via `create_vault_order`. The row is
  * immutable while pending, so the payload stays authoritative until the
- * order's fill or cancel receipt.
+ * order's fill, reject, or cancel receipt.
  */
 export interface MarketCreateVaultOrderEvent extends BaseMarketEvent {
     eventType: MarketEventType.CreateVaultOrder;
@@ -112,6 +113,26 @@ export interface MarketRedeemFillEvent extends BaseMarketEvent {
     /** Vault fill fee deducted (keeper, treasury, and vault cuts), token-dec. */
     fee: i128;
     /** Capped net pending trader PnL the share burn priced against, signed, token-dec. */
+    netPnl: i128;
+}
+
+/**
+ * A keeper call to `execute_vault_order` rejected a mature vault order: the
+ * fill would have paid less than the order's `minOut`. The order is removed
+ * with no `deposit_fill` or `redeem_fill` receipt. Its `amount` returns to
+ * the user (a deposit refund the user cannot receive parks as claimable
+ * credit), and its `execFee` pays the keeper. Both amounts are in the
+ * order's `create_vault_order` row.
+ */
+export interface MarketRejectVaultOrderEvent extends BaseMarketEvent {
+    eventType: MarketEventType.RejectVaultOrder;
+    user: string;
+    orderId: u32;
+    /** The keeper rewarded with the order's `execFee`. */
+    keeper: string;
+    /** What the fill would have paid, below `minOut`: shares a deposit would mint (share-dec), or a redeem's assets net of the vault fee (token-dec). */
+    quoted: i128;
+    /** Capped net pending trader PnL the quote priced against, signed, token-dec. */
     netPnl: i128;
 }
 
@@ -331,6 +352,7 @@ export type MarketEvent =
     | MarketCancelVaultOrderEvent
     | MarketDepositFillEvent
     | MarketRedeemFillEvent
+    | MarketRejectVaultOrderEvent
     | MarketClaimCreditEvent
     | MarketAdlUpdateEvent
     | MarketAccrualUpdateEvent

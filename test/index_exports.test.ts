@@ -92,6 +92,7 @@ describe('package root exports', () => {
         );
         expect(SDK.MarketEventType.DepositFill).toBe('deposit_fill');
         expect(SDK.MarketEventType.RedeemFill).toBe('redeem_fill');
+        expect(SDK.MarketEventType.RejectVaultOrder).toBe('reject_vault_order');
         expect(SDK.MarketEventType.CloseFill).toBe('close_fill');
         expect(SDK.MarketEventType.AccrualUpdate).toBe('accrual_update');
         expect(SDK.MarketEventType.IncreaseFill).toBe('increase_fill');
@@ -149,7 +150,9 @@ describe('package root exports', () => {
         expect(SDK.ZenexErrorCode.InvalidConfig).toBe(700);
         expect(SDK.ZenexErrorCode.TooManyOrders).toBe(733);
         expect(SDK.ZenexErrorCode.UnknownKind).toBe(734);
-        expect(SDK.ZenexErrorCode.MinOutNotMet).toBe(752);
+        expect(
+            (SDK.ZenexErrorCode as unknown as Record<string, unknown>).MinOutNotMet,
+        ).toBeUndefined();
         expect(SDK.ZenexErrorCode.PendingPnlExceeded).toBe(754);
         expect(SDK.ZenexErrorCode.PositionLiquidatable).toBe(723);
         expect(SDK.ZenexErrorCode.VaultInsolvent).toBe(755);

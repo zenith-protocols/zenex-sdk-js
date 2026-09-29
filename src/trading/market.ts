@@ -309,6 +309,11 @@ export class Market {
      * vault assets net of capped trader uPnL at `price`, virtual-offset
      * rounding, mirroring `execute_vault_order`'s deposit branch pre-fee.
      * Token-dec in, share-dec out.
+     *
+     * Pre-fee, so not a `minOut` source: a deposit order's `minOut` is
+     * checked against the shares its assets mint after the `depositFee`
+     * cut, which is what `VaultOrderIntent.expectedOut` returns. A bound cut
+     * from this conversion can sit above that quote and reject the order.
      */
     assetsToShares(assets: bigint, price: PriceInput): bigint {
         const p = resolvePrice(price);
@@ -320,6 +325,10 @@ export class Market {
      * Convert shares to assets at the effective redeem fill rate (capped
      * uPnL maximized against the redeemer at `price`, pre-fee). Share-dec
      * in, token-dec out.
+     *
+     * Pre-fee, so not a `minOut` source: a redeem order's `minOut` is
+     * checked against these assets after the `redeemFee` cut, which is what
+     * `VaultOrderIntent.expectedOut` returns.
      */
     sharesToAssets(shares: bigint, price: PriceInput): bigint {
         const p = resolvePrice(price);

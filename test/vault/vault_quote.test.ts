@@ -425,6 +425,8 @@ describe('trading vault fill sequence', () => {
 
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
+        expect(result.value.kind).toBe('deposit');
+        if (result.value.kind !== 'deposit') return;
         expect(result.value.input).toBe(1001n);
         expect(result.value.grossAssets).toBe(1001n);
         expect(result.value.executionFee).toBe(2n);
@@ -570,11 +572,65 @@ describe('trading vault fill sequence', () => {
 
         expect(result.kind).toBe('exact');
         if (result.kind !== 'exact') return;
+        expect(result.value.kind).toBe('deposit');
+        if (result.value.kind !== 'deposit') return;
         expect(result.value.netPnl).toBe(250n);
         expect(result.value.output).toBe(100n);
     });
 
-    it('applies redeem minOut to net assets', () => {
+    it('checks deposit minOut against the shares the post-fee assets mint', () => {
+        const { input } = marketContext(
+            'vault.deposit.pnl_fee_settlement_success',
+        );
+        const base = input as VaultDepositQuoteInput;
+
+        // The 1% fee takes 10 of the 1_001 assets; the 991 left mint 991
+        // shares. A bound at the 991 quote fills.
+        const atBound = quoteVaultDeposit({ ...base, minOut: 991n });
+        expect(atBound.kind).toBe('exact');
+        if (atBound.kind !== 'exact') return;
+        expect(atBound.value.kind).toBe('deposit');
+        if (atBound.value.kind !== 'deposit') return;
+        expect(atBound.value.output).toBe(991n);
+
+        // A bound cut from the pre-fee 1_001 misses the quote: the order is
+        // rejected, the assets come back, and the keeper keeps the exec fee.
+        expect(quoteVaultDeposit({ ...base, minOut: 1_001n })).toEqual({
+            kind: 'exact',
+            ledger: 42,
+            value: {
+                kind: 'rejected',
+                action: 'deposit',
+                quoted: 991n,
+                minOut: 1_001n,
+                refund: 1_001n,
+                executionFee: 2n,
+                netPnl: -20n,
+                postVaultAssets: 10_000n,
+                valuation: 'transactionQuoteMarkedNav',
+            },
+        });
+    });
+
+    it('rejects a missed deposit minOut ahead of the vault balance cap', () => {
+        const { input } = marketContext(
+            'vault.deposit.pnl_fee_settlement_success',
+        );
+        const base = input as VaultDepositQuoteInput;
+        // One below the 10_996 post-fill balance, so the cap trips.
+        const capped = { ...base, config: config({ ...base.config, maxVaultBalance: 10_995n }) };
+
+        expect(quoteVaultDeposit(capped)).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('#753'),
+            contractCode: 753,
+        });
+        const rejected = quoteVaultDeposit({ ...capped, minOut: 992n });
+        expect(rejected.kind === 'exact' && rejected.value.kind).toBe('rejected');
+    });
+
+    it('checks redeem minOut against the assets net of the redeem fee', () => {
         const { input } = marketContext(
             'vault.redeem.pnl_fee_settlement_success',
         );
@@ -583,11 +639,97 @@ describe('trading vault fill sequence', () => {
             minOut: 992n,
         });
 
+        // The 1_001 shares redeem 1_001 assets gross, 991 after the 1% fee.
+        expect(result).toEqual({
+            kind: 'exact',
+            ledger: 42,
+            value: {
+                kind: 'rejected',
+                action: 'redeem',
+                quoted: 991n,
+                minOut: 992n,
+                refund: 1_001n,
+                executionFee: 2n,
+                netPnl: 20n,
+                postVaultAssets: 10_000n,
+                valuation: 'transactionQuoteMarkedNav',
+            },
+        });
+    });
+
+    it('rejects a missed redeem minOut ahead of the exit gates', () => {
+        const { input } = marketContext(
+            'vault.redeem.pnl_fee_settlement_success',
+        );
+        const base = input as VaultRedeemQuoteInput;
+        // A zero withdraw allowance, so the pending-PnL gate trips.
+        const gated = { ...base, config: config({ ...base.config, maxPnlWithdraw: 1n }) };
+
+        expect(quoteVaultRedeem(gated)).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('#754'),
+            contractCode: 754,
+        });
+        const rejected = quoteVaultRedeem({ ...gated, minOut: 992n });
+        expect(rejected.kind === 'exact' && rejected.value.kind).toBe('rejected');
+    });
+
+    it('keeps the redeem cooldown ahead of a minOut rejection', () => {
+        const { input } = marketContext(
+            'vault.redeem.pnl_fee_settlement_success',
+        );
+        const base = input as VaultRedeemQuoteInput;
+        const result = quoteVaultRedeem({
+            ...base,
+            config: config({ ...base.config, redeemLock: 2n }),
+            minOut: 992n,
+        });
+
         expect(result).toEqual({
             kind: 'unavailable',
             code: 'CONTRACT_GATE',
-            reason: expect.stringContaining('#752'),
-            contractCode: 752,
+            reason: expect.stringContaining('#751'),
+            contractCode: 751,
+        });
+    });
+
+    it('rejects a missed redeem minOut before the burn could overdraw the vault', () => {
+        // A 50 marked trader loss lifts the backing to 150 over 100 raw
+        // assets, so redeeming every share quotes 149: more than the vault
+        // holds, which the burn cannot pay.
+        const overdraw = {
+            ...context({
+                market: market({
+                    notional: pair(100n, 0n),
+                    margin: pair(100n, 0n),
+                    tokens: pair(50_000_000_000n, 0n),
+                }),
+                vault: {
+                    totalAssets: 100n,
+                    totalSupply: 100n,
+                    decimalsOffset: 0,
+                },
+            }),
+            shares: 100n,
+            createdAt: 1n,
+        };
+
+        expect(quoteVaultRedeem(overdraw)).toEqual({
+            kind: 'unavailable',
+            code: 'INVALID_INPUT',
+            reason: 'redeem exceeds raw vault assets',
+        });
+        const rejected = quoteVaultRedeem({ ...overdraw, minOut: 150n });
+        expect(rejected).toEqual({
+            kind: 'exact',
+            ledger: 42,
+            value: expect.objectContaining({
+                kind: 'rejected',
+                quoted: 149n,
+                netPnl: -50n,
+                postVaultAssets: 100n,
+            }),
         });
     });
 
