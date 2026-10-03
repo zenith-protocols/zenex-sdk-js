@@ -8,7 +8,12 @@ export interface QueuedCall {
     target: string;
     /** Function name to invoke on `target`. */
     fn_name: string;
-    /** Arguments passed to `fn_name`. */
+    /**
+     * Arguments passed to `fn_name`, decoded with `scValToNative`. The decode
+     * loses integer widths and the difference between a Symbol, a String and
+     * an Address. To check the arguments byte for byte, read the `args` vector
+     * from the raw result XDR.
+     */
     args: unknown[];
     /** Unix timestamp, in seconds, at or after which `execute` is allowed. */
     unlock_time: bigint;
@@ -20,7 +25,7 @@ export interface GovernanceConstructorArgs {
     owner: string;
     /**
      * Mandatory timelock delay, in seconds. Must be in `(0, 60 days]` or
-     * the constructor reverts with `InvalidDelay`.
+     * the constructor reverts with `GovInvalidDelay` (812).
      */
     delay: bigint;
 }
@@ -32,6 +37,7 @@ export interface GovernanceConstructorArgs {
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class GovernanceContract extends Contract {
+    /** Parsed spec for the governance contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(governanceSpec);
 
     /** Decoders for each method's `simulateTransaction` result. Methods that only emit events parse to nothing. */
@@ -61,7 +67,7 @@ export class GovernanceContract extends Contract {
     /**
      * Build the `createCustomContract` operation that deploys a Governance
      * instance and calls its constructor with `args`. The constructor
-     * reverts with `InvalidDelay` if `args.delay` is out of range.
+     * reverts with `GovInvalidDelay` (812) if `args.delay` is out of range.
      */
     static deploy(
         deployer: string,
@@ -86,7 +92,9 @@ export class GovernanceContract extends Contract {
     /**
      * Queue a `target.fnName(args)` call to become executable after the
      * configured delay (owner only). Returns the nonce, starting at 0, used
-     * to reference this call in `cancel`, `execute`, and `getQueued`.
+     * to reference this call in `cancel`, `execute`, and `getQueued`. The
+     * call never expires: it stays executable by anyone until it is executed
+     * or cancelled. An archived entry can be restored, so it does not vanish.
      * @param args - Pre-serialized ScVal arguments for the target function
      */
     queue(target: string, fnName: string, args: xdr.ScVal[]): string {
@@ -99,9 +107,10 @@ export class GovernanceContract extends Contract {
     }
 
     /**
-     * Cancel a queued call before it executes (owner only). Reverts with
-     * `NotQueued` if `nonce` is unknown, already run, already cancelled, or
-     * expired.
+     * Cancel a queued call before it executes (owner only). Cancel is the
+     * only way to stop a queued call: it never expires. Reverts with
+     * `GovNotQueued` (810) if `nonce` is unknown, already run, or already
+     * cancelled.
      */
     cancel(nonce: u32): string {
         return this.call(
@@ -112,9 +121,10 @@ export class GovernanceContract extends Contract {
 
     /**
      * Execute a queued call once its delay has passed. Permissionless, any
-     * caller may submit this. Reverts with `NotQueued` if the nonce is
-     * unknown, already run, cancelled, or expired. Reverts with
-     * `NotUnlocked` if called before `unlock_time`.
+     * caller may submit this, however long after the unlock. Reverts with
+     * `GovNotQueued` (810) if the nonce is unknown, already run, or
+     * cancelled. Reverts with `GovNotUnlocked` (811) if called before
+     * `unlock_time`.
      */
     execute(nonce: u32): string {
         return this.call(
@@ -140,8 +150,9 @@ export class GovernanceContract extends Contract {
      * Queue a change to the timelock delay (owner only). This only queues
      * the change: it takes effect once the current delay elapses and
      * `applyDelay` is called, so a delay can never be shortened instantly.
+     * A second call replaces a change that is not applied yet.
      * @param newDelay - New delay, in seconds. Must be in `(0, 60 days]` or
-     *   the call reverts with `InvalidDelay`.
+     *   the call reverts with `GovInvalidDelay` (812).
      */
     setDelay(newDelay: bigint): string {
         return this.call(
@@ -152,8 +163,8 @@ export class GovernanceContract extends Contract {
 
     /**
      * Apply a delay change queued by `setDelay`, once the current delay has
-     * elapsed. Permissionless. Reverts with `NotQueued` if no change is
-     * pending, or `NotUnlocked` if called too early.
+     * elapsed. Permissionless. Reverts with `GovNotQueued` (810) if no change
+     * is pending, or `GovNotUnlocked` (811) if called too early.
      */
     applyDelay(): string {
         return this.call('apply_delay').toXDR('base64');
@@ -170,10 +181,10 @@ export class GovernanceContract extends Contract {
      * or the offer lapses.
      * @param liveUntilLedger - Ledger sequence the offer expires at. Pass
      *   `0` to cancel a pending transfer to `newOwner` instead of starting
-     *   one. Reverts with `InvalidLiveUntilLedger` if it is in the past or
-     *   beyond the maximum allowed range. Reverts with `NoPendingTransfer`
-     *   or `InvalidPendingAccount` if `0` and no matching transfer is
-     *   pending.
+     *   one. Reverts with `TransferInvalidLiveUntilLedger` (2201) if it is
+     *   in the past or beyond the maximum allowed range. Reverts with
+     *   `NoPendingTransfer` (2200) or `InvalidPendingAccount` (2202) if `0`
+     *   and no matching transfer is pending.
      */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
@@ -186,8 +197,8 @@ export class GovernanceContract extends Contract {
 
     /**
      * Accept a pending ownership transfer (pending owner only). Reverts
-     * with `NoPendingTransfer` if none is pending, or `TransferExpired` if
-     * the offer's `liveUntilLedger` has passed.
+     * with `NoPendingTransfer` (2200) if none is pending, or
+     * `TransferExpired` (2203) if the offer's `liveUntilLedger` has passed.
      */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
@@ -196,8 +207,9 @@ export class GovernanceContract extends Contract {
     /**
      * Permanently remove the owner (owner only), disabling every owner-gated
      * method (`queue`, `cancel`, `setStatus`, `setDelay`, `transferOwnership`)
-     * for good. Reverts with `TransferInProgress` if an ownership transfer
-     * is currently pending.
+     * for good. Calls already queued stay executable by anyone, and no one
+     * can cancel them. Reverts with `OwnershipTransferInProgress` (2101) if
+     * an unexpired ownership transfer is pending.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');
@@ -209,8 +221,8 @@ export class GovernanceContract extends Contract {
     }
 
     /**
-     * Look up a queued call by nonce. Reverts with `NotQueued` if the nonce
-     * is unknown, already run, already cancelled, or expired.
+     * Look up a queued call by nonce. Reverts with `GovNotQueued` (810) if
+     * the nonce is unknown, already run, or already cancelled.
      */
     getQueued(nonce: u32): string {
         return this.call(

@@ -2,6 +2,7 @@ import { xdr, scValToNative } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 import type { FactoryInitMeta } from './contract.js';
 
+/** The factory's instance storage, as `parseFactoryInstance` decodes it. */
 export interface FactoryInstanceState {
     /** The factory's current `FactoryInitMeta`. */
     initMeta: FactoryInitMeta;

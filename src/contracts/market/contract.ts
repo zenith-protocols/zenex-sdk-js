@@ -11,13 +11,19 @@ import {
 
 /** Deploy-time constructor arguments (`__constructor`). */
 export interface DeployArgs {
+    /** Owner of the new market, the authority for its owner-only methods. */
     owner: string;
+    /** Settlement token, the collateral every token-dec amount is in. */
     token: string;
+    /** Strategy vault that backs the market. */
     vault: string;
+    /** Oracle contract that verifies price updates for `feedId`. */
     oracle: string;
+    /** Treasury contract, the protocol fee sink. */
     treasury: string;
     /** 32-byte Data Streams stream id (`BytesN<32>`); must be a V3 (`0x0003…`) stream. */
     feedId: Buffer | Uint8Array;
+    /** Initial market configuration. */
     config: MarketConfig;
 }
 
@@ -38,11 +44,14 @@ function feedIdBuffer(feedId: Buffer | Uint8Array): Buffer {
  * Builds unsigned operations for one market: order creation, keeper fill
  * and liquidation, and reads of position and market state.
  *
- * Every method returns a base64 XDR `Operation` string, not a result.
+ * Every method returns a base64 XDR `Operation` string, not a result. The
+ * `*Call` builders return a router `Call` instead.
  */
 export class MarketContract extends Contract {
+    /** Parsed spec for the market contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(marketSpec);
 
+    /** Result decoders for each method's simulated result (base64 XDR), keyed by JS method name. */
     static readonly parsers = {
         // --- admin (void) ---
         setConfig: () => {},
@@ -125,7 +134,9 @@ export class MarketContract extends Contract {
      * # Errors
      * - InvalidConfig (700) if `feedId` is not a V3 (`0x0003…`) stream id, or
      *   a config bound or range check fails.
-     * - NegativeValueNotAllowed (710) if any rate, fee, or margin is negative.
+     * - NegativeValueNotAllowed (710) if a fee, margin, borrowing, funding,
+     *   ADL or PnL field, `minOrderMargin`, `minDeposit` or `execFee` is
+     *   negative. Any other negative field fails its own bound as 700.
      */
     static deploy(
         deployer: string,
@@ -159,15 +170,18 @@ export class MarketContract extends Contract {
     /**
      * Replace the global market configuration. Owner only.
      *
-     * Call `accrue` in the same ledger as a borrowing or funding rate change,
+     * Call `accrue` in the same ledger when `targetUtil`, `borrowRate`,
+     * `increasedBorrowRate`, `maxUtilOpen` or a funding parameter changes,
      * unless the market is `Frozen`. The first accrual after unfreeze then
-     * prices the whole frozen window at the new rates.
+     * prices the whole frozen window at the new values.
      *
      * # Errors
      * - InvalidConfig (700) if a bound or range check fails.
-     * - NegativeValueNotAllowed (710) if any rate, fee, or margin is negative.
-     * - MarketNotAccrued (703) if a borrowing or funding rate param changes
-     *   without a same-ledger accrual.
+     * - NegativeValueNotAllowed (710) if a fee, margin, borrowing, funding,
+     *   ADL or PnL field, `minOrderMargin`, `minDeposit` or `execFee` is
+     *   negative. Any other negative field fails its own bound as 700.
+     * - MarketNotAccrued (703) if one of those accrual parameters changes
+     *   without a same-ledger accrual on a market that is not `Frozen`.
      */
     setConfig(config: MarketConfig): string {
         return this.call(
@@ -179,7 +193,8 @@ export class MarketContract extends Contract {
     /**
      * Set the contract operational status. Owner only.
      *
-     * Entering `Status::Retired` sweeps the funding-pool surplus to the vault.
+     * Entering `Status::Retired` sweeps the credit-pool surplus
+     * (`creditPool - creditOwed`) to the vault.
      *
      * # Errors
      * - InvalidStatus (702) on an unknown status value or an invalid transition.
@@ -194,6 +209,11 @@ export class MarketContract extends Contract {
 
     /**
      * Set or refresh the flat settlement price of a delisted market. Owner only.
+     *
+     * From the first set on, every fill and accrual prices flat at it and
+     * ignores the submitted price update.
+     *
+     * @param price - Flat settlement price (price_scalar).
      *
      * # Errors
      * - InvalidStatus (702) unless the status is `Status::Delisted` and the
@@ -216,16 +236,20 @@ export class MarketContract extends Contract {
      *
      * An increase escrows `margin` plus `execFee`; a decrease escrows
      * `execFee` alone. `execFee` (read from config) pays the keeper at fill
-     * and refunds on cancel or when the position closes. A decrease that
-     * reaches or passes the position size, or that would leave a dust
-     * remainder behind, clamps to a full close at fill (`FULL_CLOSE` signals
-     * a full close).
+     * and refunds on cancel. When the position closes, every pending decrease
+     * order on its side is cancelled and refunded. A pending increase stays
+     * and can still fill.
      *
-     * @param kind - A market kind fills immediately; a limit or stop kind
-     *   waits on `triggerPrice`, unread by a market kind.
-     * @param notional - Size-change magnitude (token-dec).
+     * @param kind - A market kind is eligible at once; a limit or stop kind
+     *   waits for `triggerPrice` to be crossed. A keeper fills either kind.
+     * @param notional - Size-change magnitude (token-dec). A decrease at or
+     *   above the position size, or one that leaves less than
+     *   `minPositionNotional` behind, clamps to a full close at fill.
+     *   `FULL_CLOSE` signals a full close.
      * @param margin - Margin-change magnitude (token-dec).
-     * @param triggerPrice - Crossing level for a limit or stop kind (price_scalar, 18-dec).
+     * @param triggerPrice - Crossing level for a limit or stop kind
+     *   (price_scalar, 18-dec). A market kind does not read it, but a
+     *   negative value still traps.
      * @param priceBound - Fill slippage limit (price_scalar, 18-dec). `0` means unbounded.
      * @param expiration - Last ledger sequence the order can still fill at.
      *
@@ -237,12 +261,14 @@ export class MarketContract extends Contract {
      * - UnknownKind (734) if `kind` is not a known discriminant.
      * - NegativeValueNotAllowed (710) if a magnitude, `triggerPrice`, or
      *   `priceBound` is negative.
-     * - InvalidOrder (732) if the shape is a no-op, a moved value is below a
-     *   dust floor, or a limit or stop kind carries a non-positive `triggerPrice`.
-     * - TooManyOrders (733) if the side already holds the maximum
-     *   (`MAX_ORDERS_PER_SIDE` = 8) pending decrease orders.
+     * - InvalidOrder (732) if the shape is a no-op, a moved value is below
+     *   its dust floor (`minOrderNotional` or `minOrderMargin`), a limit or
+     *   stop kind carries a zero `triggerPrice`, or an increase's
+     *   `margin + execFee` escrow overflows.
      * - NotionalAboveMaximum (712) if an increase's `notional` exceeds `maxPositionNotional`.
      * - OrderExpired (731) if `expiration` is already behind the current ledger.
+     * - TooManyOrders (733) if a decrease targets a side that already holds
+     *   `MAX_ORDERS_PER_SIDE` pending decrease orders.
      */
     createOrder(
         user: string,
@@ -265,8 +291,9 @@ export class MarketContract extends Contract {
      * the router's `multicall`.
      *
      * Produces the same arguments as `createOrder`, so a batched order is
-     * byte-identical to a direct one. The router executes the call, and
-     * `user`'s auth entry nests under the router's.
+     * byte-identical to a direct one. The router needs no authorization:
+     * `user` authorizes this call in its own auth entry. `MarketRouterContract`
+     * says how to simulate a direct batch.
      */
     createOrderCall(
         user: string,
@@ -316,8 +343,9 @@ export class MarketContract extends Contract {
      * the router's `multicall`.
      *
      * Produces the same arguments as `cancelOrder`, so a batched cancel is
-     * byte-identical to a direct one. The router executes the call, and
-     * `user`'s auth entry nests under the router's.
+     * byte-identical to a direct one. The router needs no authorization:
+     * `user` authorizes this call in its own auth entry. `MarketRouterContract`
+     * says how to simulate a direct batch.
      */
     cancelOrderCall(user: string, id: u32): Call {
         return {
@@ -351,12 +379,12 @@ export class MarketContract extends Contract {
      * - The allocated vault order id, or `0` for a Retired-market instant redeem.
      *
      * # Errors
+     * - UnknownKind (734) if `kind` is not a known discriminant.
+     * - NegativeValueNotAllowed (710) if `amount` or `minOut` is negative.
      * - MarketFrozen (704) if the market status is `Frozen`.
      * - InvalidStatus (702) if a deposit is created on a `Retired` market.
-     * - UnknownKind (734) if `kind` is not a known discriminant.
-     * - NegativeValueNotAllowed (710) if `minOut` is negative.
-     * - InvalidOrder (732) if the deposited assets fall under `minDeposit`,
-     *   or a redeem's share `amount` is not positive.
+     * - InvalidOrder (732) if `amount` is zero, a deposit falls under
+     *   `minDeposit`, or a deposit's `amount + execFee` escrow overflows.
      */
     createVaultOrder(user: string, kind: VaultOrderKind, amount: i128, minOut: i128): string {
         const call = this.createVaultOrderCall(user, kind, amount, minOut);
@@ -368,8 +396,9 @@ export class MarketContract extends Contract {
      * under the router's `multicall`.
      *
      * Produces the same arguments as `createVaultOrder`, so a batched
-     * deposit or redeem is byte-identical to a direct one. The router
-     * executes the call, and `user`'s auth entry nests under the router's.
+     * deposit or redeem is byte-identical to a direct one. The router needs
+     * no authorization: `user` authorizes this call in its own auth entry.
+     * `MarketRouterContract` says how to simulate a direct batch.
      */
     createVaultOrderCall(user: string, kind: VaultOrderKind, amount: i128, minOut: i128): Call {
         return {
@@ -386,7 +415,8 @@ export class MarketContract extends Contract {
 
     /**
      * Cancel a pending `VaultOrder` `user` owns and pay back the escrowed
-     * assets or shares. `user` authorizes.
+     * assets or shares. `user` authorizes. The escrowed `execFee` refunds
+     * too, in the settlement token, and is not part of the return.
      *
      * # Returns
      * - The escrowed principal paid back: assets for a deposit (token-dec) or
@@ -406,8 +436,9 @@ export class MarketContract extends Contract {
      * under the router's `multicall`.
      *
      * Produces the same arguments as `cancelVaultOrder`, so a batched
-     * cancel is byte-identical to a direct one. The router executes the
-     * call, and `user`'s auth entry nests under the router's.
+     * cancel is byte-identical to a direct one. The router needs no
+     * authorization: `user` authorizes this call in its own auth entry.
+     * `MarketRouterContract` says how to simulate a direct batch.
      */
     cancelVaultOrderCall(user: string, id: u32): Call {
         return {
@@ -421,16 +452,21 @@ export class MarketContract extends Contract {
     }
 
     /**
-     * Pay out `user`'s accrued claimable credit balance from the pool
-     * (earned funding, plus any payout whose direct transfer failed).
-     * `user` authorizes.
+     * Pay out `user`'s claimable credit balance from the credit pool: earned
+     * funding, plus any payout whose direct transfer failed. `user`
+     * authorizes.
+     *
+     * The payout is the balance capped at the pool's holdings, and an unpaid
+     * remainder stays claimable. `MarketUser.claimable(market)` quotes the
+     * capped amount.
      *
      * # Returns
      * - The amount paid out (token-dec).
      *
      * # Errors
      * - MarketFrozen (704) if the market status is `Frozen`.
-     * - NothingToClaim (760) if `user` has no claimable balance.
+     * - NothingToClaim (760) if `user` has no claimable balance, or the pool
+     *   holds nothing to pay it with.
      */
     claimCredit(user: string): string {
         return this.call(
@@ -444,9 +480,12 @@ export class MarketContract extends Contract {
     // ============================================================
 
     /**
-     * Fill a pending `Order` at a verified price and settle it.
+     * Fill a pending `Order` and settle it. Permissionless: `keeper` takes
+     * the payout and is not authenticated.
      *
      * @param price - The keeper's signed price update for this market's feed.
+     *   The fill prices at this report, never at the cached price. Once a
+     *   terminal price is set, the fill uses it and ignores this report.
      *
      * # Returns
      * - The keeper's payout (token-dec).
@@ -457,23 +496,29 @@ export class MarketContract extends Contract {
      * - IncreaseHalted (705) if a size-growing increase runs while the status
      *   does not accept opens or the target side has ADL enabled.
      * - OrderExpired (731) if the order expired before the fill.
-     * - StalePrice (740) if the verified price predates the order, or the
-     *   price the position was last marked against.
+     * - StalePrice (740) if the price predates the order or the price the
+     *   position was last marked against. A market kind filled in its
+     *   creation ledger is exempt from the order check.
      * - TriggerNotMet (742) if the order's trigger has not been crossed.
      * - PriceBoundExceeded (741) if the fill price is worse than `priceBound`.
      * - PositionNotFound (720) if a decrease targets an absent position.
      * - PositionLiquidatable (723) if a decrease targets a position whose
-     *   settled equity is already below the maintenance margin. Call
-     *   `executeLiquidation` instead.
-     * - NotionalBelowMinimum (711) if the resulting position falls under the size floor.
-     * - VaultInsolvent (755) if a decrease settlement's vault draw exceeds the vault balance.
-     * - NotionalAboveMaximum (712) if the resulting position exceeds the size ceiling.
-     * - OpenInterestExceeded (715) if the side's open interest would exceed `maxOpenInterest`.
-     * - UtilizationExceeded (714) if an increase leaves the increased side's
-     *   reserve above the utilization cap. The opposite side is not checked.
-     * - InsufficientMargin (713) if margin falls below the initial-margin
-     *   requirement or equity below the maintenance requirement.
+     *   settled equity is already below the maintenance margin, or any fill
+     *   leaves the position's settled equity below it. For the first case,
+     *   call `executeLiquidation` instead.
      * - NotionalLocked (721) if the close exceeds the position's unlocked notional.
+     * - NotionalBelowMinimum (711) if the resulting position falls under `minPositionNotional`.
+     * - NotionalAboveMaximum (712) if the resulting position exceeds `maxPositionNotional`.
+     * - InsufficientMargin (713) if the posted margin left after the fill is
+     *   below `ceil(initMargin * notional)`. Unrealized PnL does not count.
+     * - OpenInterestExceeded (715) if a size-growing increase takes the
+     *   side's open interest above `maxOpenInterest`.
+     * - SizeRoundsToZero (716) if an increase's notional buys no base size at
+     *   the entry price.
+     * - UtilizationExceeded (714) if a size-growing increase leaves its
+     *   side's reserve above `maxUtilOpen` of half the vault. The opposite
+     *   side is not checked.
+     * - VaultInsolvent (755) if a decrease settlement's vault draw exceeds the vault balance.
      */
     executeOrder(keeper: string, user: string, id: u32, price: Buffer | Uint8Array): string {
         return this.call(
@@ -486,14 +531,17 @@ export class MarketContract extends Contract {
     }
 
     /**
-     * Force-close the `Position` `(user, isLong)` at a verified price and
-     * settle it.
+     * Force-close the `Position` `(user, isLong)` and settle it.
+     * Permissionless: `keeper` takes the payout and is not authenticated.
      *
-     * Eligible when equity has fallen below the maintenance margin, or
-     * regardless of margin health once a `Delisted` market's 7-day delist
+     * Eligible when settled equity has fallen below the maintenance margin,
+     * or regardless of margin health once a `Delisted` market's 7-day delist
      * deadline has passed.
      *
      * @param price - The keeper's signed price update for this market's feed.
+     *   The call prices at the newer of this report and the market's cached
+     *   price. Once a terminal price is set, it uses that and ignores this
+     *   report.
      *
      * # Returns
      * - The keeper's payout (token-dec).
@@ -501,10 +549,10 @@ export class MarketContract extends Contract {
      * # Errors
      * - MarketFrozen (704) if the market status is `Frozen` or `Retired`.
      * - PositionNotFound (720) if no position exists for `(user, isLong)`.
-     * - StalePrice (740) if the verified price is older than the price the
-     *   position was last marked against.
-     * - NotLiquidatable (722) if equity still covers the maintenance margin
-     *   and the wind-down waiver does not apply.
+     * - StalePrice (740) if the price is older than the price the position
+     *   was last marked against.
+     * - NotLiquidatable (722) if equity is at or above the maintenance margin
+     *   and the delist deadline has not passed.
      * - VaultInsolvent (755) if the settlement's vault draw exceeds the vault balance.
      */
     executeLiquidation(keeper: string, user: string, isLong: boolean, price: Buffer | Uint8Array): string {
@@ -518,12 +566,19 @@ export class MarketContract extends Contract {
     }
 
     /**
-     * Recompute both sides' pending PnL at a keeper-verified price and set or
-     * clear the `AdlState` flags.
+     * Recompute both sides' pending PnL and set or clear the `AdlState`
+     * flags. Permissionless.
      *
-     * A flagged side blocks its increases and is eligible for `executeAdl`.
+     * A side is flagged once its pending PnL exceeds `adlMaxPnl` of half the
+     * vault balance. It stays flagged until the PnL falls to `adlClearTarget`
+     * of half the vault or below. A flagged side rejects increases that add
+     * notional, and is eligible for `executeAdl`. A margin-only increase
+     * still fills.
      *
      * @param price - The keeper's signed price update for this market's feed.
+     *   The call prices at the newer of this report and the market's cached
+     *   price. Once a terminal price is set, it uses that and ignores this
+     *   report.
      *
      * # Returns
      * - The resulting `AdlState`.
@@ -539,38 +594,45 @@ export class MarketContract extends Contract {
     }
 
     /**
-     * Deleverage the winning `Position` `(user, isLong)` at a keeper-verified
-     * price, reducing its side's pending PnL toward `adlClearTarget` of half
-     * the vault balance.
+     * Deleverage the winning `Position` `(user, isLong)`, reducing its side's
+     * pending PnL toward `adlClearTarget` of half the vault balance.
+     * Permissionless: `keeper` takes the payout and is not authenticated.
      *
-     * Fires only on a side flagged by `updateAdlState`.
+     * Fires only on a side flagged by `updateAdlState`. The remainder of a
+     * partial close skips the initial-margin check.
      *
-     * @param amount - Notional to close (token-dec). Clamped to the whole
-     *   position, or to a partial slice that leaves at least the minimum
-     *   position size behind.
+     * @param amount - Notional to close (token-dec), at least
+     *   `minOrderNotional`. A request at or above the position notional, or
+     *   one whose remainder would fall below `minPositionNotional`, closes
+     *   the whole position.
      * @param price - The keeper's signed price update for this market's feed.
+     *   The call prices at the newer of this report and the market's cached
+     *   price. Once a terminal price is set, it uses that and ignores this
+     *   report.
      *
      * # Returns
      * - The keeper's payout: the `keeperRate` cut of the trade fee (token-dec).
      *
      * # Errors
      * - MarketFrozen (704) if the market status is `Frozen` or `Retired`.
+     * - InvalidOrder (732) if `amount` is below `minOrderNotional`.
      * - AdlNotTriggered (770) if the side is not flagged for deleveraging, or
      *   its pending PnL is already at or below `adlClearTarget` of half the
      *   vault balance.
+     * - StalePrice (740) if the price is older than the price the position
+     *   was last marked against.
      * - PositionNotFound (720) if no position exists for `(user, isLong)`.
-     * - StalePrice (740) if the effective price is older than the price the
-     *   position was last marked against.
+     * - PositionLiquidatable (723) if the position's settled equity is below
+     *   the maintenance margin, before the close or for the remainder of a
+     *   partial close. Call `executeLiquidation` instead.
+     * - NotionalLocked (721) if the close touches notional still under the
+     *   decrease lock.
+     * - NotionalAboveMaximum (712) if the remainder of a partial close
+     *   exceeds `maxPositionNotional`.
+     * - VaultInsolvent (755) if the settlement's vault draw exceeds the vault balance.
      * - AdlNotEligible (772) if the close does not reduce the side's pending PnL.
      * - AdlOvershoot (771) if the close lands the side under the clear
      *   allowance re-measured on the settled vault balance.
-     * - PositionLiquidatable (723) if the position's settled equity is
-     *   already below the maintenance margin. Call `executeLiquidation`
-     *   instead.
-     * - InvalidOrder (732) if `amount` is not positive.
-     * - VaultInsolvent (755) if the settlement's vault draw exceeds the vault balance.
-     * - NotionalLocked (721) or NotionalBelowMinimum (711) from the
-     *   underlying decrease.
      */
     executeAdl(keeper: string, user: string, isLong: boolean, amount: i128, price: Buffer | Uint8Array): string {
         return this.call(
@@ -584,7 +646,8 @@ export class MarketContract extends Contract {
     }
 
     /**
-     * Fill the `VaultOrder` `(user, id)` at a keeper-verified price.
+     * Fill the `VaultOrder` `(user, id)`. Permissionless: `keeper` takes the
+     * payout and is not authenticated.
      *
      * The whole order fills at once and is removed. The fill deducts the
      * vault fill fee (the `depositFee` or `redeemFee` cut of the moved assets
@@ -598,6 +661,9 @@ export class MarketContract extends Contract {
      * pending.
      *
      * @param price - The keeper's signed price update for this market's feed.
+     *   The fill prices at the newer of this report and the market's cached
+     *   price. Once a terminal price is set, it uses that and ignores this
+     *   report.
      *
      * # Returns
      * - The keeper's payout, token-dec: the `keeperRate` cut of the vault
@@ -607,12 +673,13 @@ export class MarketContract extends Contract {
      * # Errors
      * - MarketFrozen (704) if the market status is `Frozen` or `Retired`.
      * - VaultOrderNotFound (750) if no vault order `(user, id)` exists.
-     * - StalePrice (740) if the effective price's `publish_time` predates the
-     *   order's `createdAt`, or the fill runs in the order's creation ledger.
+     * - StalePrice (740) if the price's `publish_time` predates the order's
+     *   `createdAt`, or the fill runs in the order's creation ledger.
      * - VaultOrderLocked (751) if a redeem's `redeemLock` cooldown from
      *   `createdAt` has not elapsed.
      * - VaultBalanceExceeded (753) if a deposit would push the vault above `maxVaultBalance`.
-     * - UtilizationExceeded (714) if a redeem would leave the vault under-reserved.
+     * - UtilizationExceeded (714) if a redeem would leave either side's
+     *   reserve above `maxUtilWithdraw` of half the remaining vault balance.
      * - PendingPnlExceeded (754) if a redeem would leave a side's pending PnL
      *   above `maxPnlWithdraw` of half the remaining balance.
      */
@@ -632,9 +699,12 @@ export class MarketContract extends Contract {
 
     /**
      * Advance both of the market's accrual indices (borrowing and funding)
-     * to the current timestamp at a keeper-verified price.
+     * to the current timestamp. Permissionless.
      *
      * @param price - The keeper's signed price update for this market's feed.
+     *   The call prices at the newer of this report and the market's cached
+     *   price. Once a terminal price is set, it uses that and ignores this
+     *   report.
      *
      * Emits a payload-free `accrual_update` marker event; read the
      * post-accrual state from the returned market data or `get_market_data`.
@@ -745,7 +815,8 @@ export class MarketContract extends Contract {
      *
      * # Returns
      * - The funding owed to `user`, plus any payout whose direct transfer
-     *   failed, `0` if none (token-dec).
+     *   failed, `0` if none (token-dec). A claim pays at most what the credit
+     *   pool holds, so `claimCredit` can pay less than this balance.
      */
     getClaimableCredit(user: string): string {
         return this.call(
@@ -778,9 +849,11 @@ export class MarketContract extends Contract {
      * Read the wind-down anchors.
      *
      * # Returns
-     * - `undefined` if the market was never delisted. Otherwise
-     *   `[terminalPrice, delistedAt]`, with `terminalPrice` at `0` until a
-     *   flat settlement price is set (price_scalar units, seconds).
+     * - `undefined` if the market was never delisted, or the owner reverted
+     *   its last delist within the grace window. Otherwise
+     *   `[terminalPrice, delistedAt]`: the flat settlement price
+     *   (price_scalar), `0` until set, and the first-delist time (unix
+     *   seconds).
      */
     getRetirement(): string {
         return this.call('get_retirement').toXDR('base64');
@@ -810,6 +883,7 @@ export class MarketContract extends Contract {
      *   argument; it carries no authority of its own.
      *
      * # Errors
+     * - `OwnerNotSet` (2100) once ownership is renounced.
      * - `UpgradeNotOwner` (600) if `operator` is not the owner.
      */
     upgrade(newWasmHash: Buffer | Uint8Array, operator: string): string {
@@ -831,12 +905,21 @@ export class MarketContract extends Contract {
     }
 
     /**
-     * Start a 2-step ownership transfer to a new address. Owner only.
+     * Start a 2-step ownership transfer to `newOwner`. Owner only.
      *
-     * The new owner must call `acceptOwnership` to finish the transfer.
+     * The current owner keeps control until `newOwner` calls
+     * `acceptOwnership`. A new call replaces any pending transfer.
      *
-     * @param liveUntilLedger - Last ledger sequence the new owner can accept
-     *   by. `0` cancels any pending transfer.
+     * @param liveUntilLedger - Last ledger sequence `newOwner` can accept by.
+     *   `0` cancels the pending transfer to `newOwner` instead, and
+     *   `newOwner` must then equal the pending owner.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) once ownership is renounced.
+     * - TransferInvalidLiveUntilLedger (2201) if `liveUntilLedger` is in the
+     *   past or beyond the maximum entry TTL.
+     * - NoPendingTransfer (2200) on a cancel with no pending transfer.
+     * - InvalidPendingAccount (2202) on a cancel that names another address.
      */
     transferOwnership(newOwner: string, liveUntilLedger: u32): string {
         return this.call(
@@ -846,7 +929,13 @@ export class MarketContract extends Contract {
         ).toXDR('base64');
     }
 
-    /** Accept a pending ownership transfer. New owner authorizes. */
+    /**
+     * Accept a pending ownership transfer. The pending owner authorizes.
+     *
+     * # Errors
+     * - NoPendingTransfer (2200) if no transfer is pending.
+     * - TransferExpired (2203) if the transfer's `liveUntilLedger` has passed.
+     */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
@@ -854,7 +943,13 @@ export class MarketContract extends Contract {
     /**
      * Renounce ownership of the contract. Owner only.
      *
-     * This permanently removes the owner and disables every owner-only method.
+     * This permanently removes the owner and disables every owner-only
+     * method: `setConfig`, `setStatus`, `setTerminalPrice`, `upgrade` and
+     * `transferOwnership`.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) if ownership is already renounced.
+     * - OwnershipTransferInProgress (2101) if an unexpired transfer is pending.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');

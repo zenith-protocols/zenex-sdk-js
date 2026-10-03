@@ -50,6 +50,7 @@ function feedIdToScVal(feedId: Buffer | Uint8Array): xdr.ScVal {
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class OracleContract extends Contract {
+    /** Parsed spec for the oracle contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(oracleSpec);
 
     /**
@@ -85,8 +86,8 @@ export class OracleContract extends Contract {
     /**
      * Build the constructor operation for a new Oracle contract instance.
      * See {@link OracleConstructorArgs} for argument bounds; traps with
-     * `InvalidStaleness` (783) or `InvalidSpreadReduction` (785) if they
-     * are violated.
+     * `OracleInvalidStaleness` (783) or `OracleInvalidSpreadReduction` (785)
+     * if they are violated.
      */
     static deploy(
         deployer: string,
@@ -121,23 +122,23 @@ export class OracleContract extends Contract {
      * @param report - The signed report blob, exactly as fetched from the
      *   API; traps if the Chainlink verifier rejects it (invalid
      *   signatures or an inactive verifier configuration), with
-     *   `InvalidData` (780) if the body fails to decode or the feed is
-     *   not a V3 stream (`0x0003` prefix), with `PriceAhead` (793) if the
-     *   report sits ahead of the ledger clock by more than the forward
-     *   allowance, with `ReportExpired` (784) if the ledger clock has
-     *   passed its expiry, or with `InvalidPrice` (781) on a
-     *   non-positive price side, a crossed book, or an oversized price
-     *   value
+     *   `OracleInvalidData` (780) if the body fails to decode or the feed
+     *   is not a V3 stream (`0x0003` prefix), with `OraclePriceAhead` (793)
+     *   if the report sits ahead of the ledger clock by more than the
+     *   forward allowance, with `OracleReportExpired` (784) if the ledger
+     *   clock has passed its expiry, or with `OracleInvalidPrice` (781) on
+     *   a non-positive benchmark or price side, a crossed book, or an
+     *   oversized price value
      * @param feedId - The caller's immutable 32-byte stream anchor;
-     *   traps with `FeedMismatch` (790) if the report prices a different
-     *   stream
+     *   traps with `OracleFeedMismatch` (790) if the report prices a
+     *   different stream
      * @param protective - Selects the staleness window: `false` (default)
      *   uses the strict `trade_staleness` window for order fills, `true`
      *   the wider `close_staleness` window for gap-closing calls such as
      *   liquidation, ADL, and accrual. Only the past side widens; the
      *   forward allowance stays at `trade_staleness` for both values.
-     *   Traps with `PriceStale` (782) if the observation is older than
-     *   the selected window.
+     *   Traps with `OraclePriceStale` (782) if the observation is older
+     *   than the selected window.
      */
     verifyPrice(
         report: Buffer | Uint8Array,
@@ -157,12 +158,13 @@ export class OracleContract extends Contract {
     // ============================================================
 
     /**
-     * Update both staleness windows atomically (owner only).
+     * Update both staleness windows atomically (owner only). Traps with
+     * `OwnerNotSet` (2100) once ownership is renounced.
      * @param tradeStaleness - Max report age for order fills (seconds);
      *   in [3, 15]
      * @param closeStaleness - Max report age for gap-closing calls
      *   (seconds); in [tradeStaleness, 120]. Traps with
-     *   `InvalidStaleness` (783) if either bound is violated.
+     *   `OracleInvalidStaleness` (783) if either bound is violated.
      */
     updateStaleness(tradeStaleness: u64, closeStaleness: u64): string {
         return this.call(
@@ -173,11 +175,12 @@ export class OracleContract extends Contract {
     }
 
     /**
-     * Update the spread reduction factor (owner only).
+     * Update the spread reduction factor (owner only). Traps with
+     * `OwnerNotSet` (2100) once ownership is renounced.
      * @param spreadReductionFactor - Bid/ask narrowing toward the mid
      *   (SCALAR_18-scaled); in [0, SCALAR_18]. 0 = off, SCALAR_18 =
-     *   collapse to the mid. Traps with `InvalidSpreadReduction` (785)
-     *   if out of range.
+     *   collapse to the mid. Traps with `OracleInvalidSpreadReduction`
+     *   (785) if out of range.
      */
     updateSpreadReductionFactor(spreadReductionFactor: i128): string {
         return this.call(
@@ -200,6 +203,7 @@ export class OracleContract extends Contract {
      *   argument; it carries no authority of its own.
      *
      * # Errors
+     * - `OwnerNotSet` (2100) once ownership is renounced.
      * - `UpgradeNotOwner` (600) if `operator` is not the owner.
      */
     upgrade(newWasmHash: Buffer | Uint8Array, operator: string): string {
@@ -222,8 +226,19 @@ export class OracleContract extends Contract {
 
     /**
      * Begin a two-step transfer to `newOwner`, who must call `acceptOwnership`
-     * by `liveUntilLedger` (owner only). `liveUntilLedger = 0` cancels any
-     * pending transfer instead.
+     * by `liveUntilLedger` (owner only). A new call replaces any pending
+     * transfer.
+     *
+     * @param liveUntilLedger - Last ledger sequence `newOwner` can accept by.
+     *   `0` cancels the pending transfer to `newOwner` instead, and
+     *   `newOwner` must then equal the pending owner.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) once ownership is renounced.
+     * - TransferInvalidLiveUntilLedger (2201) if `liveUntilLedger` is in the
+     *   past or beyond the maximum entry TTL.
+     * - NoPendingTransfer (2200) on a cancel with no pending transfer.
+     * - InvalidPendingAccount (2202) on a cancel that names another address.
      */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
@@ -234,15 +249,27 @@ export class OracleContract extends Contract {
         ).toXDR('base64');
     }
 
-    /** Complete a pending ownership transfer. Only the proposed new owner may call this. */
+    /**
+     * Complete a pending ownership transfer. Only the proposed new owner may
+     * call this.
+     *
+     * # Errors
+     * - NoPendingTransfer (2200) if no transfer is pending.
+     * - TransferExpired (2203) if the transfer's `liveUntilLedger` has passed.
+     */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
 
     /**
-     * Permanently remove the owner, disabling `updateStaleness` and
-     * `updateSpreadReductionFactor` (owner only). Fails if a transfer is
-     * pending.
+     * Permanently remove the owner, disabling `updateStaleness`,
+     * `updateSpreadReductionFactor`, `upgrade` and `transferOwnership`
+     * (owner only). Only an upgrade can change the verifier, so the
+     * verifier is then fixed for good.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) if ownership is already renounced.
+     * - OwnershipTransferInProgress (2101) if an unexpired transfer is pending.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');

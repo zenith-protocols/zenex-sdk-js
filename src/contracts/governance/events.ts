@@ -1,18 +1,26 @@
 import { u32, u64 } from '../../index.js';
 import { ZenexContractType, BaseZenexEvent } from '../../base_event.js';
+import type { OwnableEvent } from '../ownable/events.js';
 
 /** Governance event topic values, matched against decoded event names. */
 export enum GovernanceEventType {
+    /** `queue` queued a call, or `setDelay` queued a delay change. */
     Queued = 'queued',
+    /** `execute` ran a queued call. */
     Executed = 'executed',
+    /** `cancel` removed a queued call. */
     Cancelled = 'cancelled',
+    /** `setStatus` forwarded a status change at once. */
     StatusSet = 'status_set',
+    /** `applyDelay` applied a pending delay change. */
     DelaySet = 'delay_set',
 }
 
-/** Fields shared by every governance event. */
+/** Fields shared by every governance event. Fields are the wire names in camelCase. */
 export interface BaseGovernanceEvent extends BaseZenexEvent {
+    /** Always `ZenexContractType.Governance`. */
     contractType: ZenexContractType.Governance;
+    /** The event name. */
     eventType: GovernanceEventType;
 }
 
@@ -69,10 +77,11 @@ export interface GovernanceDelaySetEvent extends BaseGovernanceEvent {
     newDelay: u64;
 }
 
-/** Union of every governance contract event. */
+/** Union of every governance contract event, including its ownership events. */
 export type GovernanceEvent =
     | GovernanceQueuedEvent
     | GovernanceExecutedEvent
     | GovernanceCancelledEvent
     | GovernanceStatusSetEvent
-    | GovernanceDelaySetEvent;
+    | GovernanceDelaySetEvent
+    | OwnableEvent<ZenexContractType.Governance>;

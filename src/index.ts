@@ -25,6 +25,15 @@ export interface Network {
 // Typed event surface (types only; consumers own their decode path)
 export { ZenexContractType } from './base_event.js';
 export type { BaseZenexEvent, ZenexEvent } from './base_event.js';
+export { OwnableEventType } from './contracts/ownable/index.js';
+export type {
+    OwnableContractType,
+    BaseOwnableEvent,
+    OwnershipTransferEvent,
+    OwnershipTransferCompletedEvent,
+    OwnershipRenouncedEvent,
+    OwnableEvent,
+} from './contracts/ownable/index.js';
 
 // =============================================================================
 // Market Module (order -> keeper-execute contract)
@@ -38,6 +47,7 @@ export {
     OrderKind,
     VaultOrderKind,
     FULL_CLOSE,
+    MAX_ORDERS_PER_SIDE,
     marketConfigToScVal,
     parseSidePair,
     parseOrder,
@@ -133,6 +143,19 @@ export type {
     OrderParams,
 } from './contracts/router/index.js';
 
+export {
+    FeeForwarderContract,
+    FeeForwarderEventType,
+} from './contracts/fee_forwarder/index.js';
+
+export type {
+    ForwardTarget,
+    RelayFee,
+    BaseFeeForwarderEvent,
+    FeeForwarderFeeCollectedEvent,
+    FeeForwarderEvent,
+} from './contracts/fee_forwarder/index.js';
+
 // =============================================================================
 // Factory Module
 // =============================================================================
@@ -144,6 +167,7 @@ export type {
     FactoryConstructorArgs,
     BaseFactoryEvent,
     FactoryDeployEvent,
+    FactoryInitMetaUpdateEvent,
     FactoryEvent,
 } from './contracts/factory/index.js';
 
@@ -173,10 +197,15 @@ export type {
 // =============================================================================
 
 export { OracleContract } from './contracts/oracle/index.js';
+export { OracleEventType } from './contracts/oracle/index.js';
 
 export type {
     OraclePriceData,
     OracleConstructorArgs,
+    BaseOracleEvent,
+    OracleStalenessUpdateEvent,
+    OracleSpreadReductionUpdateEvent,
+    OracleEvent,
 } from './contracts/oracle/index.js';
 
 // =============================================================================
@@ -184,8 +213,15 @@ export type {
 // =============================================================================
 
 export { TreasuryContract, parseTreasuryRate } from './contracts/treasury/index.js';
+export { TreasuryEventType } from './contracts/treasury/index.js';
 
 export type { TreasuryConstructorArgs } from './contracts/treasury/index.js';
+export type {
+    BaseTreasuryEvent,
+    TreasuryWithdrawEvent,
+    TreasuryRateUpdateEvent,
+    TreasuryEvent,
+} from './contracts/treasury/index.js';
 
 // =============================================================================
 // Vault Module
@@ -206,6 +242,8 @@ export type {
     VaultDepositEvent,
     VaultWithdrawEvent,
     VaultStrategyWithdrawEvent,
+    VaultTransferEvent,
+    VaultApproveEvent,
     VaultEvent,
 } from './contracts/vault/index.js';
 
