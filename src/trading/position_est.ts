@@ -82,7 +82,7 @@ export interface PositionEstimate {
  * decrease lock and the withdrawal probe. It defaults to the wall clock and
  * never reads earlier than the market's stored accrual.
  *
- * Measures against `market` as passed — pending accruals reflect the
+ * Measures against `market` as passed: pending accruals reflect the
  * indices as stored on-chain. Pass `market.accrue(price)` for numbers
  * advanced to now.
  */

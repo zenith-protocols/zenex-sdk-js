@@ -65,8 +65,9 @@ function zero(value: bigint): bigint {
 }
 
 /**
- * One loaded market: instance config, the market singleton, and the vault
- * state it settles against. Plain public fields, one snapshot per load.
+ * One loaded market: instance config, the market singleton, the vault state
+ * it settles against, and the oracle and treasury settings it prices and
+ * splits fees with. Plain public fields, one snapshot per load.
  */
 export class Market {
     constructor(
@@ -98,8 +99,8 @@ export class Market {
         /**
          * Flat settlement price of a wound-down market (18-dec), or
          * `undefined`. Once set, the chain fills, liquidates, accrues and
-         * prices shares at it on both sides. Every method here that takes a
-         * market then prices at it too and ignores the caller's price.
+         * prices shares at it on both sides, and so does every method of
+         * this tier that reads the market: the caller's price is ignored.
          */
         public terminalPrice: bigint | undefined,
         /**
@@ -143,10 +144,10 @@ export class Market {
      *
      * Refreshing is calling this again.
      *
-     * @throws {MarketStateError} `MISSING_STATE` when the market, vault,
-     *   oracle or treasury instance is absent or TTL-expired;
-     *   `IDENTITY_MISMATCH` when the instance names a different vault,
-     *   token, oracle or treasury than `contracts`.
+     * @throws {MarketStateError} `MISSING_STATE` when the market data or
+     *   the market, vault, oracle or treasury instance is absent or
+     *   TTL-expired; `IDENTITY_MISMATCH` when the instance names a
+     *   different vault, token, oracle or treasury than `contracts`.
      */
     static async load(
         network: Network,

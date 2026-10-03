@@ -25,9 +25,9 @@ export interface MarketContext {
     ledger: number;
     /**
      * Ledger close time in whole seconds; the clock every time gate uses.
-     * This value is supplied by the caller. It defaults to the wall clock,
-     * because the ledger entry read returns a sequence number, not a close
-     * time.
+     * The caller supplies it, since a ledger entry read returns a sequence
+     * number, not a close time. `marketContext` defaults it to the wall
+     * clock, never before the market's stored accrual.
      */
     ledgerTime: bigint;
     /** Operational status; only `Active` admits new risk. */

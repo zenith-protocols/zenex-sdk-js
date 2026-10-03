@@ -25,7 +25,7 @@ import {
  * from the storage key it read, so the methods never ask for it. All exact
  * bigints; the float view of the same numbers is `PositionEstimate`.
  *
- * Methods that take a `market` measure against it as passed — accrue first
+ * Methods that take a `market` measure against it as passed. Accrue first
  * (`market.accrue(price)`) when you want fill-grade numbers.
  */
 export class MarketPosition {
@@ -73,7 +73,7 @@ export class MarketPosition {
         return this.notional > 0n;
     }
 
-    /** Mark-to-market PnL at `price` (exit side), token-dec. Signed. */
+    /** Mark-to-market PnL at exactly `price` (exit side), token-dec. Signed. Takes no market, so no terminal price applies. */
     pnl(price: PriceInput): bigint {
         const mark = exitPrice(resolvePrice(price), this.isLong);
         return positionPnl(this, mark, SCALAR_18, this.isLong);

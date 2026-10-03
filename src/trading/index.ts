@@ -1,8 +1,5 @@
-// The trading domain: loaded chain objects (Market, MarketUser,
-// MarketPosition), the order intents, and the float estimate tier. The
-// exact fill engine lives under ./internal/ and is deliberately NOT
-// re-exported here; it is reachable for advanced callers but carries no
-// API promises.
+// The exact fill engine under ./internal/ is not re-exported, the package
+// exports map blocks deep imports of it, and it carries no API promises.
 
 export { loadTreasuryInstance, loadTreasuryRate } from './treasury.js';
 export { Price, reduceSpread } from './price.js';

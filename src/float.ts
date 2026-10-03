@@ -81,7 +81,7 @@ export function formatPrice(value: bigint): number {
 }
 
 /**
- * Converts a per-second `SCALAR_18` rate to a per-hour percentage — the one
+ * Converts a per-second `SCALAR_18` rate to a per-hour percentage, the one
  * unit rates are quoted in across the estimate tier. Signed; simple,
  * non-compounding, matching how the contract's indices accrue.
  */

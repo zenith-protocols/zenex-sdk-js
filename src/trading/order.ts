@@ -350,9 +350,15 @@ export function marketContext(
 /**
  * The creation pre-flight: preview applying `order` (the same `OrderParams`
  * you will sign, e.g. from `OrderIntent`) to `position` at `price`. Runs
- * the exact fill engine — what you preview is what the chain would do. This
- * catches what creation does not: the chain accepts orders that can never
- * fill (a decrease that would break the margin gate, #713).
+ * the exact fill engine, so what you preview is what the chain would do.
+ * This catches what creation does not: the chain accepts orders that can
+ * never fill (a decrease that would break the margin gate, #713).
+ *
+ * @param price The fill price. A bare bigint is published at the quote
+ *   time, but never behind the position's last fill. A market's terminal
+ *   price replaces it.
+ * @param now Quote time, unix seconds. Defaults to the wall clock and never
+ *   reads earlier than the market's stored accrual.
  */
 export function previewOrder(
     market: Market,

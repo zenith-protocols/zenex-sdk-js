@@ -7,6 +7,7 @@ import { I128_MAX, checkedI128 } from '../../math/fixed.js';
 import type { PriceData } from './math.js';
 import { decodeLedgerSequence } from './quote.js';
 
+/** The direction a trigger price must be crossed in for an order to become eligible. */
 export type OrderKindCrossing = 'above' | 'below';
 
 function unknownOrderKind(kind: never): never {
