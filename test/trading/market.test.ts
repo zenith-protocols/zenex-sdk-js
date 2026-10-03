@@ -200,26 +200,44 @@ describe('Market accessors', () => {
         expect((await Market.load(network, contracts)).owner).toBeUndefined();
     });
 
-    it('reports no retirement while the market is live', async () => {
+    it('reports no wind-down while the market is live', async () => {
         mockEntries(marketEntries(contracts));
         const market = await Market.load(network, contracts);
-        expect(market.retirement).toBeUndefined();
+        expect(market.terminalPrice).toBeUndefined();
+        expect(market.delistedAt).toBeUndefined();
         expect(market.assetDecimals).toBe(7);
         expect(market.feedId).toEqual(TEST_FEED_ID);
     });
 
-    it('reports (terminalPrice, delistedAt) once retired — the get_retirement shape', async () => {
+    it('reports delistedAt as soon as the market delists, before any terminal price', async () => {
         const instance = marketInstanceScVal({
             vault: VAULT,
             token: TOKEN,
             oracle: ORACLE,
             treasury: TREASURY,
+            status: Status.Delisted,
+            delistedAt: 1_700n,
+        });
+        mockEntries(marketEntries(contracts, { instance }));
+        const market = await Market.load(network, contracts);
+        expect(market.delistedAt).toBe(1_700n);
+        expect(market.terminalPrice).toBeUndefined();
+    });
+
+    it('reports the terminal price and delistedAt as separate fields', async () => {
+        const instance = marketInstanceScVal({
+            vault: VAULT,
+            token: TOKEN,
+            oracle: ORACLE,
+            treasury: TREASURY,
+            status: Status.Delisted,
             delistedAt: 1_700n,
             terminalPrice: 99n,
         });
         mockEntries(marketEntries(contracts, { instance }));
         const market = await Market.load(network, contracts);
-        expect(market.retirement).toEqual([99n, 1_700n]);
+        expect(market.terminalPrice).toBe(99n);
+        expect(market.delistedAt).toBe(1_700n);
     });
 
     it('refreshes by loading again', async () => {

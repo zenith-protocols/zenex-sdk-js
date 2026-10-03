@@ -48,6 +48,12 @@ export const FULL_CLOSE: i128 = 2n ** 127n - 1n;
 /** Maximum pending decrease orders per side; the 9th push traps `TooManyOrders` (733). */
 export const MAX_ORDERS_PER_SIDE = 8;
 
+/** Delist grace window, seconds after the delist: the delist can revert within it, and the terminal price is settable only after it. */
+export const DELIST_GRACE: u64 = 86_400n;
+
+/** Seconds after the delist until any keeper can force-liquidate an open position on a `Delisted` market. */
+export const DELIST_DEADLINE: u64 = 604_800n;
+
 /**
  * A keeper-executed order (persistent user-tier storage, keyed `(user, id)`).
  *

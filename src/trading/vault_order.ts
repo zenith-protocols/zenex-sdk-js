@@ -9,7 +9,7 @@ import {
 } from '../math/fixed.js';
 import type { Market } from './market.js';
 import type { PriceInput } from './price.js';
-import { quoteTime, resolvePrice } from './price.js';
+import { marketPrice, quoteTime } from './price.js';
 import {
     cappedNetPnl,
     convertVaultAssetsToShares,
@@ -32,7 +32,7 @@ function expectedFillOutput(
     amount: bigint,
     price: PriceInput,
 ): bigint {
-    const p = resolvePrice(price);
+    const p = marketPrice(market, price, quoteTime(market));
     if (kind === VaultOrderKind.Deposit) {
         const fee = mulDivFloor(amount, market.config.depositFee, SCALAR_18);
         const pnl = cappedNetPnl(
@@ -163,13 +163,15 @@ export class VaultOrderIntent {
             this.kind === VaultOrderKind.Redeem && market.config.redeemLock > 0n
                 ? market.config.redeemLock
                 : 1n;
-        const p = resolvePrice(price);
         const context = {
             ledger: market.ledger,
             now: createdAt + lock,
             market: market.data,
             config: market.config,
-            price: { ...p, publishTime: createdAt + lock },
+            price: {
+                ...marketPrice(market, price, createdAt + lock),
+                publishTime: createdAt + lock,
+            },
             vault: market.vaultAtomic(),
             treasuryRate: market.treasuryRate,
             executionFee: market.config.execFee,

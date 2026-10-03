@@ -7,7 +7,7 @@ import { previewOrder } from './order.js';
 import type { PositionEstimate } from './position_est.js';
 import { estimatePosition } from './position_est.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice, wallClock } from './price.js';
+import { marketPrice, quoteTime, resolvePrice, wallClock } from './price.js';
 import { exitPrice } from './internal/math.js';
 import {
     impliedEntryPrice,
@@ -84,7 +84,10 @@ export class MarketPosition {
      * contract's margin gates measure.
      */
     equity(market: Market, price: PriceInput): bigint {
-        const mark = exitPrice(resolvePrice(price), this.isLong);
+        const mark = exitPrice(
+            marketPrice(market, price, quoteTime(market)),
+            this.isLong,
+        );
         return positionEquity(this, market.data, mark, SCALAR_18, this.isLong);
     }
 
@@ -123,21 +126,26 @@ export class MarketPosition {
     /**
      * Whether a keeper liquidation would succeed at `price`: settled equity
      * below the maintenance requirement, measured exactly as
-     * `execute_liquidation` does (close fees included). `false` with no open
-     * size.
+     * `execute_liquidation` does (close fees included). On a `Delisted`
+     * market past `delistedAt + DELIST_DEADLINE`, every open position is
+     * liquidatable. The deadline is measured at the snapshot's accrual time,
+     * so accrue first to measure it now. `false` with no open size.
      */
     isLiquidatable(market: Market, price: PriceInput): boolean {
+        // The market as passed: elapsed 0 against the stored accrual.
+        const now = market.data.accruedAt;
         const state = liquidationState(this, {
             ledger: market.ledger,
-            // The market as passed: elapsed 0 against the stored accrual.
-            now: market.data.accruedAt,
+            now,
             isLong: this.isLong,
             position: this,
             market: market.data,
             config: market.config,
-            price: resolvePrice(price),
+            price: marketPrice(market, price, now),
             vaultAssets: market.vaultAssets,
             treasuryRate: market.treasuryRate,
+            status: market.status,
+            delistedAt: market.delistedAt,
         });
         return state.kind === 'exact' ? state.value.liquidatable : false;
     }

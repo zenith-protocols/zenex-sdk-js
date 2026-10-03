@@ -3,7 +3,7 @@ import { formatPrice, formatToken, formatTokenFloor } from '../float.js';
 import type { Market } from './market.js';
 import type { MarketPosition } from './position.js';
 import type { PriceInput } from './price.js';
-import { quoteTime, resolvePrice } from './price.js';
+import { marketPrice, quoteTime } from './price.js';
 import { marketContext } from './order.js';
 import { exitPrice, quoteTradeFees } from './internal/math.js';
 import { maxWithdrawableMargin } from './internal/apply.js';
@@ -88,8 +88,10 @@ export function estimatePosition(
     const data = market.data;
     const isLong = position.isLong;
     const clock = quoteTime(market, now);
-    const p = resolvePrice(
+    const p = marketPrice(
+        market,
         price,
+        clock,
         position.pricedAt > clock ? position.pricedAt : clock,
     );
     const mark = exitPrice(p, isLong);

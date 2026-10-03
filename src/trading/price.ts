@@ -70,3 +70,22 @@ export function resolvePrice(input: PriceInput, publishTime?: bigint): PriceData
         publishTime: price.publishTime,
     };
 }
+
+/**
+ * @internal The price `market` acts on at `ledgerTime`. Once the market holds
+ * a terminal price, that is both sides, observed at `ledgerTime`, and `input`
+ * is ignored, exactly as the contract prices a wind-down. Otherwise `input`,
+ * a bare bigint stamped at `stamp`.
+ */
+export function marketPrice(
+    market: Market,
+    input: PriceInput,
+    ledgerTime: bigint,
+    stamp: bigint = ledgerTime,
+): PriceData {
+    const terminal = market.terminalPrice;
+    if (terminal !== undefined) {
+        return { bid: terminal, ask: terminal, publishTime: ledgerTime };
+    }
+    return resolvePrice(input, stamp);
+}

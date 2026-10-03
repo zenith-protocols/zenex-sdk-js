@@ -16,7 +16,7 @@ import { MarketStateError, readEntries } from '../entries.js';
 import type { EntryBatch } from '../entries.js';
 import { MarketUser, decodeUser, marketUserKeys } from './user.js';
 import type { PriceInput } from './price.js';
-import { quoteTime, resolvePrice } from './price.js';
+import { marketPrice, quoteTime } from './price.js';
 import type { MarketEstimate } from './market_est.js';
 import { estimateMarket } from './market_est.js';
 import {
@@ -35,6 +35,7 @@ import {
     convertVaultSharesToAssets,
 } from './internal/vault.js';
 import type { VaultAtomicState } from './internal/vault.js';
+import type { PriceData } from './internal/math.js';
 
 /**
  * The contracts a market is read from: everything needed to build its ledger
@@ -85,8 +86,19 @@ export class Market {
         public data: MarketData,
         /** Per-side ADL flags; a flagged side is closed-only. */
         public adl: AdlState,
-        /** `(terminalPrice, delistedAt)` once delisted, else `undefined`. */
-        public retirement: readonly [bigint, bigint] | undefined,
+        /**
+         * Flat settlement price of a wound-down market (18-dec), or
+         * `undefined`. Once set, the chain fills, liquidates, accrues and
+         * prices shares at it on both sides. Every method here that takes a
+         * market then prices at it too and ignores the caller's price.
+         */
+        public terminalPrice: bigint | undefined,
+        /**
+         * Unix seconds the current wind-down began, or `undefined` outside
+         * one. Past `delistedAt + DELIST_DEADLINE` on a `Delisted` market,
+         * any keeper can liquidate any open position.
+         */
+        public delistedAt: bigint | undefined,
         /** Vault margin balance, token-dec; equals `total_assets()`. */
         public vaultAssets: bigint,
         /** Vault shares in circulation, share-dec. */
@@ -197,31 +209,11 @@ export class Market {
         const advanced = advanceMarketAccruals(
             this.data,
             this.config,
-            resolvePrice(price),
+            marketPrice(this, price, at),
             this.vaultAssets,
             at,
         ).market;
-        return new Market(
-            this.network,
-            this.id,
-            this.ledger,
-            this.vault,
-            this.token,
-            this.oracle,
-            this.treasury,
-            this.owner,
-            this.feedId,
-            this.status,
-            this.config,
-            advanced,
-            this.adl,
-            this.retirement,
-            this.vaultAssets,
-            this.vaultShares,
-            this.vaultDecimalsOffset,
-            this.assetDecimals,
-            this.treasuryRate,
-        );
+        return this.withData(advanced);
     }
 
     /**
@@ -230,7 +222,7 @@ export class Market {
      */
     utilization(isLong: boolean, price: PriceInput): bigint {
         return reserveUtilization(
-            sideReserved(this.data, resolvePrice(price), isLong),
+            sideReserved(this.data, this.priceAt(price), isLong),
             sideCapacity(this.vaultAssets, this.config.maxUtilOpen),
         );
     }
@@ -241,7 +233,7 @@ export class Market {
      * `max_open_interest` headroom. The "max size" a trade ticket shows.
      */
     openCapacity(isLong: boolean, price: PriceInput): bigint {
-        const reserved = sideReserved(this.data, resolvePrice(price), isLong);
+        const reserved = sideReserved(this.data, this.priceAt(price), isLong);
         const capacity = sideCapacity(this.vaultAssets, this.config.maxUtilOpen);
         const utilHeadroom = zero(capacity - reserved);
         const notional = isLong
@@ -260,7 +252,7 @@ export class Market {
      * keeper refreshes it.
      */
     adlState(price: PriceInput): AdlState {
-        const p = resolvePrice(price);
+        const p = this.priceAt(price);
         const trigger = sideCapacity(this.vaultAssets, this.config.adlMaxPnl);
         const clear = sideCapacity(this.vaultAssets, this.config.adlClearTarget);
         const longPnl = marketSidePnl(this.data, p, true, true);
@@ -278,12 +270,12 @@ export class Market {
      * down.
      */
     sidePnl(isLong: boolean, price: PriceInput): bigint {
-        return marketSidePnl(this.data, resolvePrice(price), isLong, true);
+        return marketSidePnl(this.data, this.priceAt(price), isLong, true);
     }
 
     /** Net unrealized trader PnL across both sides at `price`, token-dec. The quantity share pricing nets out. */
     netPnl(price: PriceInput): bigint {
-        return marketNetPnl(this.data, resolvePrice(price), true);
+        return marketNetPnl(this.data, this.priceAt(price), true);
     }
 
     /** The per-second borrowing rate a side pays at its current utilization (SCALAR_18). */
@@ -314,7 +306,7 @@ export class Market {
      * from this conversion can sit above that quote and reject the order.
      */
     assetsToShares(assets: bigint, price: PriceInput): bigint {
-        const p = resolvePrice(price);
+        const p = this.priceAt(price);
         const pnl = cappedNetPnl(this.data, this.config, p, this.vaultAssets, false);
         return convertVaultAssetsToShares(this.vaultAtomic(), assets, pnl);
     }
@@ -329,7 +321,7 @@ export class Market {
      * `VaultOrderIntent.expectedOut` returns.
      */
     sharesToAssets(shares: bigint, price: PriceInput): bigint {
-        const p = resolvePrice(price);
+        const p = this.priceAt(price);
         const pnl = cappedNetPnl(this.data, this.config, p, this.vaultAssets, true);
         return convertVaultSharesToAssets(this.vaultAtomic(), shares, pnl);
     }
@@ -360,7 +352,8 @@ export class Market {
             this.config,
             data,
             this.adl,
-            this.retirement,
+            this.terminalPrice,
+            this.delistedAt,
             this.vaultAssets,
             this.vaultShares,
             this.vaultDecimalsOffset,
@@ -376,6 +369,11 @@ export class Market {
             totalSupply: this.vaultShares,
             decimalsOffset: this.vaultDecimalsOffset,
         };
+    }
+
+    /** The price this snapshot's own methods measure at: the terminal price once set, else `price`. */
+    private priceAt(price: PriceInput): PriceData {
+        return marketPrice(this, price, quoteTime(this));
     }
 }
 
@@ -438,11 +436,6 @@ function decodeMarket(
         batch.at(keys.vaultBalance, `vault balance for ${contracts.vault}`),
     );
 
-    const retirement =
-        instance.terminalPrice !== undefined && instance.delistedAt !== undefined
-            ? ([instance.terminalPrice, instance.delistedAt] as const)
-            : undefined;
-
     return new Market(
         network,
         contracts.market,
@@ -457,7 +450,8 @@ function decodeMarket(
         instance.config,
         data,
         instance.adl,
-        retirement,
+        instance.terminalPrice,
+        instance.delistedAt,
         vaultAssets,
         vaultInstance.totalSharesAtomic,
         vaultInstance.decimalsOffset,

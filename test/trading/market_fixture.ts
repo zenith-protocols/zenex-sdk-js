@@ -100,6 +100,8 @@ export interface MarketFixture {
     status?: Status;
     adl?: AdlState;
     ledger?: number;
+    terminalPrice?: bigint;
+    delistedAt?: bigint;
 }
 
 /** A loaded `Market`, built by constructor on the contract `test_config`. */
@@ -119,7 +121,8 @@ export function fixtureMarket(fixture: MarketFixture = {}): Market {
         contractTestConfig(fixture.config),
         marketData(fixture.data),
         fixture.adl ?? { long: false, short: false },
-        undefined,
+        fixture.terminalPrice,
+        fixture.delistedAt,
         vaultAssets,
         fixture.vaultShares ?? vaultAssets,
         0,

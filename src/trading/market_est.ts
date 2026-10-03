@@ -8,7 +8,7 @@ import {
 } from '../float.js';
 import type { Market } from './market.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice } from './price.js';
+import { marketPrice, quoteTime } from './price.js';
 import type { PriceData } from './internal/math.js';
 import { mulDivFloor } from '../math/fixed.js';
 import {
@@ -189,7 +189,7 @@ export function estimateMarket(
     market: Market,
     price: PriceInput,
 ): MarketEstimate {
-    const p = resolvePrice(price);
+    const p = marketPrice(market, price, quoteTime(market));
     const data = market.data;
     const config = market.config;
     const decimals = market.assetDecimals;

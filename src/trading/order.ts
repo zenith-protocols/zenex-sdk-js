@@ -6,7 +6,7 @@ import type { Market } from './market.js';
 import { MarketPosition } from './position.js';
 import type { PositionEstimate } from './position_est.js';
 import { estimatePosition } from './position_est.js';
-import { Price, quoteTime, resolvePrice } from './price.js';
+import { Price, marketPrice, quoteTime, resolvePrice } from './price.js';
 import type { PriceInput } from './price.js';
 import type { MarketContext } from './internal/apply.js';
 import {
@@ -75,12 +75,16 @@ export class OrderIntent {
     /** @throws {RangeError} when a slippage bound is configured but no price was given to measure it against. */
     private bound(kind: OrderKind, price?: PriceInput): bigint {
         if (this.slippageBps === 0n) return 0n;
-        if (price === undefined) {
+        // A wound-down market fills at its terminal price, whatever the
+        // caller passes, so the bound measures against that.
+        const terminal = this.market.terminalPrice;
+        const measured = terminal !== undefined ? Price.from(terminal) : price;
+        if (measured === undefined) {
             throw new RangeError(
                 'slippageBps is set, so a price is required to derive the fill bound',
             );
         }
-        return orderPriceBound(price, this.isLong, kind, this.slippageBps);
+        return orderPriceBound(measured, this.isLong, kind, this.slippageBps);
     }
 
     /** Open or increase a position at market. */
@@ -261,7 +265,7 @@ export interface OrderEstimate {
  * The ledger time is `now` (default: the wall clock), never before the
  * market's stored accrual. A bare bigint price is stamped at that time, but
  * never behind the position's own last mark, since a keeper fills with a
- * report at least that fresh.
+ * report at least that fresh. A terminal price replaces `price` entirely.
  */
 export function marketContext(
     market: Market,
@@ -281,11 +285,11 @@ export function marketContext(
         config: market.config,
         market: market.data,
         position,
-        price: resolvePrice(price, stamp),
+        price: marketPrice(market, price, ledgerTime, stamp),
         vault: market.vaultAtomic(),
         treasuryRate: market.treasuryRate,
         adl: market.adl,
-        retirement: market.retirement,
+        terminalPrice: market.terminalPrice,
     };
 }
 
@@ -393,7 +397,7 @@ export function maxMarginForBalance(
     price: PriceInput,
 ): number {
     if (balance <= market.config.execFee || leverage <= 0) return 0;
-    const priceData = resolvePrice(price);
+    const priceData = marketPrice(market, price, quoteTime(market));
     const entry = isLong ? priceData.ask : priceData.bid;
     if (entry <= 0n) return 0;
     const leverageScaled = BigInt(Math.round(leverage * Number(LEVERAGE_SCALE)));

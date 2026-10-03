@@ -1,3 +1,4 @@
+import { DELIST_DEADLINE, Status } from '../../contracts/market/types.js';
 import type { MarketData, Position, SidePair, MarketConfig } from '../../contracts/market/types.js';
 import { SCALAR_18, addI128, checkedI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
 import { advanceMarketAccruals, exactPositionPnl, marketSidePnl, quoteTradeFees, sideCapacity } from './math.js';
@@ -144,6 +145,12 @@ export function quotePositionFees(
 }
 
 const OVERFLOW_MESSAGE = 'value is outside the i128 range';
+const U64_MAX = 2n ** 64n - 1n;
+
+/** A u64 timestamp sum that saturates at the u64 ceiling, as the contract adds deadlines. */
+function saturatingU64Add(left: bigint, right: bigint): bigint {
+    return left > U64_MAX - right ? U64_MAX : left + right;
+}
 
 function side(pair: { long: bigint; short: bigint }, isLong: boolean): bigint {
     return isLong ? pair.long : pair.short;
@@ -242,18 +249,30 @@ export function positionLeverage(
 }
 
 /**
+ * The wind-down facts `liquidationState` needs for the forced path. Omit
+ * both for a market that is not delisted.
+ */
+export interface LiquidationWindDown {
+    /** Market status at the snapshot. Only `Delisted` can force a liquidation. */
+    status?: Status;
+    /** Unix seconds the wind-down began (`Market.delistedAt`). */
+    delistedAt?: bigint;
+}
+
+/**
  * Exact liquidation check for `position` at `context.ledger`, token-dec.
- * Mirrors `Position::is_liquidatable`: advances the market's funding and
- * borrowing indices to `context.now` (`Market::load`), settles the full
- * position at `context.price` the way `Position::settle` would on a close,
+ * Advances the market's funding and borrowing indices to `context.now`,
+ * settles the full position at `context.price` the way a close settles it,
  * and compares the result to the maintenance line.
  *
  * `equity` is the settled equity floored at `0n`, matching what a close or a
  * liquidation would pay out. `maintenanceRequired` is
- * `ceil(notional * maintenanceMargin / SCALAR_18)` (`Position::margin_requirement`).
- * `liquidatable` is `equity < maintenanceRequired`: `true` is
- * `Position::liquidate`'s eligibility gate, `false` is `Position::decrease`'s
- * solvency gate.
+ * `ceil(notional * maintenanceMargin / SCALAR_18)`. `forced` is the
+ * wind-down waiver: `status` is `Delisted` and `context.now` has reached
+ * `delistedAt + DELIST_DEADLINE`, so a keeper liquidates without the
+ * eligibility check. `liquidatable` is `forced || equity < maintenanceRequired`.
+ * Without the waiver, `true` is the liquidation eligibility gate and `false`
+ * is the voluntary decrease's solvency gate.
  *
  * @returns `unavailable` (`CONTRACT_GATE`, "contract error #720: position not
  *   found") when `position.notional` is `0n`. `unavailable`
@@ -262,10 +281,11 @@ export function positionLeverage(
  */
 export function liquidationState(
     position: Position,
-    context: PositionQuoteContext,
+    context: PositionQuoteContext & LiquidationWindDown,
 ): QuoteResult<{
     equity: bigint;
     maintenanceRequired: bigint;
+    forced: boolean;
     liquidatable: boolean;
 }> {
     try {
@@ -327,12 +347,17 @@ export function liquidationState(
             context.config.maintenanceMargin,
             SCALAR_18,
         );
+        const forced =
+            context.status === Status.Delisted &&
+            context.delistedAt !== undefined &&
+            context.now >= saturatingU64Add(context.delistedAt, DELIST_DEADLINE);
 
         return exact(
             {
                 equity,
                 maintenanceRequired,
-                liquidatable: equity < maintenanceRequired,
+                forced,
+                liquidatable: forced || equity < maintenanceRequired,
             },
             context.ledger,
         );
