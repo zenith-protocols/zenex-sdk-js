@@ -170,10 +170,12 @@ describe('MarketUser.load', () => {
         expect(user.long.decreaseOrders).not.toBe(user.short.decreaseOrders);
     });
 
-    it('reads an absent counter as 0, meaning no order yet and id 1 next', async () => {
+    // storage.rs get_order_counter reads an absent counter as 1, the id the
+    // first order gets.
+    it('reads an absent counter as 1, the id the first order gets', async () => {
         mockEntries(userEntries(USER));
         const user = await MarketUser.load(network, MARKET, USER);
-        expect(user.orderCounter).toBe(0);
+        expect(user.orderCounter).toBe(1);
         expect(user.claimableCredit).toBe(0n);
     });
 

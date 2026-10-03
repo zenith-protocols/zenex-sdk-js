@@ -54,8 +54,8 @@ export class MarketUser {
         public short: MarketPosition,
         /**
          * The id the user's next order gets (trade and vault orders share
-         * the counter). `0` when no counter is stored: the user has never
-         * created an order, and the contract allocates id 1 next.
+         * the counter), as `get_order_counter` reports it: `1` when no
+         * counter is stored, since the user has never created an order.
          */
         public orderCounter: number,
         /** Funding owed to the user, plus any parked failed payout, token-dec. */
@@ -226,7 +226,8 @@ export function decodeUser(
         userId,
         long,
         short,
-        counter ? Number(scValToNative(counter)) : 0,
+        // An absent counter reads 1, as the contract's get_order_counter does.
+        counter ? Number(scValToNative(counter)) : 1,
         credit ? (scValToNative(credit) as bigint) : 0n,
         archived,
     );

@@ -796,8 +796,8 @@ export class MarketContract extends Contract {
      * Read `user`'s order counter.
      *
      * # Returns
-     * - The next order id. Ids `1..counter` are already allocated, shared
-     *   between trade and vault orders (`1` means none allocated yet).
+     * - The next order id. Ids `1..counter - 1` are already allocated,
+     *   shared between trade and vault orders (`1` means none allocated yet).
      */
     getOrderCounter(user: string): string {
         return this.call(
