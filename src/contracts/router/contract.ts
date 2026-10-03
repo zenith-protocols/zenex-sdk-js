@@ -50,7 +50,6 @@ export class MarketRouterContract extends Contract {
         // --- create-and-fill flows ---
         createAndFill: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        /** @deprecated Low-level ABI compatibility only. */
         createAndTryFill: (result: string): CallOutcome[] =>
             (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
                 parseCallOutcome,
@@ -149,8 +148,9 @@ export class MarketRouterContract extends Contract {
      * - Propagates the market contract's `create_order` errors. A failed
      *   fill is reported in the appended outcome, not thrown.
      *
-     * @deprecated Low-level ABI compatibility only. User-facing instant
-     * execution should use `createAndFill`, the strict fill-or-kill path.
+     * Use it when an order that misses its immediate fill should rest for a
+     * keeper, as the relay's try-fill route does. For fill-or-kill, use
+     * `createAndFill`.
      */
     createAndTryFill(
         calls: Call[],
