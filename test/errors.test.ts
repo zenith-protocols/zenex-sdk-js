@@ -274,6 +274,56 @@ describe('util-contract and smart-account codes', () => {
     });
 });
 
+describe('messages state the contract condition', () => {
+    const message = (code: number) => zenexErrorFromCode(code).message;
+
+    it('713 reads posted margin, not equity; 723 owns the maintenance case', () => {
+        expect(message(713)).toMatch(/margin/i);
+        expect(message(713)).not.toMatch(/equity/i);
+        expect(message(723)).toMatch(/maintenance/);
+    });
+
+    it('714 measures a side reserve against half the vault, on increases and redeems', () => {
+        expect(message(714)).toMatch(/half the vault/);
+        expect(message(714)).toMatch(/redeem/);
+        expect(message(714)).not.toMatch(/open interest/i);
+    });
+
+    it('770 names the unflagged side, not the trigger ratio', () => {
+        expect(message(770)).toMatch(/not flagged/);
+        expect(message(770)).not.toMatch(/ratio/);
+    });
+
+    it('760, 705, 740 and 722 carry the conditions the contract lists', () => {
+        expect(message(760)).toMatch(/credit pool is empty/);
+        expect(message(705)).toMatch(/ADL/);
+        expect(message(740)).toMatch(/creation ledger/);
+        expect(message(722)).toMatch(/delist deadline/);
+        expect(message(732)).toMatch(/zero amount/);
+        expect(message(732)).not.toMatch(/missing trigger/);
+    });
+
+    it('801 is the pending-PnL insolvency, not a strategy withdrawal', () => {
+        expect(message(801)).toMatch(/PnL/);
+        expect(message(801)).not.toMatch(/withdrawal/i);
+    });
+
+    it('810 never claims a queued call expires', () => {
+        expect(message(810)).not.toMatch(/expire/i);
+        expect(message(810)).toMatch(/delay change/);
+    });
+
+    it('2202 is a cancel that names the wrong pending owner', () => {
+        expect(message(2202)).toMatch(/^Cancel/);
+        expect(message(2202)).not.toMatch(/Caller/);
+    });
+
+    it('793 rejects only a window opening past the forward allowance', () => {
+        expect(message(793)).not.toMatch(/window not open/);
+        expect(message(793)).toMatch(/opens/);
+    });
+});
+
 describe('zenexErrorFromCode (hint-free resolution)', () => {
     it('takes only the code (collision-hint parameter deleted)', () => {
         expect(zenexErrorFromCode.length).toBe(1);
