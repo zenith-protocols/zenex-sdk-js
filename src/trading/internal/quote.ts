@@ -108,6 +108,7 @@ const GATE_REASONS: Readonly<Record<number, string>> = {
     723: 'position liquidatable',
     732: 'invalid order',
     740: 'stale price',
+    755: 'vault insolvent',
 };
 
 class ProtocolGateError extends Error {
@@ -213,11 +214,14 @@ export interface PositionActionOutcome {
     realizedPnl: bigint;
     /**
      * Token-dec. What the trader is owed back to their wallet, net of the
-     * settled fees. Zero on an increase. On a partial decrease, the paid
-     * withdrawal plus the profit the fees did not consume: fees pay from
-     * profit first, and the withdrawal caps at the margin that survives the
-     * loss and the uncovered fees. Excludes `executionFee` and `relayFee`,
-     * which settle outside this simulation.
+     * settled fees: the fill receipt's `returned`. Zero on an increase. On a
+     * partial decrease, the paid withdrawal plus the profit the fees did not
+     * consume: fees pay from profit first, and the withdrawal caps at the
+     * margin that survives the loss and the uncovered fees. Excludes
+     * `executionFee` and `relayFee`, which settle outside this simulation.
+     * A full close also refunds the escrowed fee of every pending decrease
+     * order it sweeps (`position.decreaseOrders`) in the same transfer; that
+     * refund is not included.
      */
     walletPayout: bigint;
     /**
@@ -896,6 +900,14 @@ function runTransition(input: PositionActionInput): TransitionResult {
         );
     }
 
+    // The vault draw settles before any payout, and may not exceed the
+    // vault's balance.
+    if (
+        transition.settlementVaultLeg < 0n &&
+        subI128(0n, transition.settlementVaultLeg) > input.vaultAssets
+    ) {
+        throw new ProtocolGateError(755);
+    }
     const postVaultAssets = addI128(
         input.vaultAssets,
         transition.settlementVaultLeg,
@@ -966,9 +978,9 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
  *   path skips this check.
  * - NotionalAboveMaximum (712) if the resulting position's notional
  *   exceeds `config.maxPositionNotional`. Same exemption as #711.
- * - InsufficientMargin (713) if margin falls under the initial requirement,
- *   or settled equity under the maintenance requirement. Same exemption as
- *   #711.
+ * - InsufficientMargin (713) if the resulting margin falls under the
+ *   initial requirement, `ceil(initMargin * notional)`, measured before PnL.
+ *   Same exemption as #711.
  * - UtilizationExceeded (714) on an increase that adds notional, if the
  *   increased side's reserved value exceeds the post-fill utilization cap.
  *   The opposite side is not checked.
@@ -979,13 +991,17 @@ function caughtUnavailable<T>(error: unknown): QuoteResult<T> {
  * - NotionalLocked (721) if a partial decrease exceeds the unlocked
  *   notional, or a full close, explicit or clamped from a decrease, finds
  *   any notional still locked.
- * - PositionLiquidatable (723) on a voluntary decrease, close, or margin
- *   `withdraw`, if settled equity is under the maintenance margin.
- *   Liquidation is then the only legal transition.
+ * - PositionLiquidatable (723) if settled equity is under the maintenance
+ *   margin: before a decrease, close, or margin `withdraw` (liquidation is
+ *   then the only legal transition), or left on the resulting position by
+ *   any fill, increases included.
  * - InvalidOrder (732) if the action is a no-op: zero notional and margin,
  *   or a zero `adjustMargin` amount.
  * - StalePrice (740) if `price.publishTime` is before the position's
  *   `pricedAt`.
+ * - VaultInsolvent (755) if the fill's draw on the vault (the trader's
+ *   profit and any bad debt, less the vault's fee share) exceeds
+ *   `vaultAssets`.
  *
  * Two more `unavailable` codes cover the SDK's own checks, not a contract
  * error:

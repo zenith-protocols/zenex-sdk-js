@@ -348,6 +348,7 @@ export function liquidationState(
             return unavailable(
                 'CONTRACT_GATE',
                 'contract error #720: position not found',
+                720,
             );
         }
         const settledEquity = settledPositionEquity(

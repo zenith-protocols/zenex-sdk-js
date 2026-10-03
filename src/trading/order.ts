@@ -254,7 +254,11 @@ export interface OrderEstimate {
     escrowed: number;
     /** Execution price the fill is sized at (entry side for an increase, exit side for a decrease). */
     executionPrice: number;
-    /** What actually pays out on a decrease (the paid withdrawal plus the profit the fees did not consume), token units. */
+    /**
+     * What a decrease pays out (the paid withdrawal plus the profit the fees
+     * did not consume), token units. A full close also refunds the escrowed
+     * fee of each pending decrease order it sweeps, which is not included.
+     */
     payout: number;
     /** The position after the fill. `undefined` unless `outcome === 'fills'`; a full close yields a flat position. */
     position: PositionEstimate | undefined;
