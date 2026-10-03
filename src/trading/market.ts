@@ -16,7 +16,7 @@ import { MarketStateError, readEntries } from '../entries.js';
 import type { EntryBatch } from '../entries.js';
 import { MarketUser, decodeUser, marketUserKeys } from './user.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice } from './price.js';
+import { quoteTime, resolvePrice } from './price.js';
 import type { MarketEstimate } from './market_est.js';
 import { estimateMarket } from './market_est.js';
 import {
@@ -193,8 +193,7 @@ export class Market {
      * post-accrual data; this snapshot is not mutated.
      */
     accrue(price: PriceInput, now?: bigint): Market {
-        const clock = now ?? BigInt(Math.floor(Date.now() / 1000));
-        const at = clock > this.data.accruedAt ? clock : this.data.accruedAt;
+        const at = quoteTime(this, now);
         const advanced = advanceMarketAccruals(
             this.data,
             this.config,
@@ -299,8 +298,7 @@ export class Market {
      * shorts. Skew-driven, so no price is involved.
      */
     fundingRate(now?: bigint): bigint {
-        const clock = now ?? BigInt(Math.floor(Date.now() / 1000));
-        const elapsed = zero(clock - this.data.accruedAt);
+        const elapsed = quoteTime(this, now) - this.data.accruedAt;
         return advanceFunding(this.data, this.config, elapsed).fundingRate;
     }
 

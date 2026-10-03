@@ -1,12 +1,13 @@
 import type { PriceData } from './internal/math.js';
+import type { Market } from './market.js';
 
 /**
  * An 18-dec price the estimates are computed at, mirroring how the contracts
  * pick a side: entry at the adverse open side, exit at the adverse close side.
  *
  * A UI holds one number and builds a zero-spread price with {@link Price.from}.
- * A caller holding a verified Data Streams report (specter, a future bot)
- * constructs the full bid/ask shape and the same math prices the spread.
+ * A caller holding a verified Data Streams report constructs the full bid/ask
+ * shape and the same math prices the spread.
  */
 export class Price {
     constructor(
@@ -23,8 +24,7 @@ export class Price {
 
     /** A zero-spread price: `bid = ask = price`. `publishTime` defaults to the wall clock. */
     static from(price: bigint, publishTime?: bigint): Price {
-        const time = publishTime ?? BigInt(Math.floor(Date.now() / 1000));
-        return new Price(price, price, time);
+        return new Price(price, price, publishTime ?? wallClock());
     }
 
     /** The price a position opens at: the ask for a long, the bid for a short. */
@@ -41,9 +41,29 @@ export class Price {
 /** Accepted anywhere an estimate takes a price: a bare 18-dec bigint becomes `Price.from(value)`. */
 export type PriceInput = Price | bigint;
 
-/** @internal Resolve a {@link PriceInput} to the engine's `PriceData` shape. */
-export function resolvePrice(input: PriceInput): PriceData {
-    const price = typeof input === 'bigint' ? Price.from(input) : input;
+/** @internal Unix seconds now, from the wall clock. */
+export function wallClock(): bigint {
+    return BigInt(Math.floor(Date.now() / 1000));
+}
+
+/**
+ * @internal The clock a quote against `market` runs at: `now`, or the wall
+ * clock, but never before the market's stored accrual. The chain's ledger
+ * clock cannot predate `accruedAt`, so a client clock that lags it would
+ * otherwise gate a valid fill.
+ */
+export function quoteTime(market: Market, now?: bigint): bigint {
+    const clock = now ?? wallClock();
+    return clock > market.data.accruedAt ? clock : market.data.accruedAt;
+}
+
+/**
+ * @internal Resolve a {@link PriceInput} to the engine's `PriceData` shape. A
+ * bare bigint carries no observation time, so it takes `publishTime`, or the
+ * wall clock when that is omitted.
+ */
+export function resolvePrice(input: PriceInput, publishTime?: bigint): PriceData {
+    const price = typeof input === 'bigint' ? Price.from(input, publishTime) : input;
     return {
         bid: price.bid,
         ask: price.ask,

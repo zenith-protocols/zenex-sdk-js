@@ -7,7 +7,7 @@ import { previewOrder } from './order.js';
 import type { PositionEstimate } from './position_est.js';
 import { estimatePosition } from './position_est.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice } from './price.js';
+import { resolvePrice, wallClock } from './price.js';
 import { exitPrice } from './internal/math.js';
 import {
     impliedEntryPrice,
@@ -144,10 +144,7 @@ export class MarketPosition {
 
     /** Notional not under the decrease lock at `now` (defaults to the wall clock), token-dec. */
     unlockedNotional(now?: bigint): bigint {
-        return unlockedNotional(
-            this,
-            now ?? BigInt(Math.floor(Date.now() / 1000)),
-        );
+        return unlockedNotional(this, now ?? wallClock());
     }
 
     /** This position's display estimate at `price`. Delegates to {@link estimatePosition}. */

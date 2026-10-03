@@ -6,7 +6,7 @@ import type { Market } from './market.js';
 import { MarketPosition } from './position.js';
 import type { PositionEstimate } from './position_est.js';
 import { estimatePosition } from './position_est.js';
-import { Price, resolvePrice } from './price.js';
+import { Price, quoteTime, resolvePrice } from './price.js';
 import type { PriceInput } from './price.js';
 import type { MarketContext } from './internal/apply.js';
 import {
@@ -256,7 +256,13 @@ export interface OrderEstimate {
     position: PositionEstimate | undefined;
 }
 
-/** @internal Assemble the engine's context record from the public objects. */
+/**
+ * @internal Assemble the engine's context record from the public objects.
+ * The ledger time is `now` (default: the wall clock), never before the
+ * market's stored accrual. A bare bigint price is stamped at that time, but
+ * never behind the position's own last mark, since a keeper fills with a
+ * report at least that fresh.
+ */
 export function marketContext(
     market: Market,
     position: MarketPosition,
@@ -264,15 +270,18 @@ export function marketContext(
     now?: bigint,
     user = '',
 ): MarketContext {
+    const ledgerTime = quoteTime(market, now);
+    const stamp =
+        position.pricedAt > ledgerTime ? position.pricedAt : ledgerTime;
     return {
         subject: { user, isLong: position.isLong },
         ledger: market.ledger,
-        ledgerTime: now ?? BigInt(Math.floor(Date.now() / 1000)),
+        ledgerTime,
         status: market.status,
         config: market.config,
         market: market.data,
         position,
-        price: resolvePrice(price),
+        price: resolvePrice(price, stamp),
         vault: market.vaultAtomic(),
         treasuryRate: market.treasuryRate,
         adl: market.adl,
@@ -314,7 +323,9 @@ export function previewOrder(
         position: undefined,
     };
 
-    const context = marketContext(market, position, price, now, order.user);
+    // One clock for the fill and the resulting position.
+    const at = quoteTime(market, now);
+    const context = marketContext(market, position, price, at, order.user);
     const applied = applyOrder(context, order, {
         executionFee: market.config.execFee,
     });
@@ -359,7 +370,7 @@ export function previewOrder(
             market.withData(outcome.postMarket),
             post,
             price,
-            now,
+            at,
         ),
     };
 }

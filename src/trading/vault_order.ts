@@ -9,7 +9,7 @@ import {
 } from '../math/fixed.js';
 import type { Market } from './market.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice } from './price.js';
+import { quoteTime, resolvePrice } from './price.js';
 import {
     cappedNetPnl,
     convertVaultAssetsToShares,
@@ -156,7 +156,7 @@ export class VaultOrderIntent {
         | { fills: true }
         | { fills: false; rejected: { quoted: bigint } }
         | { fills: false; block: ZenexError } {
-        const createdAt = now ?? BigInt(Math.floor(Date.now() / 1000));
+        const createdAt = quoteTime(market, now);
         // Evaluate at the earliest ledger a keeper could legally fill: the
         // next second for a deposit, past the redeem lock for a redeem.
         const lock =

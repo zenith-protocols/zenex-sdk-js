@@ -3,7 +3,7 @@ import { formatPrice, formatToken, formatTokenFloor } from '../float.js';
 import type { Market } from './market.js';
 import type { MarketPosition } from './position.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice } from './price.js';
+import { quoteTime, resolvePrice } from './price.js';
 import { marketContext } from './order.js';
 import { exitPrice, quoteTradeFees } from './internal/math.js';
 import { maxWithdrawableMargin } from './internal/apply.js';
@@ -70,7 +70,8 @@ export interface PositionEstimate {
 /**
  * Compute one position's display estimate at `price` (bare bigint =
  * zero-spread); the side rides in with the position. `now` drives the
- * decrease lock and defaults to the wall clock.
+ * decrease lock and the withdrawal probe. It defaults to the wall clock and
+ * never reads earlier than the market's stored accrual.
  *
  * Measures against `market` as passed — pending accruals reflect the
  * indices as stored on-chain. Pass `market.accrue(price)` for numbers
@@ -86,8 +87,11 @@ export function estimatePosition(
     const config = market.config;
     const data = market.data;
     const isLong = position.isLong;
-    const clock = now ?? BigInt(Math.floor(Date.now() / 1000));
-    const p = resolvePrice(price);
+    const clock = quoteTime(market, now);
+    const p = resolvePrice(
+        price,
+        position.pricedAt > clock ? position.pricedAt : clock,
+    );
     const mark = exitPrice(p, isLong);
 
     const pnlRaw = positionPnl(position, mark, SCALAR_18, isLong);
