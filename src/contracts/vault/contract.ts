@@ -2,6 +2,7 @@ import { strategyVaultSpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, Operation } from '@stellar/stellar-sdk';
 import { i128, u32 } from '../../index.js';
 
+/** Constructor arguments for {@link VaultContract.deploy}. */
 export interface VaultConstructorArgs {
     /** Name for the vault share token */
     name: string;
@@ -9,8 +10,9 @@ export interface VaultConstructorArgs {
     symbol: string;
     /** Address of the underlying settlement token contract */
     asset: string;
-    /** Extra share decimals on top of the asset's decimals; contributes
-     * `10^decimals_offset` virtual shares to the exchange rate as
+    /** Extra share decimals on top of the asset's decimals, at most 10; a
+     * larger value traps `VaultMaxDecimalsOffsetExceeded` (409). It
+     * contributes `10^decimals_offset` virtual shares to the exchange rate as
      * inflation-attack protection. Share amounts are therefore NOT the same
      * scale as asset amounts. */
     decimals_offset: u32;

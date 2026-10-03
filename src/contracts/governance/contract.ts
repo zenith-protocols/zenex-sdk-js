@@ -37,6 +37,7 @@ export interface GovernanceConstructorArgs {
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class GovernanceContract extends Contract {
+    /** Parsed spec for the governance contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(governanceSpec);
 
     /** Decoders for each method's `simulateTransaction` result. Methods that only emit events parse to nothing. */

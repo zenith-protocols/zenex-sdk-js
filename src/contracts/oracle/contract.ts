@@ -50,6 +50,7 @@ function feedIdToScVal(feedId: Buffer | Uint8Array): xdr.ScVal {
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class OracleContract extends Contract {
+    /** Parsed spec for the oracle contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(oracleSpec);
 
     /**

@@ -45,6 +45,7 @@ function initMetaToScVal(initMeta: FactoryInitMeta): xdr.ScVal {
 export interface FactoryConstructorArgs {
     /** Owner of the factory: may upgrade it and replace `init_meta`. */
     owner: string;
+    /** WASM hashes and treasury that future `deployMarket` calls use. */
     init_meta: FactoryInitMeta;
 }
 
@@ -55,8 +56,10 @@ export interface FactoryConstructorArgs {
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class FactoryContract extends Contract {
+    /** Parsed spec for the factory contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(factorySpec);
 
+    /** Result decoders for each method's simulated result (base64 XDR), keyed by JS method name. */
     static readonly parsers = {
         /** Returns the deployed `[market, vault]` address pair. */
         deployMarket: (result: string): [string, string] =>

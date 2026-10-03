@@ -16,6 +16,7 @@ export interface TreasuryConstructorArgs {
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class TreasuryContract extends Contract {
+    /** Parsed spec for the treasury contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(treasurySpec);
 
     /** Parsers for each contract method's simulated result (base64 XDR), keyed by JS method name. */

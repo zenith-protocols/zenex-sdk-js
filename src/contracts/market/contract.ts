@@ -11,13 +11,19 @@ import {
 
 /** Deploy-time constructor arguments (`__constructor`). */
 export interface DeployArgs {
+    /** Owner of the new market, the authority for its owner-only methods. */
     owner: string;
+    /** Settlement token, the collateral every token-dec amount is in. */
     token: string;
+    /** Strategy vault that backs the market. */
     vault: string;
+    /** Oracle contract that verifies price updates for `feedId`. */
     oracle: string;
+    /** Treasury contract, the protocol fee sink. */
     treasury: string;
     /** 32-byte Data Streams stream id (`BytesN<32>`); must be a V3 (`0x0003…`) stream. */
     feedId: Buffer | Uint8Array;
+    /** Initial market configuration. */
     config: MarketConfig;
 }
 
@@ -42,8 +48,10 @@ function feedIdBuffer(feedId: Buffer | Uint8Array): Buffer {
  * `*Call` builders return a router `Call` instead.
  */
 export class MarketContract extends Contract {
+    /** Parsed spec for the market contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(marketSpec);
 
+    /** Result decoders for each method's simulated result (base64 XDR), keyed by JS method name. */
     static readonly parsers = {
         // --- admin (void) ---
         setConfig: () => {},
