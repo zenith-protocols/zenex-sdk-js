@@ -25,6 +25,7 @@ import {
     balanceMapScVal,
     ledgerEntryFor,
 } from '../helpers/market_state.js';
+import { linkedEntries } from './market_fixture.js';
 
 const MARKET = StrKey.encodeContract(Buffer.alloc(32, 1));
 const OTHER_MARKET = StrKey.encodeContract(Buffer.alloc(32, 9));
@@ -168,6 +169,7 @@ describe('marketContext', () => {
                 }),
             ),
             ledgerEntryFor(tokenBalanceLedgerKey(TOKEN, VAULT), balanceMapScVal(500n)),
+            ...linkedEntries(),
             ...userEntries(USER),
         ]);
         const market = await Market.load(network, contracts);

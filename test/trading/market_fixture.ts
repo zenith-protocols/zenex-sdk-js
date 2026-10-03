@@ -1,5 +1,12 @@
-import { StrKey } from '@stellar/stellar-sdk';
+import { Address, StrKey, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import { SCALAR_18 } from '../../src/math/fixed.js';
+import { contractInstanceLedgerKey } from '../../src/contracts/keys.js';
+import {
+    contractInstance,
+    ledgerEntryFor,
+    treasuryInstanceScVal,
+    unitKey,
+} from '../helpers/market_state.js';
 import { Status } from '../../src/contracts/market/types.js';
 import type {
     AdlState,
@@ -30,6 +37,58 @@ export const px = (whole: number) =>
     (BigInt(Math.round(whole * 1_000_000)) * SCALAR_18) / 1_000_000n;
 
 export const pair = (long = 0n, short = 0n): SidePair => ({ long, short });
+
+/** The mainnet oracle's spread reduction: halve the half-spread. */
+export const MAINNET_SPREAD_REDUCTION = SCALAR_18 / 2n;
+
+/** An oracle instance as `getLedgerEntries` returns it. */
+export function oracleInstanceScVal(
+    spreadReductionFactor: bigint = MAINNET_SPREAD_REDUCTION,
+): xdr.ScVal {
+    const verifier = StrKey.encodeContract(Buffer.alloc(32, 31));
+    return contractInstance([
+        new xdr.ScMapEntry({
+            key: unitKey('Verifier'),
+            val: Address.fromString(verifier).toScVal(),
+        }),
+        new xdr.ScMapEntry({
+            key: unitKey('TradeStaleness'),
+            val: nativeToScVal(10n, { type: 'u64' }),
+        }),
+        new xdr.ScMapEntry({
+            key: unitKey('CloseStaleness'),
+            val: nativeToScVal(60n, { type: 'u64' }),
+        }),
+        new xdr.ScMapEntry({
+            key: unitKey('SpreadReductionFactor'),
+            val: nativeToScVal(spreadReductionFactor, { type: 'i128' }),
+        }),
+    ]);
+}
+
+/**
+ * The oracle and treasury instance entries a market load reads after the
+ * market's own keys, as `getLedgerEntries` returns them.
+ */
+export function linkedEntries(
+    options: {
+        oracle?: string;
+        treasury?: string;
+        spreadReductionFactor?: bigint;
+        treasuryRate?: bigint;
+    } = {},
+) {
+    return [
+        ledgerEntryFor(
+            contractInstanceLedgerKey(options.oracle ?? ORACLE),
+            oracleInstanceScVal(options.spreadReductionFactor),
+        ),
+        ledgerEntryFor(
+            contractInstanceLedgerKey(options.treasury ?? TREASURY),
+            treasuryInstanceScVal(options.treasuryRate ?? 0n),
+        ),
+    ];
+}
 
 /**
  * The contract's own `test_config`: 0.5% / 0.3% fees, 10% initial and 5%

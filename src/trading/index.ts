@@ -5,7 +5,7 @@
 // API promises.
 
 export { loadTreasuryInstance, loadTreasuryRate } from './treasury.js';
-export { Price } from './price.js';
+export { Price, reduceSpread } from './price.js';
 export type { PriceInput } from './price.js';
 export { Market } from './market.js';
 export type { MarketContracts } from './market.js';
