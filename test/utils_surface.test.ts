@@ -149,7 +149,7 @@ describe('simulateAndParse', () => {
         expect(error).toBeInstanceOf(ZenexError);
         expect((error as ZenexError).code).toBe(ZenexErrorCode.InsufficientMargin);
         expect((error as ZenexError).message).toBe(
-            'Simulation failed: Equity below the initial-margin floor',
+            `Simulation failed: ${new ZenexError(ZenexErrorCode.InsufficientMargin).message}`,
         );
         expect((error as ZenexError).cause).toBe(raw);
     });
