@@ -15,7 +15,7 @@
 // This script does not verify provenance. It does not pin a source commit, a
 // toolchain, or per-WASM hashes, and it reads whatever was last built rather
 // than an approved bundle — including uncommitted contract edits, which is the
-// point. Deployment provenance is enforced where it belongs: zenex-infra
+// point. Deployment provenance is enforced where it belongs: zenex-ops
 // re-verifies every artifact hash against zenex-contracts/artifacts/v2/ on the
 // deploy path. Nothing here feeds that path.
 
