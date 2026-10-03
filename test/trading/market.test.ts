@@ -16,6 +16,15 @@ import {
     ledgerEntryFor,
     TEST_FEED_ID,
 } from '../helpers/market_state.js';
+import {
+    USER,
+    fixtureMarket,
+    flatPosition,
+    linkedEntries,
+    px,
+    unit,
+} from './market_fixture.js';
+import { OrderIntent, previewOrder } from '../../src/trading/order.js';
 
 const MARKET = StrKey.encodeContract(Buffer.alloc(32, 1));
 const MARKET_B = StrKey.encodeContract(Buffer.alloc(32, 9));
@@ -43,6 +52,9 @@ function marketEntries(
         omitData?: boolean;
         instance?: xdr.ScVal;
         liveUntil?: number;
+        omitLinks?: boolean;
+        spreadReductionFactor?: bigint;
+        treasuryRate?: bigint;
     } = {},
 ) {
     const instance =
@@ -80,6 +92,14 @@ function marketEntries(
             ),
         );
     }
+    if (!overrides.omitLinks) {
+        entries.push(
+            ...linkedEntries({
+                spreadReductionFactor: overrides.spreadReductionFactor,
+                treasuryRate: overrides.treasuryRate,
+            }),
+        );
+    }
     return entries;
 }
 
@@ -94,12 +114,16 @@ afterEach(() => {
 });
 
 describe('Market.load', () => {
-    it('decodes a market from one getLedgerEntries of exactly four keys', async () => {
+    it('reads the four market keys, then the oracle and treasury it names', async () => {
         const spy = mockEntries(marketEntries(contracts));
         const market = await Market.load(network, contracts);
 
-        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy).toHaveBeenCalledTimes(2);
         expect(spy.mock.calls[0]).toHaveLength(4);
+        expect(spy.mock.calls[1].map((k) => (k as xdr.LedgerKey).toXDR('base64'))).toEqual([
+            contractInstanceLedgerKey(ORACLE).toXDR('base64'),
+            contractInstanceLedgerKey(TREASURY).toXDR('base64'),
+        ]);
 
         expect(market.ledger).toBe(4242);
         expect(market.id).toBe(MARKET);
@@ -119,7 +143,62 @@ describe('Market.load', () => {
         expect(market.assetDecimals).toBe(7);
     });
 
-    it('does not read a price — that is a caller input, never a ledger entry', async () => {
+    it('reads all six keys in one round trip when the contracts name the oracle and treasury', async () => {
+        const spy = mockEntries(marketEntries(contracts));
+        const full = { ...contracts, oracle: ORACLE, treasury: TREASURY };
+        const market = await Market.load(network, full);
+
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy.mock.calls[0]).toHaveLength(6);
+        expect(market.oracle).toBe(ORACLE);
+    });
+
+    it('reads the spread reduction factor and the treasury rate', async () => {
+        mockEntries(
+            marketEntries(contracts, {
+                spreadReductionFactor: 5n * 10n ** 17n,
+                treasuryRate: 3n * 10n ** 17n,
+            }),
+        );
+        const market = await Market.load(network, contracts);
+        expect(market.spreadReductionFactor).toBe(5n * 10n ** 17n);
+        expect(market.treasuryRate).toBe(3n * 10n ** 17n);
+        // The accrual copy carries both.
+        const accrued = market.accrue(10n ** 18n, 600n);
+        expect(accrued.spreadReductionFactor).toBe(5n * 10n ** 17n);
+        expect(accrued.treasuryRate).toBe(3n * 10n ** 17n);
+    });
+
+    it('fails closed when the oracle or treasury instance is missing', async () => {
+        mockEntries(marketEntries(contracts, { omitLinks: true }));
+        await expect(Market.load(network, contracts)).rejects.toMatchObject({
+            code: 'MISSING_STATE',
+            message: expect.stringContaining('oracle instance'),
+        });
+    });
+
+    it('rejects an oracle or treasury the market is not wired to', async () => {
+        mockEntries(marketEntries(contracts));
+        await expect(
+            Market.load(network, { ...contracts, oracle: TREASURY }),
+        ).rejects.toMatchObject({ code: 'IDENTITY_MISMATCH' });
+        await expect(
+            Market.load(network, { ...contracts, treasury: ORACLE }),
+        ).rejects.toMatchObject({ code: 'IDENTITY_MISMATCH' });
+    });
+
+    it('resolves the full wiring from the market id', async () => {
+        mockEntries(marketEntries(contracts));
+        expect(await Market.resolveContracts(network, MARKET)).toEqual({
+            market: MARKET,
+            vault: VAULT,
+            token: TOKEN,
+            oracle: ORACLE,
+            treasury: TREASURY,
+        });
+    });
+
+    it('does not read a price, which is a caller input and never a ledger entry', async () => {
         mockEntries(marketEntries(contracts));
         const market = await Market.load(network, contracts);
         expect(market).not.toHaveProperty('price');
@@ -190,7 +269,11 @@ describe('Market accessors', () => {
             withOwner: OWNER,
         });
         const spy = mockEntries(marketEntries(contracts, { instance }));
-        const market = await Market.load(network, contracts);
+        const market = await Market.load(network, {
+            ...contracts,
+            oracle: ORACLE,
+            treasury: TREASURY,
+        });
         expect(market.owner).toBe(OWNER);
         expect(spy).toHaveBeenCalledTimes(1);
     });
@@ -200,26 +283,44 @@ describe('Market accessors', () => {
         expect((await Market.load(network, contracts)).owner).toBeUndefined();
     });
 
-    it('reports no retirement while the market is live', async () => {
+    it('reports no wind-down while the market is live', async () => {
         mockEntries(marketEntries(contracts));
         const market = await Market.load(network, contracts);
-        expect(market.retirement).toBeUndefined();
+        expect(market.terminalPrice).toBeUndefined();
+        expect(market.delistedAt).toBeUndefined();
         expect(market.assetDecimals).toBe(7);
         expect(market.feedId).toEqual(TEST_FEED_ID);
     });
 
-    it('reports (terminalPrice, delistedAt) once retired — the get_retirement shape', async () => {
+    it('reports delistedAt as soon as the market delists, before any terminal price', async () => {
         const instance = marketInstanceScVal({
             vault: VAULT,
             token: TOKEN,
             oracle: ORACLE,
             treasury: TREASURY,
+            status: Status.Delisted,
+            delistedAt: 1_700n,
+        });
+        mockEntries(marketEntries(contracts, { instance }));
+        const market = await Market.load(network, contracts);
+        expect(market.delistedAt).toBe(1_700n);
+        expect(market.terminalPrice).toBeUndefined();
+    });
+
+    it('reports the terminal price and delistedAt as separate fields', async () => {
+        const instance = marketInstanceScVal({
+            vault: VAULT,
+            token: TOKEN,
+            oracle: ORACLE,
+            treasury: TREASURY,
+            status: Status.Delisted,
             delistedAt: 1_700n,
             terminalPrice: 99n,
         });
         mockEntries(marketEntries(contracts, { instance }));
         const market = await Market.load(network, contracts);
-        expect(market.retirement).toEqual([99n, 1_700n]);
+        expect(market.terminalPrice).toBe(99n);
+        expect(market.delistedAt).toBe(1_700n);
     });
 
     it('refreshes by loading again', async () => {
@@ -230,5 +331,37 @@ describe('Market accessors', () => {
         const fresh = await Market.load(network, contracts);
         expect(market.ledger).toBe(5000);
         expect(fresh.ledger).toBe(5001);
+    });
+});
+
+describe('the treasury rate in previews', () => {
+    // The treasury's cut leaves the vault, so the settled balance that gates
+    // an open (#714) is smaller at a nonzero rate. A load reads the live rate;
+    // previewing at 0 would pass an open the chain rejects.
+    it('gates at the loaded rate an open that a zero rate would fill', () => {
+        const market = fixtureMarket({ vaultAssets: unit(1000) });
+        const outcome = (rate: bigint, notional: bigint) => {
+            const order = new OrderIntent(market, USER, true).openMarket({
+                notional,
+                margin: notional / 5n,
+            });
+            return previewOrder(
+                market.withTreasuryRate(rate),
+                flatPosition(),
+                order,
+                px(1),
+                1n,
+            );
+        };
+        let low = unit(100);
+        let high = unit(600);
+        while (low < high) {
+            const mid = low + (high - low + 1n) / 2n;
+            if (outcome(0n, mid).outcome === 'fills') low = mid;
+            else high = mid - 1n;
+        }
+        expect(outcome(0n, low).outcome).toBe('fills');
+        expect(outcome(0n, low + 1n).gate?.code).toBe(714);
+        expect(outcome(3n * 10n ** 17n, low).gate?.code).toBe(714);
     });
 });

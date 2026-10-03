@@ -7,7 +7,7 @@ import { previewOrder } from './order.js';
 import type { PositionEstimate } from './position_est.js';
 import { estimatePosition } from './position_est.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice } from './price.js';
+import { marketPrice, quoteTime, resolvePrice, wallClock } from './price.js';
 import { exitPrice } from './internal/math.js';
 import {
     impliedEntryPrice,
@@ -25,7 +25,7 @@ import {
  * from the storage key it read, so the methods never ask for it. All exact
  * bigints; the float view of the same numbers is `PositionEstimate`.
  *
- * Methods that take a `market` measure against it as passed — accrue first
+ * Methods that take a `market` measure against it as passed. Accrue first
  * (`market.accrue(price)`) when you want fill-grade numbers.
  */
 export class MarketPosition {
@@ -73,18 +73,22 @@ export class MarketPosition {
         return this.notional > 0n;
     }
 
-    /** Mark-to-market PnL at `price` (exit side), token-dec. Signed. */
+    /** Mark-to-market PnL at exactly `price` (exit side), token-dec. Signed. Takes no market, so no terminal price applies. */
     pnl(price: PriceInput): bigint {
         const mark = exitPrice(resolvePrice(price), this.isLong);
         return positionPnl(this, mark, SCALAR_18, this.isLong);
     }
 
     /**
-     * Margin + PnL - pending accruals at `price`, token-dec. The equity the
-     * contract's margin gates measure.
+     * Margin + PnL - pending accruals at `price`, token-dec: the mark before
+     * close fees and the profit haircut. The maintenance gate measures
+     * settled equity, which nets both, so use `isLiquidatable` for the gate.
      */
     equity(market: Market, price: PriceInput): bigint {
-        const mark = exitPrice(resolvePrice(price), this.isLong);
+        const mark = exitPrice(
+            marketPrice(market, price, quoteTime(market)),
+            this.isLong,
+        );
         return positionEquity(this, market.data, mark, SCALAR_18, this.isLong);
     }
 
@@ -115,7 +119,12 @@ export class MarketPosition {
         );
     }
 
-    /** Price (18-dec) at which equity meets the maintenance margin; `0n` with no open size. */
+    /**
+     * Price (18-dec) at which settled equity, net of a full close's fees at
+     * the current book, meets the maintenance margin: a long is liquidatable
+     * below it, a short above it. Assumes no profit haircut and the accruals
+     * as passed. `0n` with no open size.
+     */
     liquidationPrice(market: Market): bigint {
         return liquidationPrice(this, market.config, market.data, this.isLong);
     }
@@ -123,31 +132,33 @@ export class MarketPosition {
     /**
      * Whether a keeper liquidation would succeed at `price`: settled equity
      * below the maintenance requirement, measured exactly as
-     * `execute_liquidation` does (close fees included). `false` with no open
-     * size.
+     * `execute_liquidation` does (close fees included). On a `Delisted`
+     * market past `delistedAt + DELIST_DEADLINE`, every open position is
+     * liquidatable. The deadline is measured at the snapshot's accrual time,
+     * so accrue first to measure it now. `false` with no open size.
      */
     isLiquidatable(market: Market, price: PriceInput): boolean {
+        // The market as passed: elapsed 0 against the stored accrual.
+        const now = market.data.accruedAt;
         const state = liquidationState(this, {
             ledger: market.ledger,
-            // The market as passed: elapsed 0 against the stored accrual.
-            now: market.data.accruedAt,
+            now,
             isLong: this.isLong,
             position: this,
             market: market.data,
             config: market.config,
-            price: resolvePrice(price),
+            price: marketPrice(market, price, now),
             vaultAssets: market.vaultAssets,
             treasuryRate: market.treasuryRate,
+            status: market.status,
+            delistedAt: market.delistedAt,
         });
         return state.kind === 'exact' ? state.value.liquidatable : false;
     }
 
     /** Notional not under the decrease lock at `now` (defaults to the wall clock), token-dec. */
     unlockedNotional(now?: bigint): bigint {
-        return unlockedNotional(
-            this,
-            now ?? BigInt(Math.floor(Date.now() / 1000)),
-        );
+        return unlockedNotional(this, now ?? wallClock());
     }
 
     /** This position's display estimate at `price`. Delegates to {@link estimatePosition}. */

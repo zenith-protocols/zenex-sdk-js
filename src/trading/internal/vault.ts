@@ -1,6 +1,6 @@
 import { Status } from '../../contracts/market/types.js';
 import type { MarketData, MarketConfig } from '../../contracts/market/types.js';
-import { BPS_DENOMINATOR, SCALAR_18, addI128, checkedBps, checkedI128, mulDivFloor, subI128 } from '../../math/fixed.js';
+import { BPS_DENOMINATOR, I128_MAX, SCALAR_18, addI128, checkedBps, checkedI128, mulDivFloor, subI128 } from '../../math/fixed.js';
 import { advanceMarketAccruals, marketSidePnl, sideCapacity, sideReserved } from './math.js';
 import type { PriceData } from './math.js';
 import { decodeLedgerSequence, estimate, exact, unavailable } from './quote.js';
@@ -33,7 +33,10 @@ export interface VaultWithdrawHeadroom {
  * instead of throwing it to the caller.
  */
 export class VaultProtocolGateError extends Error {
-    constructor(readonly code: number) {
+    constructor(
+        /** The mirrored contract error number. */
+        readonly code: number,
+    ) {
         super(
             `contract error #${code}: ${WITHDRAW_GATE_REASONS[code] ?? 'protocol gate failed'}`,
         );
@@ -183,6 +186,7 @@ export interface VaultAtomicState {
 
 /** A caller-supplied fill estimate that `deriveVaultMinimumOutput` derives a `minOut` bound from. */
 export interface VaultEstimatedOutputReference {
+    /** Marks the output as a caller estimate, not a chain quote. */
     readonly kind: 'estimate';
     /** Estimated fill output: shares for a deposit, assets for a redeem (share-dec or token-dec, matching the order side). */
     readonly output: bigint;
@@ -210,9 +214,13 @@ export interface DeriveVaultMinimumOutputInput {
 
 /** Input to `quoteVaultOrderCreation`, mirroring `create_vault_order`'s arguments and the market state it reads. */
 export interface VaultOrderCreationQuoteInput {
+    /** Ledger sequence the quote is exact as of. */
     ledger: number;
+    /** Creation time, unix seconds: the order's `createdAt`. */
     now: bigint;
+    /** Market status at creation. */
     status: Status;
+    /** Market config at creation. */
     config: MarketConfig;
     /** Deposit escrows `amount` assets; redeem escrows `amount` shares. */
     action: 'deposit' | 'redeem';
@@ -226,8 +234,11 @@ export interface VaultOrderCreationQuoteInput {
 
 /** A vault order accepted to rest, mirroring the `VaultOrder` row `create_vault_order` stores. */
 export interface VaultRestingOrderCreation {
+    /** The order rests for a keeper fill. */
     kind: 'resting';
+    /** Creation never fills a non-retired order. */
     policy: 'restOnly';
+    /** Deposit or redeem. */
     action: 'deposit' | 'redeem';
     /** Assets escrowed (deposit, token-dec) or shares escrowed (redeem, share-dec). */
     amount: bigint;
@@ -257,14 +268,19 @@ export interface VaultRestingOrderCreation {
  * check, and no keeper `executionFee`.
  */
 export interface VaultRetiredImmediateRedeem {
+    /** The redeem settles inside creation. */
     kind: 'retiredImmediateRedeem';
+    /** Creation pays out directly. */
     policy: 'direct';
+    /** Only a redeem can settle this way. */
     action: 'redeem';
     /** Shares burned, share-dec. */
     shares: bigint;
     /** Assets paid, token-dec. Priced at `net_pnl = 0`, exact because a retired market's book is flat. */
     assets: bigint;
+    /** `minOut` is never checked. */
     minOutApplied: false;
+    /** No keeper fee is escrowed or paid. */
     executionFee: 0n;
 }
 
@@ -274,13 +290,17 @@ export type VaultOrderCreationOutcome =
 
 /** An exact `quoteVaultOrderCreation` result, unwrapped from its `QuoteResult` envelope. */
 export interface ExactVaultOrderCreationQuote {
+    /** Always `exact`. */
     kind: 'exact';
+    /** The creation outcome. */
     value: VaultOrderCreationOutcome;
+    /** Ledger sequence the quote is exact as of. */
     ledger: number;
 }
 
 /** `ExactVaultOrderCreationQuote` narrowed to the resting-order outcome. */
 export interface ExactVaultRestingOrderCreationQuote extends ExactVaultOrderCreationQuote {
+    /** The resting order. */
     value: VaultRestingOrderCreation;
 }
 
@@ -289,6 +309,7 @@ export interface ExactVaultRestingOrderCreationQuote extends ExactVaultOrderCrea
  * receipts `execute_vault_order` emits.
  */
 export interface VaultFillOutcome {
+    /** Which fill landed. */
     kind: 'deposit' | 'redeem';
     /** Assets deposited or shares redeemed, before fees: token-dec for a deposit, share-dec for a redeem. */
     input: bigint;
@@ -308,6 +329,7 @@ export interface VaultFillOutcome {
      * so this is not `vaultFee` added in full, and it does not change `output`.
      */
     postVaultAssets: bigint;
+    /** Shares price at the vault's uPnL-marked net asset value at fill. */
     valuation: 'transactionQuoteMarkedNav';
 }
 
@@ -319,7 +341,9 @@ export interface VaultFillOutcome {
  * through the vault.
  */
 export interface VaultRejectOutcome {
+    /** The keeper's call rejects the order. */
     kind: 'rejected';
+    /** Deposit or redeem. */
     action: 'deposit' | 'redeem';
     /** The fill's quote, below `minOut`: the shares a deposit would mint (share-dec), or a redeem's assets net of the vault fee (token-dec). */
     quoted: bigint;
@@ -333,6 +357,7 @@ export interface VaultRejectOutcome {
     netPnl: bigint;
     /** Vault backing after the rejection, token-dec: unchanged. */
     postVaultAssets: bigint;
+    /** The quote priced at the vault's uPnL-marked net asset value. */
     valuation: 'transactionQuoteMarkedNav';
 }
 
@@ -346,11 +371,17 @@ export type VaultQuoteOutcome = VaultFillOutcome | VaultRejectOutcome;
 
 /** Shared inputs for `quoteVaultDepositFill` and `quoteVaultRedeemFill`: the market and vault state a fill prices against. */
 export interface VaultQuoteContext {
+    /** Ledger sequence the quote is exact as of. */
     ledger: number;
+    /** Fill time, unix seconds; the market accrues to it first. */
     now: bigint;
+    /** The market's stored aggregates. */
     market: MarketData;
+    /** The market's config. */
     config: MarketConfig;
+    /** The verified fill price. */
     price: PriceData;
+    /** The vault's atomic state. */
     vault: VaultAtomicState;
     /** Treasury's cut of the fill fee (SCALAR_18), read live like `execute_vault_order` reads it at fill time. */
     treasuryRate: bigint;
@@ -467,6 +498,11 @@ function feeSplit(
     };
 }
 
+/**
+ * Net pending trader PnL for share pricing, token-dec: both sides marked at
+ * `maximize`, each side's profit capped at `maxPnlTrader` of half
+ * `vaultAssets`. A redeem prices at `maximize = true`, a deposit at `false`.
+ */
 export function cappedNetPnl(
     market: MarketData,
     config: MarketConfig,
@@ -602,14 +638,16 @@ export function deriveVaultMinimumOutput(
  * mirroring `create_vault_order`'s direct-redeem branch; `input.vault` is
  * required for that case.
  *
- * Returns `unavailable`:
- * - `MISSING_STATE` if the market is Retired, the action is redeem, and
- *   `input.vault` was not supplied.
- * - `CONTRACT_GATE` 710 if `minOut` is negative.
- * - `CONTRACT_GATE` 704 if the market is Frozen.
- * - `CONTRACT_GATE` 702 if a deposit is quoted on a Retired market.
- * - `CONTRACT_GATE` 732 if a deposit falls under `config.minDeposit`, or a
- *   redeem's share `amount` is not positive.
+ * Returns `unavailable` with `CONTRACT_GATE`, checked in the contract's
+ * order:
+ * - 710 if `amount` or `minOut` is negative.
+ * - 704 if the market is Frozen.
+ * - 702 if a deposit is quoted on a Retired market.
+ * - 732 if `amount` is zero, a deposit falls under `config.minDeposit`, or
+ *   a deposit's `amount + execFee` escrow leaves the i128 range.
+ *
+ * Returns `unavailable` with `MISSING_STATE` if the market is Retired, the
+ * action is redeem, and `input.vault` was not supplied.
  */
 export function quoteVaultOrderCreation(
     input: VaultOrderCreationQuoteInput,
@@ -617,19 +655,29 @@ export function quoteVaultOrderCreation(
     try {
         const ledger = decodeLedgerSequence(input.ledger);
         const createdAt = input.now;
+        const amount = input.amount;
         const minOut = input.minOut;
-        if (minOut < 0n) throw new VaultQuoteGateError(710);
+        if (amount < 0n || minOut < 0n) throw new VaultQuoteGateError(710);
 
         const status = input.status;
         if (status === Status.Frozen) throw new VaultQuoteGateError(704);
-        if (status === Status.Retired) {
-            if (input.action === 'deposit') {
-                throw new VaultQuoteGateError(702);
+        if (status === Status.Retired && input.action === 'deposit') {
+            throw new VaultQuoteGateError(702);
+        }
+        // A zero order can never fill; a redeem has no other floor.
+        if (amount === 0n) throw new VaultQuoteGateError(732);
+        const executionFee = input.config.execFee;
+        if (input.action === 'deposit') {
+            if (amount < input.config.minDeposit) {
+                throw new VaultQuoteGateError(732);
             }
-            const shares = input.amount;
-            // Same guard as the pending-redeem branch below: the contract
-            // rejects a non-positive share amount before touching the vault.
-            if (shares <= 0n) throw new VaultQuoteGateError(732);
+            if (amount > I128_MAX - executionFee) {
+                throw new VaultQuoteGateError(732);
+            }
+        }
+
+        if (status === Status.Retired) {
+            const shares = amount;
             if (input.vault === undefined) {
                 return unavailable(
                     'MISSING_STATE',
@@ -653,16 +701,6 @@ export function quoteVaultOrderCreation(
                 },
                 ledger,
             );
-        }
-
-        const amount = input.amount;
-        const executionFee = input.config.execFee;
-        if (input.action === 'deposit') {
-            if (amount <= 0n || amount < input.config.minDeposit) {
-                throw new VaultQuoteGateError(732);
-            }
-        } else if (amount <= 0n) {
-            throw new VaultQuoteGateError(732);
         }
 
         const fillAfter = createdAt === U64_MAX ? null : createdAt + 1n;

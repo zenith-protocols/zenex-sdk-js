@@ -8,6 +8,9 @@ import type {
 } from '../contracts/market/types.js';
 import { parseMarketData } from '../contracts/market/types.js';
 import { parseMarketInstance } from '../contracts/market/instance.js';
+import type { MarketInstanceState } from '../contracts/market/instance.js';
+import { parseOracleInstance } from '../contracts/oracle/instance.js';
+import { parseTreasuryRate } from '../contracts/treasury/instance.js';
 import { parseVaultInstance } from '../contracts/vault/instance.js';
 import { contractInstanceLedgerKey } from '../contracts/keys.js';
 import { marketDataLedgerKey } from '../contracts/market/keys.js';
@@ -16,14 +19,13 @@ import { MarketStateError, readEntries } from '../entries.js';
 import type { EntryBatch } from '../entries.js';
 import { MarketUser, decodeUser, marketUserKeys } from './user.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice } from './price.js';
+import { Price, marketPrice, quoteTime } from './price.js';
 import type { MarketEstimate } from './market_est.js';
 import { estimateMarket } from './market_est.js';
 import {
     advanceFunding,
     advanceMarketAccruals,
     borrowingRate,
-    marketNetPnl,
     marketSidePnl,
     reserveUtilization,
     sideCapacity,
@@ -35,11 +37,11 @@ import {
     convertVaultSharesToAssets,
 } from './internal/vault.js';
 import type { VaultAtomicState } from './internal/vault.js';
+import type { PriceData } from './internal/math.js';
 
 /**
- * The contracts a market is read from: everything needed to build its ledger
- * keys, and nothing more. Oracle and treasury are outputs of the load, not
- * inputs.
+ * The contracts a market is read from. The load checks every address given
+ * against the market's own wiring.
  */
 export interface MarketContracts {
     /** The market (trading) contract. */
@@ -48,6 +50,14 @@ export interface MarketContracts {
     vault: string;
     /** Settlement token (the vault's asset). */
     token: string;
+    /**
+     * Oracle the market verifies prices through. Give it with `treasury` to
+     * keep the load at one round trip. If either is omitted, the load finds
+     * it in the market instance and reads it in a second round trip.
+     */
+    oracle?: string;
+    /** Treasury the market pays protocol fees to. Optional, as `oracle`. */
+    treasury?: string;
 }
 
 function zero(value: bigint): bigint {
@@ -55,8 +65,9 @@ function zero(value: bigint): bigint {
 }
 
 /**
- * One loaded market: instance config, the market singleton, and the vault
- * state it settles against. Plain public fields, one snapshot per load.
+ * One loaded market: instance config, the market singleton, the vault state
+ * it settles against, and the oracle and treasury settings it prices and
+ * splits fees with. Plain public fields, one snapshot per load.
  */
 export class Market {
     constructor(
@@ -85,8 +96,19 @@ export class Market {
         public data: MarketData,
         /** Per-side ADL flags; a flagged side is closed-only. */
         public adl: AdlState,
-        /** `(terminalPrice, delistedAt)` once delisted, else `undefined`. */
-        public retirement: readonly [bigint, bigint] | undefined,
+        /**
+         * Flat settlement price of a wound-down market (18-dec), or
+         * `undefined`. Once set, the chain fills, liquidates, accrues and
+         * prices shares at it on both sides, and so does every method of
+         * this tier that reads the market: the caller's price is ignored.
+         */
+        public terminalPrice: bigint | undefined,
+        /**
+         * Unix seconds the current wind-down began, or `undefined` outside
+         * one. Past `delistedAt + DELIST_DEADLINE` on a `Delisted` market,
+         * any keeper can liquidate any open position.
+         */
+        public delistedAt: bigint | undefined,
         /** Vault margin balance, token-dec; equals `total_assets()`. */
         public vaultAssets: bigint,
         /** Vault shares in circulation, share-dec. */
@@ -96,27 +118,38 @@ export class Market {
         /** Settlement-token decimals. */
         public assetDecimals: number,
         /**
-         * Protocol fee rate (SCALAR_18 fraction) used to split fees between
-         * vault and treasury in exact previews. Not read by the load — the
-         * rate lives on the treasury contract, which the load discovers —
-         * so it defaults to `0n`, pricing previews as if the treasury takes
-         * nothing. For the exact split, attach it:
-         * `market.withTreasuryRate(await loadTreasuryRate(network, market.treasury))`.
+         * Protocol fee rate (SCALAR_18) the treasury takes from fees, read
+         * from the treasury instance by the load. Previews use it to split
+         * fees and to gate a fill on the settled vault balance (#714, #753).
+         * A directly constructed snapshot defaults to `0n`.
          */
         public treasuryRate: bigint = 0n,
+        /**
+         * The oracle's spread reduction (SCALAR_18), read from the oracle
+         * instance by the load: `0` leaves report sides as they are, and
+         * `SCALAR_18` collapses them to the midpoint. Feeds
+         * {@link Market.priceFromReport}. A directly constructed snapshot
+         * defaults to `0n`.
+         */
+        public spreadReductionFactor: bigint = 0n,
     ) {}
 
     /**
-     * Load one market. One `getLedgerEntries`: instance, market data, vault
-     * instance, vault balance. The supplied vault/token are verified against
-     * the instance's own wiring; a mismatch throws rather than blending one
-     * market's positions with an unrelated vault's balance.
+     * Load one market: its instance, market data, vault instance and vault
+     * balance, plus the oracle and treasury instances it names. One
+     * `getLedgerEntries` when `contracts` carries `oracle` and `treasury`
+     * (as {@link Market.resolveContracts} returns), else two; the second
+     * reads those slow-moving settings at its own, later ledger, while
+     * {@link Market.ledger} stays the first read's. Every supplied
+     * address is checked against the instance's own wiring, so one market's
+     * positions never blend with an unrelated vault's balance.
      *
      * Refreshing is calling this again.
      *
-     * @throws {MarketStateError} `MISSING_STATE` when the market or vault
-     *   instance is absent or TTL-expired; `IDENTITY_MISMATCH` when the
-     *   instance names a different vault or token than `contracts`.
+     * @throws {MarketStateError} `MISSING_STATE` when the market data or
+     *   the market, vault, oracle or treasury instance is absent or
+     *   TTL-expired; `IDENTITY_MISMATCH` when the instance names a
+     *   different vault, token, oracle or treasury than `contracts`.
      */
     static async load(
         network: Network,
@@ -128,30 +161,40 @@ export class Market {
             keys.data,
             keys.vaultInstance,
             keys.vaultBalance,
+            ...knownLinkKeys(contracts),
         ]);
         return decodeMarket(network, contracts, batch);
     }
 
     /**
      * Resolve `MarketContracts` from the market contract id alone. One
-     * `getLedgerEntries`: the instance names its own vault and token, so the
-     * result always passes `load`'s identity check.
+     * `getLedgerEntries`: the instance names its own vault, token, oracle
+     * and treasury, so the result passes `load`'s identity check and keeps
+     * every later load at one round trip.
      */
     static async resolveContracts(
         network: Network,
         marketId: string,
-    ): Promise<MarketContracts> {
+    ): Promise<Required<MarketContracts>> {
         const key = contractInstanceLedgerKey(marketId);
         const batch = await readEntries(network, [key]);
         const instance = parseMarketInstance(
             batch.require(key, `market instance ${marketId}`),
         );
-        return { market: marketId, vault: instance.vault, token: instance.token };
+        return {
+            market: marketId,
+            vault: instance.vault,
+            token: instance.token,
+            oracle: instance.oracle,
+            treasury: instance.treasury,
+        };
     }
 
     /**
-     * Load a market and one subject's state on it in a single
-     * `getLedgerEntries` (the market's four keys plus the user's four).
+     * Load a market and one subject's state on it in the same
+     * `getLedgerEntries` (the market's keys plus the user's four). Round
+     * trips and market-level failures are as {@link Market.load}; the
+     * user's entries decode as {@link MarketUser.load} decodes them.
      */
     static async loadWithUser(
         network: Network,
@@ -165,13 +208,14 @@ export class Market {
             keys.data,
             keys.vaultInstance,
             keys.vaultBalance,
+            ...knownLinkKeys(contracts),
             userKeys.long,
             userKeys.short,
             userKeys.orderCounter,
             userKeys.claimableCredit,
         ]);
         return {
-            market: decodeMarket(network, contracts, batch),
+            market: await decodeMarket(network, contracts, batch),
             user: decodeUser(contracts.market, userId, batch),
         };
     }
@@ -187,42 +231,30 @@ export class Market {
     }
 
     /**
+     * The price the chain fills at for a raw Data Streams report, narrowed
+     * by this market's {@link Market.spreadReductionFactor}. Delegates to
+     * {@link Price.fromReport}.
+     */
+    priceFromReport(bid: bigint, ask: bigint, publishTime: bigint): Price {
+        return Price.fromReport(bid, ask, publishTime, this.spreadReductionFactor);
+    }
+
+    /**
      * Advance the funding and borrowing indices to `now` (defaults to the
      * wall clock, clamped to never predate the stored accrual) at `price`,
      * mirroring the contract's `accrue`. Returns a NEW `Market` carrying the
      * post-accrual data; this snapshot is not mutated.
      */
     accrue(price: PriceInput, now?: bigint): Market {
-        const clock = now ?? BigInt(Math.floor(Date.now() / 1000));
-        const at = clock > this.data.accruedAt ? clock : this.data.accruedAt;
+        const at = quoteTime(this, now);
         const advanced = advanceMarketAccruals(
             this.data,
             this.config,
-            resolvePrice(price),
+            marketPrice(this, price, at),
             this.vaultAssets,
             at,
         ).market;
-        return new Market(
-            this.network,
-            this.id,
-            this.ledger,
-            this.vault,
-            this.token,
-            this.oracle,
-            this.treasury,
-            this.owner,
-            this.feedId,
-            this.status,
-            this.config,
-            advanced,
-            this.adl,
-            this.retirement,
-            this.vaultAssets,
-            this.vaultShares,
-            this.vaultDecimalsOffset,
-            this.assetDecimals,
-            this.treasuryRate,
-        );
+        return this.withData(advanced);
     }
 
     /**
@@ -231,18 +263,19 @@ export class Market {
      */
     utilization(isLong: boolean, price: PriceInput): bigint {
         return reserveUtilization(
-            sideReserved(this.data, resolvePrice(price), isLong),
+            sideReserved(this.data, this.priceAt(price), isLong),
             sideCapacity(this.vaultAssets, this.config.maxUtilOpen),
         );
     }
 
     /**
-     * Notional (token-dec) that can still open on a side before an open gate
-     * trips: the smaller of the `max_util_open` headroom at `price` and the
-     * `max_open_interest` headroom. The "max size" a trade ticket shows.
+     * Notional (token-dec) the side can still take before a side-level open
+     * gate trips: the smaller of the `max_util_open` headroom at `price` and
+     * the `max_open_interest` headroom. One order is also capped at
+     * `config.maxPositionNotional` less the position's own notional (#712).
      */
     openCapacity(isLong: boolean, price: PriceInput): bigint {
-        const reserved = sideReserved(this.data, resolvePrice(price), isLong);
+        const reserved = sideReserved(this.data, this.priceAt(price), isLong);
         const capacity = sideCapacity(this.vaultAssets, this.config.maxUtilOpen);
         const utilHeadroom = zero(capacity - reserved);
         const notional = isLong
@@ -261,7 +294,7 @@ export class Market {
      * keeper refreshes it.
      */
     adlState(price: PriceInput): AdlState {
-        const p = resolvePrice(price);
+        const p = this.priceAt(price);
         const trigger = sideCapacity(this.vaultAssets, this.config.adlMaxPnl);
         const clear = sideCapacity(this.vaultAssets, this.config.adlClearTarget);
         const longPnl = marketSidePnl(this.data, p, true, true);
@@ -279,28 +312,48 @@ export class Market {
      * down.
      */
     sidePnl(isLong: boolean, price: PriceInput): bigint {
-        return marketSidePnl(this.data, resolvePrice(price), isLong, true);
+        return marketSidePnl(this.data, this.priceAt(price), isLong, true);
     }
 
-    /** Net unrealized trader PnL across both sides at `price`, token-dec. The quantity share pricing nets out. */
+    /**
+     * Net unrealized trader PnL across both sides at `price`, token-dec, as a
+     * redeem fill nets it out of the share price: each side marked in the
+     * traders' favour, its profit capped at the haircut allowance
+     * (`maxPnlTrader` of half the vault). The uncapped sum is
+     * `sidePnl(true, price) + sidePnl(false, price)`.
+     */
     netPnl(price: PriceInput): bigint {
-        return marketNetPnl(this.data, resolvePrice(price), true);
+        return cappedNetPnl(
+            this.data,
+            this.config,
+            this.priceAt(price),
+            this.vaultAssets,
+            true,
+        );
     }
 
-    /** The per-second borrowing rate a side pays at its current utilization (SCALAR_18). */
+    /**
+     * The per-second borrowing rate (SCALAR_18) the side is charged at
+     * `price`: the kink rate at its utilization while it holds at least as
+     * many base tokens as the other side, else `0n`. Only the dominant side
+     * pays, and a tie charges both.
+     */
     borrowingRate(isLong: boolean, price: PriceInput): bigint {
+        const own = isLong ? this.data.tokens.long : this.data.tokens.short;
+        const other = isLong ? this.data.tokens.short : this.data.tokens.long;
+        if (own < other) return 0n;
         return borrowingRate(this.config, this.utilization(isLong, price));
     }
 
     /**
-     * The per-second funding rate as accrual would charge it at `now`
-     * (defaults to the wall clock): the stored rate evolved over the elapsed
-     * window by the book's skew. Signed, SCALAR_18: positive means longs pay
-     * shorts. Skew-driven, so no price is involved.
+     * The stored per-second funding rate, evolved to `now` (defaults to the
+     * wall clock) by the book's skew. Signed, SCALAR_18: positive means longs
+     * pay shorts. This is the unfloored rate the market keeps. Accrual
+     * charges the payer `max(|rate|, config.fundingMin)`, and nothing at a
+     * zero rate. Skew-driven, so no price is involved.
      */
     fundingRate(now?: bigint): bigint {
-        const clock = now ?? BigInt(Math.floor(Date.now() / 1000));
-        const elapsed = zero(clock - this.data.accruedAt);
+        const elapsed = quoteTime(this, now) - this.data.accruedAt;
         return advanceFunding(this.data, this.config, elapsed).fundingRate;
     }
 
@@ -316,7 +369,7 @@ export class Market {
      * from this conversion can sit above that quote and reject the order.
      */
     assetsToShares(assets: bigint, price: PriceInput): bigint {
-        const p = resolvePrice(price);
+        const p = this.priceAt(price);
         const pnl = cappedNetPnl(this.data, this.config, p, this.vaultAssets, false);
         return convertVaultAssetsToShares(this.vaultAtomic(), assets, pnl);
     }
@@ -331,14 +384,15 @@ export class Market {
      * `VaultOrderIntent.expectedOut` returns.
      */
     sharesToAssets(shares: bigint, price: PriceInput): bigint {
-        const p = resolvePrice(price);
+        const p = this.priceAt(price);
         const pnl = cappedNetPnl(this.data, this.config, p, this.vaultAssets, true);
         return convertVaultSharesToAssets(this.vaultAtomic(), shares, pnl);
     }
 
     /**
-     * A copy of this snapshot carrying `rate` as the treasury fee rate, for
-     * exact fee splits in previews. Pair with {@link loadTreasuryRate}.
+     * A copy of this snapshot carrying `rate` (SCALAR_18) as the treasury fee
+     * rate in place of {@link Market.treasuryRate}. For a snapshot built by
+     * hand, or to preview a rate change.
      */
     withTreasuryRate(rate: bigint): Market {
         const copy = this.withData(this.data);
@@ -362,12 +416,14 @@ export class Market {
             this.config,
             data,
             this.adl,
-            this.retirement,
+            this.terminalPrice,
+            this.delistedAt,
             this.vaultAssets,
             this.vaultShares,
             this.vaultDecimalsOffset,
             this.assetDecimals,
             this.treasuryRate,
+            this.spreadReductionFactor,
         );
     }
 
@@ -378,6 +434,11 @@ export class Market {
             totalSupply: this.vaultShares,
             decimalsOffset: this.vaultDecimalsOffset,
         };
+    }
+
+    /** The price this snapshot's own methods measure at: the terminal price once set, else `price`. */
+    private priceAt(price: PriceInput): PriceData {
+        return marketPrice(this, price, quoteTime(this));
     }
 }
 
@@ -396,12 +457,78 @@ export function marketKeys(contracts: MarketContracts): {
     };
 }
 
-/** @internal Decode one market from a batch holding its four keys. */
-function decodeMarket(
+/**
+ * @internal The oracle and treasury instance keys the caller already knows,
+ * so the first round trip can read them alongside the market.
+ */
+function knownLinkKeys(
+    contracts: MarketContracts,
+): ReturnType<typeof contractInstanceLedgerKey>[] {
+    const known: ReturnType<typeof contractInstanceLedgerKey>[] = [];
+    if (contracts.oracle !== undefined) {
+        known.push(contractInstanceLedgerKey(contracts.oracle));
+    }
+    if (contracts.treasury !== undefined) {
+        known.push(contractInstanceLedgerKey(contracts.treasury));
+    }
+    return known;
+}
+
+/** @internal Throw `IDENTITY_MISMATCH` unless a supplied address matches the instance's. */
+function requireWiring(
+    market: string,
+    role: string,
+    wired: string,
+    supplied: string | undefined,
+): void {
+    if (supplied !== undefined && supplied !== wired) {
+        throw new MarketStateError(
+            'IDENTITY_MISMATCH',
+            `market ${market} is wired to ${role} ${wired}, not ${supplied}`,
+        );
+    }
+}
+
+/**
+ * @internal The oracle's spread reduction factor and the treasury's fee
+ * rate. Each instance comes from `batch` when the caller named it, else
+ * from one more round trip that reads every unnamed one.
+ */
+async function readLinks(
+    network: Network,
+    contracts: MarketContracts,
+    instance: MarketInstanceState,
+    batch: EntryBatch,
+): Promise<{ spreadReductionFactor: bigint; treasuryRate: bigint }> {
+    const oracleKey = contractInstanceLedgerKey(instance.oracle);
+    const treasuryKey = contractInstanceLedgerKey(instance.treasury);
+    const unnamed = [
+        ...(contracts.oracle === undefined ? [oracleKey] : []),
+        ...(contracts.treasury === undefined ? [treasuryKey] : []),
+    ];
+    const second =
+        unnamed.length > 0 ? await readEntries(network, unnamed) : batch;
+    const oracle = parseOracleInstance(
+        (contracts.oracle === undefined ? second : batch).require(
+            oracleKey,
+            `oracle instance ${instance.oracle}`,
+        ),
+    );
+    const treasuryRate = parseTreasuryRate(
+        (contracts.treasury === undefined ? second : batch).require(
+            treasuryKey,
+            `treasury instance ${instance.treasury}`,
+        ),
+    );
+    return { spreadReductionFactor: oracle.spreadReductionFactor, treasuryRate };
+}
+
+/** @internal Decode one market from a batch holding its keys, reading what the batch lacks. */
+async function decodeMarket(
     network: Network,
     contracts: MarketContracts,
     batch: EntryBatch,
-): Market {
+): Promise<Market> {
     const keys = marketKeys(contracts);
 
     const instance = parseMarketInstance(
@@ -423,6 +550,13 @@ function decodeMarket(
             `market ${contracts.market} settles in ${instance.token}, not ${contracts.token}`,
         );
     }
+    requireWiring(contracts.market, 'oracle', instance.oracle, contracts.oracle);
+    requireWiring(
+        contracts.market,
+        'treasury',
+        instance.treasury,
+        contracts.treasury,
+    );
 
     const data = parseMarketData(
         scValToNative(
@@ -440,10 +574,7 @@ function decodeMarket(
         batch.at(keys.vaultBalance, `vault balance for ${contracts.vault}`),
     );
 
-    const retirement =
-        instance.terminalPrice !== undefined && instance.delistedAt !== undefined
-            ? ([instance.terminalPrice, instance.delistedAt] as const)
-            : undefined;
+    const links = await readLinks(network, contracts, instance, batch);
 
     return new Market(
         network,
@@ -459,10 +590,13 @@ function decodeMarket(
         instance.config,
         data,
         instance.adl,
-        retirement,
+        instance.terminalPrice,
+        instance.delistedAt,
         vaultAssets,
         vaultInstance.totalSharesAtomic,
         vaultInstance.decimalsOffset,
         vaultInstance.assetDecimals,
+        links.treasuryRate,
+        links.spreadReductionFactor,
     );
 }

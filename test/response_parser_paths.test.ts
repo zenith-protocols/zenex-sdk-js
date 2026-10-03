@@ -86,6 +86,89 @@ describe('parseError: get-transaction responses', () => {
     });
 });
 
+function txFailedWith(operation: xdr.OperationResult) {
+    return new xdr.TransactionResult({
+        feeCharged: new xdr.Int64(100),
+        result: xdr.TransactionResultResult.txFailed([operation]),
+        ext: new xdr.TransactionResultExt(0),
+    });
+}
+
+describe('parseError: never throws', () => {
+    it('names an operation-level failure instead of throwing', () => {
+        const error = parseError({
+            status: 'ERROR',
+            errorResult: txFailedWith(xdr.OperationResult.opBadAuth()),
+        } as never);
+        expect(error.code).toBe(ZenexErrorCode.UnknownError);
+        expect(error.message).toBe('Operation failed: opBadAuth');
+    });
+
+    it('names a failed TTL extension or restore instead of throwing', () => {
+        const extend = parseError({
+            resultXdr: txFailedWith(
+                xdr.OperationResult.opInner(
+                    xdr.OperationResultTr.extendFootprintTtl(
+                        xdr.ExtendFootprintTtlResult.extendFootprintTtlMalformed(),
+                    ),
+                ),
+            ),
+        } as never);
+        expect(extend.code).toBe(ZenexErrorCode.UnknownError);
+        expect(extend.message).toBe('Operation failed: extendFootprintTtlMalformed');
+
+        const restore = parseError({
+            status: 'ERROR',
+            errorResult: txFailedWith(
+                xdr.OperationResult.opInner(
+                    xdr.OperationResultTr.restoreFootprint(
+                        xdr.RestoreFootprintResult.restoreFootprintResourceLimitExceeded(),
+                    ),
+                ),
+            ),
+        } as never);
+        expect(restore.message).toBe(
+            'Operation failed: restoreFootprintResourceLimitExceeded',
+        );
+    });
+
+    it('returns UnknownError for a shape it cannot read', () => {
+        for (const input of [null, undefined, {}, { errorResult: {} }, 'boom']) {
+            expect(parseError(input as never).code).toBe(ZenexErrorCode.UnknownError);
+        }
+    });
+});
+
+describe('parseError: host errors outside any contract', () => {
+    it('surfaces a non-root auth failure with the simulation fix', () => {
+        const error = parseError(
+            simulationError(
+                'HostError: Error(Auth, InvalidAction)\n\nEvent log (newest first):\n   0: [Diagnostic Event] ' +
+                    '[recording authorization only] encountered authorization not tied to the root contract invocation for an address.',
+            ),
+        );
+        expect(error.code).toBe(ZenexErrorCode.UnknownError);
+        expect(error.message).toContain('Error(Auth, InvalidAction)');
+        expect(error.message).toContain('record_allow_nonroot');
+    });
+
+    it('names a storage or budget host error', () => {
+        const error = parseError(simulationError('HostError: Error(Storage, MissingValue)\n...'));
+        expect(error.message).toBe('Host error Error(Storage, MissingValue)');
+    });
+
+    it('keeps an unrecognized contract code in the message', () => {
+        const error = parseError(simulationError('HostError: Error(Contract, #99999)'));
+        expect(error.code).toBe(ZenexErrorCode.UnknownError);
+        expect(error.message).toBe('Unknown contract error Error(Contract, #99999)');
+    });
+
+    it('reads a simulation error that carries no id', () => {
+        const error = parseError({ error: 'HostError: Error(Contract, #720)' } as never);
+        expect(error.code).toBe(ZenexErrorCode.PositionNotFound);
+    });
+});
+
 describe('parseResult', () => {
     const returnValue = nativeToScVal(42n, { type: 'i128' });
     const parser = (base64Xdr: string) => xdr.ScVal.fromXDR(base64Xdr, 'base64');
