@@ -1,13 +1,13 @@
 /**
  * Every error code the SDK can decode, one flat enum: Soroban host and
  * transaction codes, the shared, token, vault, market, oracle,
- * strategy-vault, governance, treasury, ownable/role-transfer and
- * fee-abstraction domains, plus the SDK-side sentinels (negative, never on
- * chain). Contract variant names are kept verbatim where they are unique
- * across contracts; where two contracts reuse a name for different meanings
- * (the oracle also has an `InvalidPrice`), the smaller domain carries a
- * prefix naming its meaning. Resolve a raw code with
- * `zenexErrorFromCode`.
+ * strategy-vault, governance, treasury, ownable/role-transfer,
+ * smart-account, session-policy, fee-abstraction, fee-forwarder and
+ * referral domains, plus the SDK-side sentinels (negative, never on chain).
+ * Contract variant names are kept verbatim where they are unique across
+ * contracts; where two contracts reuse a name for different meanings (the
+ * oracle also has an `InvalidPrice`), the smaller domain carries a prefix
+ * naming its meaning. Resolve a raw code with `zenexErrorFromCode`.
  */
 export enum ZenexErrorCode {
     // SDK-side sentinels: negative, never emitted by a contract.
@@ -226,6 +226,58 @@ export enum ZenexErrorCode {
     InvalidPendingAccount = 2202,
     TransferExpired = 2203,
 
+    // SmartAccountError (3000-3016): the smart-account wallet that the
+    // wallet factory deploys. Passkey and session-key authorizations fail
+    // with these codes. 3001 is unassigned.
+    /** No context rule exists with the given id. */
+    SmartAccountContextRuleNotFound = 3000,
+    /** A selected context rule does not validate its call: the rule expired, its context type differs, or a policy-free rule lacks a signer. */
+    SmartAccountUnvalidatedContext = 3002,
+    /** An external signer's signature failed verification. */
+    SmartAccountExternalVerificationFailed = 3003,
+    /** A context rule would hold no signer and no policy. */
+    SmartAccountNoSignersAndPolicies = 3004,
+    /** A context rule's `valid_until` ledger is already past. */
+    SmartAccountPastValidUntil = 3005,
+    /** The signer is not registered, or not in the context rule. */
+    SmartAccountSignerNotFound = 3006,
+    /** The signer is already in the context rule. */
+    SmartAccountDuplicateSigner = 3007,
+    /** The policy is not registered, or not in the context rule. */
+    SmartAccountPolicyNotFound = 3008,
+    /** The policy is already in the context rule. */
+    SmartAccountDuplicatePolicy = 3009,
+    /** A context rule would hold more than 15 signers. */
+    SmartAccountTooManySigners = 3010,
+    /** A context rule would hold more than 5 policies. */
+    SmartAccountTooManyPolicies = 3011,
+    /** An internal id counter (context rule, signer, or policy) reached `u32::MAX`. */
+    SmartAccountMathOverflow = 3012,
+    /** An external signer's key data exceeds the maximum size. */
+    SmartAccountKeyDataTooLarge = 3013,
+    /** The auth payload names a different number of context rules than there are auth contexts. */
+    SmartAccountContextRuleIdsLengthMismatch = 3014,
+    /** A context rule name exceeds the maximum length. */
+    SmartAccountNameTooLong = 3015,
+    /** The auth payload carries a signer that no selected context rule holds. */
+    SmartAccountUnauthorizedSigner = 3016,
+
+    // SessionPolicyError (4002-4007): the session policy that limits a
+    // wallet's session key to trading. A refused one-click trade simulates as
+    // `Error(Auth, InvalidAction)` with the policy code in the diagnostics.
+    /** The session key may not call this contract. */
+    SessionContractNotAllowed = 4002,
+    /** A token call other than `transfer` or `approve`. */
+    SessionFunctionNotAllowed = 4003,
+    /** A token `transfer` to an address that is not one of the policy's markets. */
+    SessionTransferNotAllowed = 4004,
+    /** A token `approve` whose spender is not the fee forwarder. */
+    SessionApproveNotAllowed = 4005,
+    /** A relayed call signs a fee recipient other than the policy's own. */
+    SessionForwardNotAllowed = 4006,
+    /** The session key did not sign. */
+    SessionSignerNotAuthenticated = 4007,
+
     // Fee Abstraction Errors (5000-5006)
     // Emitted by OpenZeppelin's stellar-fee-abstraction library inside the
     // fee forwarder (zenex-util-contracts `fee-forwarder`), which wraps a
@@ -237,6 +289,16 @@ export enum ZenexErrorCode {
     NoTokensToSweep = 5004,
     FeeAbstractionInvalidUser = 5005,
     FeeAbstractionInvalidExpirationLedger = 5006,
+
+    // FeeForwarderError (6001-6002): the fee forwarder's own rejects.
+    /** The target function is `transfer_from` or `burn_from`, which spend an allowance. */
+    FeeForwarderTargetNotAllowed = 6001,
+    /** The fee recipient is the forwarder itself. */
+    FeeForwarderInvalidRecipient = 6002,
+
+    // ReferralError (7001): the referral attestation contract.
+    /** The caller names itself as its referrer. */
+    ReferralSelfReferral = 7001,
 }
 
 const errorMessages: Record<number, string> = {
@@ -387,6 +449,32 @@ const errorMessages: Record<number, string> = {
     [2202]: 'Caller is not the pending owner',
     [2203]: 'The pending ownership transfer has expired',
 
+    // Smart account
+    [3000]: 'Smart-account context rule not found',
+    [3002]: 'Smart-account context rule does not validate the call: expired, wrong context type, or a missing signer',
+    [3003]: 'Smart-account external signature failed verification',
+    [3004]: 'Smart-account context rule needs at least one signer or policy',
+    [3005]: 'Smart-account context rule valid_until is a past ledger',
+    [3006]: 'Smart-account signer not found',
+    [3007]: 'Smart-account signer is already in the context rule',
+    [3008]: 'Smart-account policy not found',
+    [3009]: 'Smart-account policy is already in the context rule',
+    [3010]: 'Smart-account context rule exceeds 15 signers',
+    [3011]: 'Smart-account context rule exceeds 5 policies',
+    [3012]: 'Smart-account id counter overflow',
+    [3013]: 'Smart-account external signer key data is too large',
+    [3014]: 'Smart-account auth payload rule count differs from the auth context count',
+    [3015]: 'Smart-account context rule name is too long',
+    [3016]: 'Smart-account auth payload carries a signer outside every selected context rule',
+
+    // Session policy
+    [4002]: 'Session key may not call this contract',
+    [4003]: 'Session key may call only transfer or approve on the token',
+    [4004]: 'Session key token transfer must go to a market',
+    [4005]: 'Session key approve must name the fee forwarder as spender',
+    [4006]: 'Relayed call pays a fee recipient other than the session policy recipient',
+    [4007]: 'Session key did not sign',
+
     // Fee Abstraction (OpenZeppelin stellar-fee-abstraction)
     [5000]: 'Fee token is not on the allowlist',
     [5001]: 'Fee token is already on the allowlist',
@@ -395,6 +483,13 @@ const errorMessages: Record<number, string> = {
     [5004]: 'No tokens to sweep',
     [5005]: 'Invalid user for fee abstraction',
     [5006]: 'Invalid expiration ledger for fee abstraction',
+
+    // Fee forwarder
+    [6001]: 'Fee forwarder target function is transfer_from or burn_from',
+    [6002]: 'Fee recipient is the fee forwarder itself',
+
+    // Referral
+    [7001]: 'Referral names the caller as its own referrer',
 };
 
 /**
@@ -415,11 +510,13 @@ export class ZenexError extends Error {
 /**
  * Resolve a raw on-chain error code to a ZenexError.
  *
- * The per-contract code namespaces are disjoint (shared admin 600,
- * market 700-772, oracle 780-793, strategy-vault 800-801,
- * governance 810-812, treasury 900, ownable 2100-2102, role transfer
- * 2200-2203, fee-abstraction 5000-5006), so every code resolves without a
- * hint.
+ * The per-contract code namespaces are disjoint (Stellar Asset Contract
+ * 1-13, fungible token 100-114, vault token 400-410, shared admin 600,
+ * market 700-772, oracle 780-793, strategy-vault 800-801, governance
+ * 810-812, treasury 900, ownable 2100-2102, role transfer 2200-2203, smart
+ * account 3000-3016, session policy 4002-4007, fee-abstraction 5000-5006,
+ * fee forwarder 6001-6002, referral 7001), so every code resolves without a
+ * hint. A code outside them resolves to `UnknownError`.
  */
 export function zenexErrorFromCode(code: number): ZenexError {
     if (code in ZenexErrorCode) {

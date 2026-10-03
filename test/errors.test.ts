@@ -17,6 +17,12 @@ import {
 //   treasury/src/lib.rs            (TreasuryError, 900)
 //   OpenZeppelin ownable           (OwnableError 2100-2102, RoleTransferError 2200-2203)
 //   OpenZeppelin fee-abstraction   (FeeAbstractionError, 5000-5006)
+// and against the zenex-util-contracts v0.0.2 sources and spec-sig output:
+//   fee-forwarder/src/lib.rs       (FeeForwarderError, 6001-6002)
+//   session-policy/src/lib.rs      (SessionPolicyError, 4002-4007)
+//   referral/src/lib.rs            (ReferralError, 7001)
+//   the smart-account wasm the wallet factory pins
+//                                  (SmartAccountError, 3000-3016, no 3001)
 // The namespaces are disjoint, so zenexErrorFromCode takes no hint and
 // every code lives in the one flat ZenexErrorCode enum. UpgradeNotOwner
 // (600) is one shared code raised identically by market, oracle and factory,
@@ -196,6 +202,75 @@ describe('ZenexErrorCode periphery codes (v2 contracts)', () => {
         expect(ZenexErrorCode[770]).toBe('AdlNotTriggered');
         expect(ZenexErrorCode[771]).toBe('AdlOvershoot');
         expect(ZenexErrorCode[772]).toBe('AdlNotEligible');
+    });
+});
+
+describe('util-contract and smart-account codes', () => {
+    it('fee forwarder covers FeeForwarderError (6001-6002)', () => {
+        expect(ZenexErrorCode.FeeForwarderTargetNotAllowed).toBe(6001);
+        expect(ZenexErrorCode.FeeForwarderInvalidRecipient).toBe(6002);
+    });
+
+    it('session policy covers SessionPolicyError (4002-4007)', () => {
+        expect(ZenexErrorCode.SessionContractNotAllowed).toBe(4002);
+        expect(ZenexErrorCode.SessionFunctionNotAllowed).toBe(4003);
+        expect(ZenexErrorCode.SessionTransferNotAllowed).toBe(4004);
+        expect(ZenexErrorCode.SessionApproveNotAllowed).toBe(4005);
+        expect(ZenexErrorCode.SessionForwardNotAllowed).toBe(4006);
+        expect(ZenexErrorCode.SessionSignerNotAuthenticated).toBe(4007);
+    });
+
+    it('referral covers ReferralError (7001)', () => {
+        expect(ZenexErrorCode.ReferralSelfReferral).toBe(7001);
+    });
+
+    it('smart account covers SmartAccountError (3000-3016, 3001 unassigned)', () => {
+        expect(ZenexErrorCode.SmartAccountContextRuleNotFound).toBe(3000);
+        expect(ZenexErrorCode.SmartAccountUnvalidatedContext).toBe(3002);
+        expect(ZenexErrorCode.SmartAccountExternalVerificationFailed).toBe(3003);
+        expect(ZenexErrorCode.SmartAccountNoSignersAndPolicies).toBe(3004);
+        expect(ZenexErrorCode.SmartAccountPastValidUntil).toBe(3005);
+        expect(ZenexErrorCode.SmartAccountSignerNotFound).toBe(3006);
+        expect(ZenexErrorCode.SmartAccountDuplicateSigner).toBe(3007);
+        expect(ZenexErrorCode.SmartAccountPolicyNotFound).toBe(3008);
+        expect(ZenexErrorCode.SmartAccountDuplicatePolicy).toBe(3009);
+        expect(ZenexErrorCode.SmartAccountTooManySigners).toBe(3010);
+        expect(ZenexErrorCode.SmartAccountTooManyPolicies).toBe(3011);
+        expect(ZenexErrorCode.SmartAccountMathOverflow).toBe(3012);
+        expect(ZenexErrorCode.SmartAccountKeyDataTooLarge).toBe(3013);
+        expect(ZenexErrorCode.SmartAccountContextRuleIdsLengthMismatch).toBe(3014);
+        expect(ZenexErrorCode.SmartAccountNameTooLong).toBe(3015);
+        expect(ZenexErrorCode.SmartAccountUnauthorizedSigner).toBe(3016);
+        expect(zenexErrorFromCode(3001).code).toBe(ZenexErrorCode.UnknownError);
+    });
+
+    it('every util and smart-account code resolves with its own message', () => {
+        const codes = [
+            ...Array.from({ length: 17 }, (_, i) => 3000 + i).filter((code) => code !== 3001),
+            4002, 4003, 4004, 4005, 4006, 4007, 6001, 6002, 7001,
+        ];
+        for (const code of codes) {
+            const error = zenexErrorFromCode(code);
+            expect(error.code, `code ${code}`).toBe(code);
+            expect(error.message, `message for ${code}`).not.toBe('Unknown contract error');
+            expect(error.message, `message for ${code}`).not.toBe(`Contract error ${code}`);
+        }
+    });
+
+    it('a session-policy refusal decodes from the simulation diagnostics', () => {
+        const diagnostic = 'HostError: Error(Auth, InvalidAction)\n'
+            + 'Event log (newest first):\n'
+            + '   0: [Diagnostic Event] topics:[error, Error(Contract, #4006)]';
+        const code = parseContractErrorCode(diagnostic);
+        expect(code).toBe(4006);
+        expect(zenexErrorFromCode(code!).code).toBe(ZenexErrorCode.SessionForwardNotAllowed);
+    });
+
+    it('no two members share a code', () => {
+        const values = Object.values(ZenexErrorCode).filter(
+            (value): value is number => typeof value === 'number',
+        );
+        expect(new Set(values).size).toBe(values.length);
     });
 });
 
