@@ -138,7 +138,9 @@ export class Market {
      * Load one market: its instance, market data, vault instance and vault
      * balance, plus the oracle and treasury instances it names. One
      * `getLedgerEntries` when `contracts` carries `oracle` and `treasury`
-     * (as {@link Market.resolveContracts} returns), else two. Every supplied
+     * (as {@link Market.resolveContracts} returns), else two; the second
+     * reads those slow-moving settings at its own, later ledger, while
+     * {@link Market.ledger} stays the first read's. Every supplied
      * address is checked against the instance's own wiring, so one market's
      * positions never blend with an unrelated vault's balance.
      *
