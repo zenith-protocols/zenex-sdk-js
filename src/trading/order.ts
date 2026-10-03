@@ -1,7 +1,6 @@
 import type { OrderParams } from '../contracts/router/types.js';
 import { ZenexError, zenexErrorFromGate } from '../errors.js';
 import { OrderKind } from '../contracts/market/types.js';
-import { SCALAR_18, mulDivFloor } from '../math/fixed.js';
 import { formatPrice, formatToken, formatTokenFloor } from '../float.js';
 import type { Market } from './market.js';
 import { MarketPosition } from './position.js';
@@ -14,7 +13,7 @@ import {
     applyOrder,
     orderPriceBound as enginePriceBound,
 } from './internal/apply.js';
-import { quoteTradeFees } from './internal/math.js';
+import { entryTokens, quoteTradeFees } from './internal/math.js';
 import {
     closePositionParams,
     decreasePositionParams,
@@ -391,7 +390,7 @@ export function maxMarginForBalance(
 
     const cost = (margin: bigint): bigint => {
         const notional = (margin * leverageScaled) / LEVERAGE_SCALE;
-        const tokens = mulDivFloor(notional, SCALAR_18, entry);
+        const tokens = entryTokens(notional, entry, isLong);
         const fees = quoteTradeFees(
             market.data,
             market.config,

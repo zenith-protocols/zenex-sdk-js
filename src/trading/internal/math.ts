@@ -37,6 +37,21 @@ export function entryPrice(price: PriceData, isLong: boolean): bigint {
     return isLong ? price.ask : price.bid;
 }
 
+/**
+ * Base size `notional` buys at `price` (base-dec), rounded against the
+ * trader like the close mark: a long floors, a short ceils. Mirrors
+ * `Position::increase`'s `to_tokens_floor` / `to_tokens_ceil` split.
+ */
+export function entryTokens(
+    notional: bigint,
+    price: bigint,
+    isLong: boolean,
+): bigint {
+    return isLong
+        ? mulDivFloor(notional, SCALAR_18, price)
+        : mulDivCeil(notional, SCALAR_18, price);
+}
+
 /** The price an open position closes at: the bid for a long, the ask for a short. 18-dec. */
 export function exitPrice(price: PriceData, isLong: boolean): bigint {
     return isLong ? price.bid : price.ask;
