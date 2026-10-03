@@ -126,17 +126,26 @@ export class FactoryContract extends Contract {
      *   for the life of the deployed market contract.
      * @param config - Initial `MarketConfig` for the deployed market contract.
      * @param vaultDecimalsOffset - Extra decimals on the vault's share
-     *   token. Higher values reduce inflation-attack risk on share pricing.
+     *   token, at most 10. Higher values reduce inflation-attack risk on
+     *   share pricing.
      *
      * # Returns
      * - The `(market, vault)` address pair. Parse with `parsers.deployMarket`.
      *
      * # Errors
-     * - Propagates the market contract's constructor validation.
+     * A rejected constructor fails the call as `Error(Context,
+     * InvalidAction)`, and its code is in the simulation diagnostics:
      * - `InvalidConfig` (700) if `config` fails its bounds, or `feedId` is
      *   not a V3 (`0x0003…`) stream id.
-     * - `NegativeValueNotAllowed` (710) if a rate, fee, or margin in
+     * - `NegativeValueNotAllowed` (710) if a fee, margin, borrowing, funding,
+     *   ADL or PnL field, `minOrderMargin`, `minDeposit` or `execFee` in
      *   `config` is negative.
+     * - `VaultMaxDecimalsOffsetExceeded` (409) if `vaultDecimalsOffset` is
+     *   above 10.
+     *
+     * A repeated `(admin, salt)` finds a contract at the derived address and
+     * traps in the host as `Error(Storage, ExistingValue)`, which carries no
+     * contract error code.
      *
      * # Events
      * - Emits `Deploy` with the market and vault addresses as topics. The
@@ -203,16 +212,17 @@ export class FactoryContract extends Contract {
     }
 
     /**
-     * Replace the factory's WASM executable (owner only). Instance storage —
-     * including `InitMeta`, so the WASM hashes new markets receive — is
-     * untouched; pair with `setInitMeta` when those should move too. The
-     * host emits a SYSTEM `executable_update` event.
+     * Replace the factory's WASM executable (owner only). Instance storage
+     * stays as is, `InitMeta` included, so new markets keep receiving the
+     * same WASM hashes. Pair the upgrade with `setInitMeta` to move them
+     * too. The host emits a SYSTEM `executable_update` event.
      *
      * @param newWasmHash - Hash of the already-uploaded replacement WASM.
      * @param operator - Must equal the owner. The trait shape mandates the
      *   argument; it carries no authority of its own.
      *
      * # Errors
+     * - `OwnerNotSet` (2100) once ownership is renounced.
      * - `UpgradeNotOwner` (600) if `operator` is not the owner.
      */
     upgrade(newWasmHash: Buffer | Uint8Array, operator: string): string {
@@ -235,8 +245,19 @@ export class FactoryContract extends Contract {
 
     /**
      * Begin a two-step transfer to `newOwner`, who must call `acceptOwnership`
-     * by `liveUntilLedger` (owner only). `liveUntilLedger = 0` cancels any
-     * pending transfer instead.
+     * by `liveUntilLedger` (owner only). A new call replaces any pending
+     * transfer.
+     *
+     * @param liveUntilLedger - Last ledger sequence `newOwner` can accept by.
+     *   `0` cancels the pending transfer to `newOwner` instead, and
+     *   `newOwner` must then equal the pending owner.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) once ownership is renounced.
+     * - TransferInvalidLiveUntilLedger (2201) if `liveUntilLedger` is in the
+     *   past or beyond the maximum entry TTL.
+     * - NoPendingTransfer (2200) on a cancel with no pending transfer.
+     * - InvalidPendingAccount (2202) on a cancel that names another address.
      */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
@@ -247,14 +268,25 @@ export class FactoryContract extends Contract {
         ).toXDR('base64');
     }
 
-    /** Complete a pending ownership transfer. Only the proposed new owner may call this. */
+    /**
+     * Complete a pending ownership transfer. Only the proposed new owner may
+     * call this.
+     *
+     * # Errors
+     * - NoPendingTransfer (2200) if no transfer is pending.
+     * - TransferExpired (2203) if the transfer's `liveUntilLedger` has passed.
+     */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
 
     /**
-     * Permanently remove the owner, disabling `upgrade` and `setInitMeta`
-     * for good (owner only). Fails if a transfer is pending.
+     * Permanently remove the owner, disabling `upgrade`, `setInitMeta` and
+     * `transferOwnership` for good (owner only).
+     *
+     * # Errors
+     * - OwnerNotSet (2100) if ownership is already renounced.
+     * - OwnershipTransferInProgress (2101) if an unexpired transfer is pending.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');

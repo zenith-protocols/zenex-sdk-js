@@ -36,7 +36,8 @@ export class TreasuryContract extends Contract {
     /**
      * Deploy a new instance of the Treasury contract.
      *
-     * If `args.rate` is out of range, the call traps with `InvalidRate`.
+     * If `args.rate` is out of range, the call traps with
+     * `TreasuryInvalidRate` (900).
      */
     static deploy(
         deployer: string,
@@ -59,9 +60,11 @@ export class TreasuryContract extends Contract {
     }
 
     /**
-     * Set the protocol fee rate that the market reads at every settlement (owner only).
+     * Set the protocol fee rate that the market reads at every settlement
+     * (owner only).
      * @param rate - SCALAR_18 fraction, e.g. 1e17 = 10%. If `rate` is outside
-     *   `[0, SCALAR_18 / 2]` (0% to 50%), the call traps with `InvalidRate`.
+     *   `[0, SCALAR_18 / 2]` (0% to 50%), the call traps with
+     *   `TreasuryInvalidRate` (900).
      */
     setRate(rate: i128): string {
         return this.call(
@@ -95,11 +98,20 @@ export class TreasuryContract extends Contract {
     }
 
     /**
-     * Begin a two-step transfer of ownership to `newOwner` (owner only).
+     * Begin a two-step transfer of ownership to `newOwner` (owner only). A
+     * new call replaces any pending transfer.
      * @param newOwner - Must call `acceptOwnership` before the deadline to
      *   complete the transfer.
-     * @param liveUntilLedger - Ledger sequence deadline. `0` cancels any
-     *   pending transfer instead.
+     * @param liveUntilLedger - Last ledger sequence `newOwner` can accept by.
+     *   `0` cancels the pending transfer to `newOwner` instead, and
+     *   `newOwner` must then equal the pending owner.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) once ownership is renounced.
+     * - TransferInvalidLiveUntilLedger (2201) if `liveUntilLedger` is in the
+     *   past or beyond the maximum entry TTL.
+     * - NoPendingTransfer (2200) on a cancel with no pending transfer.
+     * - InvalidPendingAccount (2202) on a cancel that names another address.
      */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
@@ -110,14 +122,26 @@ export class TreasuryContract extends Contract {
         ).toXDR('base64');
     }
 
-    /** Complete a pending ownership transfer; callable only by the proposed new owner. */
+    /**
+     * Complete a pending ownership transfer; callable only by the proposed
+     * new owner.
+     *
+     * # Errors
+     * - NoPendingTransfer (2200) if no transfer is pending.
+     * - TransferExpired (2203) if the transfer's `liveUntilLedger` has passed.
+     */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
 
     /**
-     * Permanently remove the owner, disabling `setRate` and `withdraw` for
-     * good (owner only). Fails if a transfer is pending.
+     * Permanently remove the owner, disabling `setRate`, `withdraw` and
+     * `transferOwnership` for good (owner only). Fees left in the treasury
+     * can then never be withdrawn.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) if ownership is already renounced.
+     * - OwnershipTransferInProgress (2101) if an unexpired transfer is pending.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');

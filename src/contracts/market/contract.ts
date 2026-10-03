@@ -897,12 +897,21 @@ export class MarketContract extends Contract {
     }
 
     /**
-     * Start a 2-step ownership transfer to a new address. Owner only.
+     * Start a 2-step ownership transfer to `newOwner`. Owner only.
      *
-     * The new owner must call `acceptOwnership` to finish the transfer.
+     * The current owner keeps control until `newOwner` calls
+     * `acceptOwnership`. A new call replaces any pending transfer.
      *
-     * @param liveUntilLedger - Last ledger sequence the new owner can accept
-     *   by. `0` cancels any pending transfer.
+     * @param liveUntilLedger - Last ledger sequence `newOwner` can accept by.
+     *   `0` cancels the pending transfer to `newOwner` instead, and
+     *   `newOwner` must then equal the pending owner.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) once ownership is renounced.
+     * - TransferInvalidLiveUntilLedger (2201) if `liveUntilLedger` is in the
+     *   past or beyond the maximum entry TTL.
+     * - NoPendingTransfer (2200) on a cancel with no pending transfer.
+     * - InvalidPendingAccount (2202) on a cancel that names another address.
      */
     transferOwnership(newOwner: string, liveUntilLedger: u32): string {
         return this.call(
@@ -912,7 +921,13 @@ export class MarketContract extends Contract {
         ).toXDR('base64');
     }
 
-    /** Accept a pending ownership transfer. New owner authorizes. */
+    /**
+     * Accept a pending ownership transfer. The pending owner authorizes.
+     *
+     * # Errors
+     * - NoPendingTransfer (2200) if no transfer is pending.
+     * - TransferExpired (2203) if the transfer's `liveUntilLedger` has passed.
+     */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
@@ -920,7 +935,13 @@ export class MarketContract extends Contract {
     /**
      * Renounce ownership of the contract. Owner only.
      *
-     * This permanently removes the owner and disables every owner-only method.
+     * This permanently removes the owner and disables every owner-only
+     * method: `setConfig`, `setStatus`, `setTerminalPrice`, `upgrade` and
+     * `transferOwnership`.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) if ownership is already renounced.
+     * - OwnershipTransferInProgress (2101) if an unexpired transfer is pending.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');
