@@ -27,8 +27,8 @@ function priceBuffer(price: Buffer | Uint8Array): Buffer {
  * base64-encoded XDR operation.
  *
  * A batched call that needs a user's authorization carries the user's own
- * auth entry. With the router as the transaction's root call, that entry is
- * not rooted at the root invocation. Simulate the batch with
+ * auth entry. When the router is the transaction's root call, that entry
+ * starts below the root invocation. Simulate such a batch with
  * `simulateAndParse(network, op, parser, { authMode: 'record_allow_nonroot' })`,
  * because `prepareTransaction` simulates in the default mode and fails. To
  * pay a relayer in a token, relay the call through `FeeForwarderContract`

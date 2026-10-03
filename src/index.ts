@@ -196,7 +196,8 @@ export type {
 // Oracle Module (Chainlink Data Streams verifier)
 // =============================================================================
 
-export { OracleContract, OracleEventType } from './contracts/oracle/index.js';
+export { OracleContract } from './contracts/oracle/index.js';
+export { OracleEventType } from './contracts/oracle/index.js';
 
 export type {
     OraclePriceData,
@@ -211,14 +212,11 @@ export type {
 // Treasury Module
 // =============================================================================
 
-export {
-    TreasuryContract,
-    TreasuryEventType,
-    parseTreasuryRate,
-} from './contracts/treasury/index.js';
+export { TreasuryContract, parseTreasuryRate } from './contracts/treasury/index.js';
+export { TreasuryEventType } from './contracts/treasury/index.js';
 
+export type { TreasuryConstructorArgs } from './contracts/treasury/index.js';
 export type {
-    TreasuryConstructorArgs,
     BaseTreasuryEvent,
     TreasuryWithdrawEvent,
     TreasuryRateUpdateEvent,
