@@ -14,6 +14,7 @@ import {
     pendingFunding,
     positionEquity,
     positionPnl,
+    settledPositionEquity,
     unlockedNotional,
 } from './internal/position.js';
 
@@ -33,7 +34,7 @@ export interface PositionEstimate {
     margin: number;
     /** Mark-to-market PnL at the close price, token units. */
     pnl: number;
-    /** Margin + PnL - pending accruals, token units. */
+    /** Margin + PnL - pending accruals, token units: the mark before close fees and the profit haircut. */
     equity: number;
     /** Pending funding, token units. Positive is owed by the trader. */
     pendingFunding: number;
@@ -43,9 +44,17 @@ export interface PositionEstimate {
     leverage: number;
     /** Average entry price, or `0` with no open size. */
     entryPrice: number;
-    /** Price at which equity meets the maintenance margin. */
+    /**
+     * Price at which settled equity (net of a full close's fees) meets the
+     * maintenance margin: a long is liquidatable below it, a short above
+     * it. Assumes no profit haircut. `0` with no open size.
+     */
     liquidationPrice: number;
-    /** equity / maintenance requirement; above `1` is healthy, `Infinity` with no requirement. */
+    /**
+     * Settled equity over the maintenance requirement, the measure the
+     * liquidation gate uses (close fees and haircut included): below `1` a
+     * keeper can liquidate. `Infinity` with no requirement.
+     */
     healthFactor: number;
     /** Signed % move from mark to liquidation price; negative once crossed. */
     liquidationDistancePercent: number;
@@ -162,7 +171,16 @@ export function estimatePosition(
         healthFactor:
             maintenanceRaw === 0n
                 ? Infinity
-                : Number(equityRaw) / Number(maintenanceRaw),
+                : Number(
+                      settledPositionEquity(
+                          position,
+                          data,
+                          config,
+                          p,
+                          market.vaultAssets,
+                          isLong,
+                      ),
+                  ) / Number(maintenanceRaw),
         liquidationDistancePercent: distance,
         closeFee: formatToken(closeFeeRaw, decimals),
         netPnl: formatToken(netPnlRaw, decimals),

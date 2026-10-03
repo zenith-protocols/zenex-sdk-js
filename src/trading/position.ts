@@ -80,8 +80,9 @@ export class MarketPosition {
     }
 
     /**
-     * Margin + PnL - pending accruals at `price`, token-dec. The equity the
-     * contract's margin gates measure.
+     * Margin + PnL - pending accruals at `price`, token-dec: the mark before
+     * close fees and the profit haircut. The maintenance gate measures
+     * settled equity, which nets both, so use `isLiquidatable` for the gate.
      */
     equity(market: Market, price: PriceInput): bigint {
         const mark = exitPrice(
@@ -118,7 +119,12 @@ export class MarketPosition {
         );
     }
 
-    /** Price (18-dec) at which equity meets the maintenance margin; `0n` with no open size. */
+    /**
+     * Price (18-dec) at which settled equity, net of a full close's fees at
+     * the current book, meets the maintenance margin: a long is liquidatable
+     * below it, a short above it. Assumes no profit haircut and the accruals
+     * as passed. `0n` with no open size.
+     */
     liquidationPrice(market: Market): bigint {
         return liquidationPrice(this, market.config, market.data, this.isLong);
     }

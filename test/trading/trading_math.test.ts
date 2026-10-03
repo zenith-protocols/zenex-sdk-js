@@ -247,39 +247,54 @@ describe('unlockedNotional (ports Position::locked, boundary at now == unlocks_a
     });
 });
 
-describe('liquidationPrice (inverts the maintenance-margin equity line)', () => {
+describe('liquidationPrice (solves the settled-equity maintenance line)', () => {
     // $5,000 margin on $50,000 notional (10x), maintenance 5%:
     // maintenanceAmount = ceil(5e11 * 5e16 / 1e18) = 2.5e10 ($2,500).
-    // Long: allowed loss = 5,000 - 2,500 = $2,500 on 0.5 base units
-    //       = $5,000/unit drop, so $100,000 - $5,000 = $95,000 (9.5e12).
-    //       Via the solver: target = 2.5e10 + 5e11 - 5e10 = 4.75e11;
-    //       price = floor(4.75e11 * 1e18 / 5e16) = 9,500,000,000,000.
+    // The book holds just this position, so a full close improves the skew:
+    // base fee ceil(5e11 * 0.3%) = 1.5e9 ($150), impact with a $100M scalar
+    // 5e11^2 / 1e15 = 2.5e8 ($25). The gate nets that $175 close fee.
+    // Long: allowed loss = 5,000 - 2,500 - 175 = $2,325 on 0.5 base units
+    //       = $4,650/unit drop, so $100,000 - $4,650 = $95,350.
+    //       Via the solver: target = 2.5e10 + 5e11 - 5e10 + 1.75e9
+    //       = 4.7675e11; price = 4.7675e11 * 1e18 / 5e16 = 9,535,000,000,000.
     const tenXPosition = makePosition({
         margin: COLLATERAL_5K,
         notional: NOTIONAL_50K,
         tokens: TOKENS_HALF_UNIT,
     });
+    const config = (): MarketConfig => ({
+        ...baselineConfig(),
+        impactScalar: 1_000_000_000_000_000n, // $100M, token-dec
+    });
+    const book = (isLong: boolean, overrides: Partial<MarketData> = {}) =>
+        makeMarket({
+            notional: isLong ? pairOf(NOTIONAL_50K, 0n) : pairOf(0n, NOTIONAL_50K),
+            tokens: isLong
+                ? pairOf(TOKENS_HALF_UNIT, 0n)
+                : pairOf(0n, TOKENS_HALF_UNIT),
+            ...overrides,
+        });
 
-    it('long liquidation at $95,000 with no accruals', () => {
-        expect(liquidationPrice(tenXPosition, baselineConfig(), makeMarket(), true)).toBe(9_500_000_000_000n);
+    it('long liquidation at $95,350 with no accruals', () => {
+        expect(liquidationPrice(tenXPosition, config(), book(true), true)).toBe(9_535_000_000_000n);
     });
 
-    // Short: target = 5e11 + 5e10 - 2.5e10 = 5.25e11;
-    // price = 5.25e11 * 1e18 / 5e16 = 10,500,000,000,000 ($105,000).
-    it('short liquidation at $105,000 with no accruals', () => {
-        expect(liquidationPrice(tenXPosition, baselineConfig(), makeMarket(), false)).toBe(10_500_000_000_000n);
+    // Short: target = 5e11 + 5e10 - 1.75e9 - 2.5e10 = 5.2325e11;
+    // price = 5.2325e11 * 20 = 10,465,000,000,000 ($104,650).
+    it('short liquidation at $104,650 with no accruals', () => {
+        expect(liquidationPrice(tenXPosition, config(), book(false), false)).toBe(10_465_000_000_000n);
     });
 
     // Accruals shrink the loss budget: funding 3_600_000 + borrowing 216_000_000
-    // raise the long target to 475,219,600,000, price = target * 20
-    // = 9,504,392,000,000 ($95,043.92; hand check: allowed loss
-    // 5,000 - 2,500 - 0.36 - 21.60 = $2,478.04, over 0.5 units = $4,956.08 drop).
-    it('paid funding and borrowing raise the long liquidation price to $95,043.92', () => {
-        const market = makeMarket({
+    // raise the long target to 476,969,600,000, price = target * 20
+    // = 9,539,392,000,000 ($95,393.92; hand check: allowed loss
+    // 5,000 - 2,500 - 175 - 0.36 - 21.60 = $2,303.04, over 0.5 units = $4,606.08 drop).
+    it('paid funding and borrowing raise the long liquidation price to $95,393.92', () => {
+        const market = book(true, {
             fundingIdx: pairOf(FUNDING_IDX_ONE_HOUR, 0n),
             borrowingIdx: pairOf(BORROWING_IDX_ONE_DAY, 0n),
         });
-        expect(liquidationPrice(tenXPosition, baselineConfig(), market, true)).toBe(9_504_392_000_000n);
+        expect(liquidationPrice(tenXPosition, config(), market, true)).toBe(9_539_392_000_000n);
     });
 
     // Earned funding (market index below the position snapshot) is clamped to
@@ -291,21 +306,32 @@ describe('liquidationPrice (inverts the maintenance-margin equity line)', () => 
             tokens: TOKENS_HALF_UNIT,
             fundingIdx: FUNDING_IDX_ONE_HOUR,
         });
-        const market = makeMarket({ fundingIdx: pairOf(0n, 0n) });
-        expect(liquidationPrice(earnedFundingPosition, baselineConfig(), market, true)).toBe(9_500_000_000_000n);
+        const market = book(true, { fundingIdx: pairOf(0n, 0n) });
+        expect(liquidationPrice(earnedFundingPosition, config(), market, true)).toBe(9_535_000_000_000n);
     });
 
     // The threshold is the maintenance line alone. The liquidation fee rate
     // only sizes the fee charged out of the settled equity on-chain; it never
     // moves the eligibility price.
     it('the liquidation-fee rate does not move the threshold', () => {
-        const noFeeConfig = { ...baselineConfig(), liqFee: 0n };
-        const highFeeConfig = { ...baselineConfig(), liqFee: (4n * SCALAR_18) / 100n }; // 4%, still < 5% maintenance
-        expect(liquidationPrice(tenXPosition, noFeeConfig, makeMarket(), true)).toBe(9_500_000_000_000n);
-        expect(liquidationPrice(tenXPosition, highFeeConfig, makeMarket(), true)).toBe(9_500_000_000_000n);
+        const noFeeConfig = { ...config(), liqFee: 0n };
+        const highFeeConfig = { ...config(), liqFee: (4n * SCALAR_18) / 100n }; // 4%, still < 5% maintenance
+        expect(liquidationPrice(tenXPosition, noFeeConfig, book(true), true)).toBe(9_535_000_000_000n);
+        expect(liquidationPrice(tenXPosition, highFeeConfig, book(true), true)).toBe(9_535_000_000_000n);
     });
 
-    // Over-collateralized long: target = 2.5e10 + 5e11 - 6e11 = -7.5e10 < 0,
+    // The close fee follows the book: the same long on a short-heavy book
+    // closes worsening the skew at the 0.5% dominant rate, $250 + $25.
+    it('prices the close fee at the current book', () => {
+        const shortHeavy = makeMarket({
+            notional: pairOf(NOTIONAL_50K, 2n * NOTIONAL_50K),
+            tokens: pairOf(TOKENS_HALF_UNIT, 2n * TOKENS_HALF_UNIT),
+        });
+        // target = 2.5e10 + 5e11 - 5e10 + 2.75e9 = 4.7775e11; * 20.
+        expect(liquidationPrice(tenXPosition, config(), shortHeavy, true)).toBe(9_555_000_000_000n);
+    });
+
+    // Over-collateralized long: target = 2.5e10 + 5e11 - 6e11 + 1.75e9 < 0,
     // clamped to zero (no reachable liquidation price).
     it('clamps to zero when margin exceeds notional plus maintenance', () => {
         const overCollateralized = makePosition({
@@ -313,10 +339,10 @@ describe('liquidationPrice (inverts the maintenance-margin equity line)', () => 
             notional: NOTIONAL_50K,
             tokens: TOKENS_HALF_UNIT,
         });
-        expect(liquidationPrice(overCollateralized, baselineConfig(), makeMarket(), true)).toBe(0n);
+        expect(liquidationPrice(overCollateralized, config(), book(true), true)).toBe(0n);
     });
 
     it('zero position has no liquidation price', () => {
-        expect(liquidationPrice(makePosition(), baselineConfig(), makeMarket(), true)).toBe(0n);
+        expect(liquidationPrice(makePosition(), config(), makeMarket(), true)).toBe(0n);
     });
 });
