@@ -202,11 +202,36 @@ describe('quoteVaultOrderCreation', () => {
                 amount: -1n,
             }),
             'CONTRACT_GATE',
-            '#732',
+            '#710',
         ],
         [
             'negative minimum output',
             creation({ minOut: -1n }),
+            'CONTRACT_GATE',
+            '#710',
+        ],
+        // vault_order.rs checks a negative amount before status or size.
+        [
+            'negative deposit',
+            creation({ amount: -5n }),
+            'CONTRACT_GATE',
+            '#710',
+        ],
+        [
+            'negative redeem',
+            creation({ action: 'redeem', amount: -5n }),
+            'CONTRACT_GATE',
+            '#710',
+        ],
+        [
+            'negative deposit on a frozen market',
+            creation({ status: Status.Frozen, amount: -5n }),
+            'CONTRACT_GATE',
+            '#710',
+        ],
+        [
+            'negative deposit on a retired market',
+            creation({ status: Status.Retired, amount: -5n }),
             'CONTRACT_GATE',
             '#710',
         ],
@@ -222,7 +247,7 @@ describe('quoteVaultOrderCreation', () => {
         },
     );
 
-    it('reports settlement escrow overflow without approximating', () => {
+    it('rejects a deposit whose escrow sum overflows, as the contract does (#732)', () => {
         expect(
             quoteVaultOrderCreation(
                 creation({
@@ -232,8 +257,17 @@ describe('quoteVaultOrderCreation', () => {
             ),
         ).toMatchObject({
             kind: 'unavailable',
-            code: 'CONTRACT_OVERFLOW',
+            code: 'CONTRACT_GATE',
+            contractCode: 732,
         });
+        expect(
+            quoteVaultOrderCreation(
+                creation({
+                    amount: I128_MAX - 1n,
+                    config: config({ execFee: 1n, minDeposit: 1n }),
+                }),
+            ).kind,
+        ).toBe('exact');
     });
 
     it('represents an impossible later fill ledger time explicitly', () => {

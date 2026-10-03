@@ -1,6 +1,6 @@
 import { Status } from '../../contracts/market/types.js';
 import type { MarketData, MarketConfig } from '../../contracts/market/types.js';
-import { BPS_DENOMINATOR, SCALAR_18, addI128, checkedBps, checkedI128, mulDivFloor, subI128 } from '../../math/fixed.js';
+import { BPS_DENOMINATOR, I128_MAX, SCALAR_18, addI128, checkedBps, checkedI128, mulDivFloor, subI128 } from '../../math/fixed.js';
 import { advanceMarketAccruals, marketSidePnl, sideCapacity, sideReserved } from './math.js';
 import type { PriceData } from './math.js';
 import { decodeLedgerSequence, estimate, exact, unavailable } from './quote.js';
@@ -602,14 +602,16 @@ export function deriveVaultMinimumOutput(
  * mirroring `create_vault_order`'s direct-redeem branch; `input.vault` is
  * required for that case.
  *
- * Returns `unavailable`:
- * - `MISSING_STATE` if the market is Retired, the action is redeem, and
- *   `input.vault` was not supplied.
- * - `CONTRACT_GATE` 710 if `minOut` is negative.
- * - `CONTRACT_GATE` 704 if the market is Frozen.
- * - `CONTRACT_GATE` 702 if a deposit is quoted on a Retired market.
- * - `CONTRACT_GATE` 732 if a deposit falls under `config.minDeposit`, or a
- *   redeem's share `amount` is not positive.
+ * Returns `unavailable` with `CONTRACT_GATE`, checked in the contract's
+ * order:
+ * - 710 if `amount` or `minOut` is negative.
+ * - 704 if the market is Frozen.
+ * - 702 if a deposit is quoted on a Retired market.
+ * - 732 if `amount` is zero, a deposit falls under `config.minDeposit`, or
+ *   a deposit's `amount + execFee` escrow leaves the i128 range.
+ *
+ * Returns `unavailable` with `MISSING_STATE` if the market is Retired, the
+ * action is redeem, and `input.vault` was not supplied.
  */
 export function quoteVaultOrderCreation(
     input: VaultOrderCreationQuoteInput,
@@ -617,19 +619,29 @@ export function quoteVaultOrderCreation(
     try {
         const ledger = decodeLedgerSequence(input.ledger);
         const createdAt = input.now;
+        const amount = input.amount;
         const minOut = input.minOut;
-        if (minOut < 0n) throw new VaultQuoteGateError(710);
+        if (amount < 0n || minOut < 0n) throw new VaultQuoteGateError(710);
 
         const status = input.status;
         if (status === Status.Frozen) throw new VaultQuoteGateError(704);
-        if (status === Status.Retired) {
-            if (input.action === 'deposit') {
-                throw new VaultQuoteGateError(702);
+        if (status === Status.Retired && input.action === 'deposit') {
+            throw new VaultQuoteGateError(702);
+        }
+        // A zero order can never fill; a redeem has no other floor.
+        if (amount === 0n) throw new VaultQuoteGateError(732);
+        const executionFee = input.config.execFee;
+        if (input.action === 'deposit') {
+            if (amount < input.config.minDeposit) {
+                throw new VaultQuoteGateError(732);
             }
-            const shares = input.amount;
-            // Same guard as the pending-redeem branch below: the contract
-            // rejects a non-positive share amount before touching the vault.
-            if (shares <= 0n) throw new VaultQuoteGateError(732);
+            if (amount > I128_MAX - executionFee) {
+                throw new VaultQuoteGateError(732);
+            }
+        }
+
+        if (status === Status.Retired) {
+            const shares = amount;
             if (input.vault === undefined) {
                 return unavailable(
                     'MISSING_STATE',
@@ -653,16 +665,6 @@ export function quoteVaultOrderCreation(
                 },
                 ledger,
             );
-        }
-
-        const amount = input.amount;
-        const executionFee = input.config.execFee;
-        if (input.action === 'deposit') {
-            if (amount <= 0n || amount < input.config.minDeposit) {
-                throw new VaultQuoteGateError(732);
-            }
-        } else if (amount <= 0n) {
-            throw new VaultQuoteGateError(732);
         }
 
         const fillAfter = createdAt === U64_MAX ? null : createdAt + 1n;
