@@ -148,7 +148,7 @@ function snapshot(overrides: Partial<MarketContext> = {}): MarketContext {
             vaultShareDecimals: 7,
         },
         status: Status.Active,
-        retirement: undefined,
+        terminalPrice: undefined,
         config: config(),
         market: marketFor(open),
         position: open,

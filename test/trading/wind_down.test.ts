@@ -6,11 +6,12 @@ import {
     VaultOrderKind,
 } from '../../src/contracts/market/types.js';
 import { Price } from '../../src/trading/price.js';
-import { OrderIntent, previewOrder } from '../../src/trading/order.js';
+import { OrderIntent, marketContext, previewOrder } from '../../src/trading/order.js';
 import { estimateMarket } from '../../src/trading/market_est.js';
 import { estimatePosition } from '../../src/trading/position_est.js';
 import { VaultOrderIntent } from '../../src/trading/vault_order.js';
 import { liquidationState } from '../../src/trading/internal/position.js';
+import { applyOrder } from '../../src/trading/internal/apply.js';
 import {
     USER,
     contractTestConfig,
@@ -170,6 +171,18 @@ describe('a terminal price replaces the caller price', () => {
 
         const live = previewOrder(plain, lonePosition(), order, px(10.5), 10n);
         expect(live.payout).toBeCloseTo(14.6, 9);
+    });
+
+    it('keeps the engine on the flat price even under a what-if price', () => {
+        const order = new OrderIntent(wound, USER, true).closePosition();
+        const context = marketContext(wound, lonePosition(), px(10.5), 10n, USER);
+        const result = applyOrder(context, order, {
+            price: { bid: px(20), ask: px(20), publishTime: 10n },
+        });
+        expect(result.kind).toBe('fills');
+        if (result.kind !== 'fills') return;
+        expect(result.outcome.executionPrice).toBe(terminal);
+        expect(result.outcome.walletPayout).toBe(76_000_000n);
     });
 
     it('publishes the flat price at the ledger time, so a stale quote cannot gate', () => {
