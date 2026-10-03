@@ -1,35 +1,56 @@
 import { i128, u32 } from '../../index.js';
 import { ZenexContractType, BaseZenexEvent } from '../../base_event.js';
-import {
-    Order, VaultOrder, MarketConfig,
-    parseOrder, parseVaultOrder, parseMarketConfig,
-} from './types.js';
+import type { OwnableEvent } from '../ownable/events.js';
+import type { Order, VaultOrder, MarketConfig } from './types.js';
 
-/** Discriminates a decoded {@link MarketEvent}. */
+/** Discriminates a decoded {@link MarketEvent}. The market's ownership events use `OwnableEventType`. */
 export enum MarketEventType {
+    /** `create_order` stored a keeper order. */
     CreateOrder = 'create_order',
+    /** A pending order was cancelled by its owner or by the closure sweep. */
     CancelOrder = 'cancel_order',
+    /** `create_vault_order` stored a vault order. */
     CreateVaultOrder = 'create_vault_order',
+    /** `cancel_vault_order` removed a vault order. */
     CancelVaultOrder = 'cancel_vault_order',
+    /** A keeper filled a deposit order. */
     DepositFill = 'deposit_fill',
+    /** A keeper filled a redeem order, or a retired market redeemed at once. */
     RedeemFill = 'redeem_fill',
+    /** A keeper rejected a vault order whose fill would miss its `minOut`. */
     RejectVaultOrder = 'reject_vault_order',
+    /** `claim_credit` paid out claimable credit. */
     ClaimCredit = 'claim_credit',
+    /** `update_adl_state` recomputed the ADL flags. */
     AdlUpdate = 'adl_update',
+    /** `accrue` advanced the accrual indices. */
     AccrualUpdate = 'accrual_update',
+    /** `set_status` changed the operational status. */
     StatusUpdate = 'status_update',
+    /** `set_config` replaced the configuration. */
     ConfigUpdate = 'config_update',
+    /** `set_terminal_price` set the flat settlement price. */
     TerminalPriceUpdate = 'terminal_price_update',
+    /** A keeper fill opened a position. */
     OpenFill = 'open_fill',
+    /** A keeper fill grew an open position. */
     IncreaseFill = 'increase_fill',
+    /** A keeper or ADL fill closed part of a position. */
     DecreaseFill = 'decrease_fill',
+    /** A keeper or ADL fill closed a whole position. */
     CloseFill = 'close_fill',
+    /** A keeper liquidated a position. */
     Liquidation = 'liquidation',
 }
 
-/** Base shape shared by every decoded market contract event. */
+/**
+ * Base shape shared by every decoded market contract event. Fields are the
+ * wire names in camelCase, and the wire `id` topic is `orderId`.
+ */
 export interface BaseMarketEvent extends BaseZenexEvent {
+    /** Always `ZenexContractType.Market`. */
     contractType: ZenexContractType.Market;
+    /** The event name. */
     eventType: MarketEventType;
 }
 
@@ -39,7 +60,9 @@ export interface BaseMarketEvent extends BaseZenexEvent {
  */
 export interface MarketCreateOrderEvent extends BaseMarketEvent {
     eventType: MarketEventType.CreateOrder;
+    /** The order owner. */
     user: string;
+    /** The order id. */
     orderId: u32;
     /** The stored order row, as returned by `get_order`. */
     order: Order;
@@ -54,7 +77,9 @@ export interface MarketCreateOrderEvent extends BaseMarketEvent {
  */
 export interface MarketCancelOrderEvent extends BaseMarketEvent {
     eventType: MarketEventType.CancelOrder;
+    /** The order owner. */
     user: string;
+    /** The cancelled order's id. */
     orderId: u32;
     /** Escrow returned by this cancel, token-dec. */
     refund: i128;
@@ -67,7 +92,9 @@ export interface MarketCancelOrderEvent extends BaseMarketEvent {
  */
 export interface MarketCreateVaultOrderEvent extends BaseMarketEvent {
     eventType: MarketEventType.CreateVaultOrder;
+    /** The order owner. */
     user: string;
+    /** The vault order id. */
     orderId: u32;
     /** The stored vault-order row, as returned by `get_vault_order`. */
     order: VaultOrder;
@@ -76,20 +103,24 @@ export interface MarketCreateVaultOrderEvent extends BaseMarketEvent {
 /** Pending vault order cancelled by its owner via `cancel_vault_order`. */
 export interface MarketCancelVaultOrderEvent extends BaseMarketEvent {
     eventType: MarketEventType.CancelVaultOrder;
+    /** The order owner. */
     user: string;
+    /** The cancelled vault order's id. */
     orderId: u32;
 }
 
 /** A keeper fill of a deposit order via `execute_vault_order` (the user's receipt). */
 export interface MarketDepositFillEvent extends BaseMarketEvent {
     eventType: MarketEventType.DepositFill;
+    /** The depositor. */
     user: string;
+    /** The filled vault order's id. */
     orderId: u32;
     /** The keeper rewarded for the fill. */
     keeper: string;
     /** Gross assets moved from escrow, token-dec. The vault receives assets - fee. */
     assets: i128;
-    /** Shares minted to the user. */
+    /** Shares minted to the user, share-dec. */
     shares: i128;
     /** Vault fill fee deducted (keeper, treasury, and vault cuts), token-dec. */
     fee: i128;
@@ -97,18 +128,20 @@ export interface MarketDepositFillEvent extends BaseMarketEvent {
     netPnl: i128;
 }
 
-/** A keeper fill of a redeem order via `execute_vault_order` (the user's receipt). */
+/** A keeper fill of a redeem order via `execute_vault_order`, or a retired market's instant redeem (the user's receipt). */
 export interface MarketRedeemFillEvent extends BaseMarketEvent {
     eventType: MarketEventType.RedeemFill;
+    /** The redeemer. */
     user: string;
+    /** The filled vault order's id; `0` for an instant redeem. */
     orderId: u32;
-    /** `'order'` for a keeper fill of a pending order, `'instant'` for a Retired-market direct redeem. */
+    /** Derived, not on the wire: `'instant'` when `orderId` is `0`, else `'order'`. */
     source: 'order' | 'instant';
     /** The keeper rewarded for the fill. On an instant redeem, this is the user. */
     keeper: string;
-    /** Shares burned from escrow. */
+    /** Shares burned from escrow, share-dec. */
     shares: i128;
-    /** Gross assets redeemed, token-dec. The user is paid assets - fee. */
+    /** Gross assets redeemed, token-dec. The user gets assets - fee, parked as claimable credit if the transfer fails. */
     assets: i128;
     /** Vault fill fee deducted (keeper, treasury, and vault cuts), token-dec. */
     fee: i128;
@@ -126,7 +159,9 @@ export interface MarketRedeemFillEvent extends BaseMarketEvent {
  */
 export interface MarketRejectVaultOrderEvent extends BaseMarketEvent {
     eventType: MarketEventType.RejectVaultOrder;
+    /** The order owner. */
     user: string;
+    /** The rejected vault order's id. */
     orderId: u32;
     /** The keeper rewarded with the order's `execFee`. */
     keeper: string;
@@ -139,6 +174,7 @@ export interface MarketRejectVaultOrderEvent extends BaseMarketEvent {
 /** Claimable credit balance paid out via `claim_credit`. */
 export interface MarketClaimCreditEvent extends BaseMarketEvent {
     eventType: MarketEventType.ClaimCredit;
+    /** The claimant. */
     user: string;
     /** Paid claimable balance, token-dec. */
     amount: i128;
@@ -147,9 +183,9 @@ export interface MarketClaimCreditEvent extends BaseMarketEvent {
 /** ADL flags recomputed via `update_adl_state`. */
 export interface MarketAdlUpdateEvent extends BaseMarketEvent {
     eventType: MarketEventType.AdlUpdate;
-    /** Long-side ADL enabled (long increases blocked). */
+    /** Long-side ADL enabled: long increases that add notional are blocked. */
     long: boolean;
-    /** Short-side ADL enabled (short increases blocked). */
+    /** Short-side ADL enabled: short increases that add notional are blocked. */
     short: boolean;
 }
 
@@ -190,8 +226,11 @@ export interface MarketTerminalPriceUpdateEvent extends BaseMarketEvent {
  */
 export interface MarketOpenFillEvent extends BaseMarketEvent {
     eventType: MarketEventType.OpenFill;
+    /** The trader. */
     user: string;
+    /** The filled order's id. */
     orderId: u32;
+    /** The position side. */
     isLong: boolean;
     /** The keeper rewarded for the fill. */
     keeper: string;
@@ -201,7 +240,7 @@ export interface MarketOpenFillEvent extends BaseMarketEvent {
     notional: i128;
     /** Base size bought, base-dec. */
     tokens: i128;
-    /** Margin pulled from the trader, token-dec. */
+    /** Margin posted, escrowed at order creation, token-dec. */
     margin: i128;
     /** Trade fee charged, token-dec. */
     baseFee: i128;
@@ -212,8 +251,11 @@ export interface MarketOpenFillEvent extends BaseMarketEvent {
 /** A keeper fill of an increase order on an already-open position (the user's itemized receipt). */
 export interface MarketIncreaseFillEvent extends BaseMarketEvent {
     eventType: MarketEventType.IncreaseFill;
+    /** The trader. */
     user: string;
+    /** The filled order's id. */
     orderId: u32;
+    /** The position side. */
     isLong: boolean;
     /** The keeper rewarded for the fill. */
     keeper: string;
@@ -223,7 +265,7 @@ export interface MarketIncreaseFillEvent extends BaseMarketEvent {
     notional: i128;
     /** Base size bought, base-dec. */
     tokens: i128;
-    /** Margin pulled from the trader, token-dec. */
+    /** Margin posted, escrowed at order creation, token-dec. */
     margin: i128;
     /** Trade fee charged, token-dec. */
     baseFee: i128;
@@ -236,17 +278,21 @@ export interface MarketIncreaseFillEvent extends BaseMarketEvent {
 }
 
 /**
- * A keeper fill of a partial decrease. The position survives the fill.
+ * A keeper fill of a partial decrease, or a partial ADL close. The position
+ * survives the fill.
  *
  * `notional` and `tokens` are the closed fraction at entry pricing, so
  * `notional * SCALAR_18 / tokens` is the entry price of the closed chunk.
  */
 export interface MarketDecreaseFillEvent extends BaseMarketEvent {
     eventType: MarketEventType.DecreaseFill;
+    /** The trader. */
     user: string;
+    /** The filled order's id; `0` for an ADL close. */
     orderId: u32;
-    /** `'order'` for a keeper fill of a user order, `'adl'` for an ADL close. */
+    /** Derived, not on the wire: `'adl'` when `orderId` is `0`, else `'order'`. */
     source: 'order' | 'adl';
+    /** The position side. */
     isLong: boolean;
     /** The keeper rewarded for the fill. */
     keeper: string;
@@ -268,17 +314,20 @@ export interface MarketDecreaseFillEvent extends BaseMarketEvent {
     funding: i128;
     /** Settled borrowing fee, token-dec. */
     borrowing: i128;
-    /** Amount transferred to the trader, token-dec. The paid withdrawal plus the profit the fees did not consume: fees pay from profit first, the margin absorbs the uncovered rest, and the withdrawal caps at the margin that survives. */
+    /** The paid withdrawal plus the profit the fees did not consume, token-dec. It is paid to the trader, or parked as claimable credit if the transfer fails. Fees pay from profit first, and the withdrawal caps at the margin that survives. */
     returned: i128;
 }
 
-/** A keeper fill that closes the whole position. The stored row zeroes. */
+/** A keeper or ADL fill that closes the whole position. The stored row zeroes. */
 export interface MarketCloseFillEvent extends BaseMarketEvent {
     eventType: MarketEventType.CloseFill;
+    /** The trader. */
     user: string;
+    /** The filled order's id; `0` for an ADL close. */
     orderId: u32;
-    /** `'order'` for a keeper fill of a user order, `'adl'` for an ADL close. */
+    /** Derived, not on the wire: `'adl'` when `orderId` is `0`, else `'order'`. */
     source: 'order' | 'adl';
+    /** The position side. */
     isLong: boolean;
     /** The keeper rewarded for the fill. */
     keeper: string;
@@ -302,14 +351,16 @@ export interface MarketCloseFillEvent extends BaseMarketEvent {
     borrowing: i128;
     /** Fees and losses past the freed margin, absorbed by the vault, token-dec. */
     badDebt: i128;
-    /** Post-fee equity floored at zero, transferred to the trader, token-dec. The transfer adds the swept decrease-order escrows announced by the same-tx `cancel_order` receipts. */
+    /** Post-fee equity floored at zero, token-dec. One transfer pays it with the swept decrease-order escrows of the same-tx `cancel_order` receipts. If that transfer fails, the whole amount parks as claimable credit. */
     returned: i128;
 }
 
 /** A keeper liquidation receipt. The full size is force-closed. */
 export interface MarketLiquidationEvent extends BaseMarketEvent {
     eventType: MarketEventType.Liquidation;
+    /** The trader. */
     user: string;
+    /** The position side. */
     isLong: boolean;
     /** The keeper rewarded for the liquidation. */
     keeper: string;
@@ -334,17 +385,21 @@ export interface MarketLiquidationEvent extends BaseMarketEvent {
     /** Fees and losses past the freed margin, absorbed by the vault, token-dec. */
     badDebt: i128;
     /**
-     * Remainder paid to the trader net of the liquidation fee, token-dec. It
-     * is zero exactly where the fee saturates the whole remainder. The
-     * transfer adds the swept decrease-order escrows announced by the
-     * same-tx `cancel_order` receipts.
+     * Remainder for the trader net of the liquidation fee, token-dec. It is
+     * zero exactly where the fee saturates the whole remainder. One transfer
+     * pays it with the swept decrease-order escrows of the same-tx
+     * `cancel_order` receipts. If that transfer fails, the whole amount parks
+     * as claimable credit.
      */
     returned: i128;
-    /** Liquidation fee charged: min(equity, ceil(config.liqFee * notional)), token-dec. Split between the keeper, treasury, and vault like a trade fee. */
+    /** Liquidation fee charged: `min(max(equity, 0), ceil(config.liqFee * notional))`, token-dec. Split between the keeper, treasury, and vault like a trade fee. */
     liqFee: i128;
 }
 
-/** A decoded market contract event. Narrow on `eventType` for the concrete shape. */
+/**
+ * A decoded market contract event, including the market's ownership events.
+ * Narrow on `eventType` for the concrete shape.
+ */
 export type MarketEvent =
     | MarketCreateOrderEvent
     | MarketCancelOrderEvent
@@ -363,4 +418,5 @@ export type MarketEvent =
     | MarketIncreaseFillEvent
     | MarketDecreaseFillEvent
     | MarketCloseFillEvent
-    | MarketLiquidationEvent;
+    | MarketLiquidationEvent
+    | OwnableEvent<ZenexContractType.Market>;

@@ -15,6 +15,7 @@ describe('package root exports', () => {
     it('exports every contract class', () => {
         expect(SDK.MarketContract).toBeTypeOf('function');
         expect(SDK.MarketRouterContract).toBeTypeOf('function');
+        expect(SDK.FeeForwarderContract).toBeTypeOf('function');
         expect(SDK.FactoryContract).toBeTypeOf('function');
         expect(SDK.VaultContract).toBeTypeOf('function');
         expect(SDK.OracleContract).toBeTypeOf('function');
@@ -35,6 +36,11 @@ describe('package root exports', () => {
         expect(SDK.VaultOrderKind.Deposit).toBe(0);
         expect(SDK.VaultOrderKind.Redeem).toBe(1);
         expect(SDK.FULL_CLOSE).toBe(2n ** 127n - 1n);
+        // constants.rs MAX_ORDERS_PER_SIDE: the 9th pending decrease traps 733.
+        expect(SDK.MAX_ORDERS_PER_SIDE).toBe(8);
+        // constants.rs DELIST_GRACE / DELIST_DEADLINE, seconds after the delist.
+        expect(SDK.DELIST_GRACE).toBe(86_400n);
+        expect(SDK.DELIST_DEADLINE).toBe(604_800n);
         expect(SDK.marketConfigToScVal).toBeTypeOf('function');
         expect(SDK.parseSidePair).toBeTypeOf('function');
         expect(SDK.parseOrder).toBeTypeOf('function');
@@ -108,7 +114,17 @@ describe('package root exports', () => {
         expect(SDK.GovernanceEventType.StatusSet).toBe('status_set');
         expect(SDK.decodeGovernanceEvent).toBeUndefined();
         expect(SDK.FactoryEventType.Deploy).toBe('deploy');
+        expect(SDK.FactoryEventType.InitMetaUpdate).toBe('init_meta_update');
+        expect(SDK.FeeForwarderEventType.FeeCollected).toBe('fee_collected');
+        expect(SDK.OracleEventType.StalenessUpdate).toBe('staleness_update');
+        expect(SDK.TreasuryEventType.RateUpdate).toBe('rate_update');
+        expect(SDK.OwnableEventType.OwnershipTransfer).toBe('ownership_transfer');
+        expect(SDK.VaultEventType.Transfer).toBe('transfer');
+        expect(SDK.VaultEventType.Approve).toBe('approve');
         expect(SDK.ZenexContractType.Market).toBe('market');
+        expect(SDK.ZenexContractType.Oracle).toBe('oracle');
+        expect(SDK.ZenexContractType.Treasury).toBe('treasury');
+        expect(SDK.ZenexContractType.FeeForwarder).toBe('fee_forwarder');
         // The event surface is types-only; consumers own their decode path.
         expect(SDK.decodeEvent).toBeUndefined();
         expect(SDK.normalizeRpc).toBeUndefined();

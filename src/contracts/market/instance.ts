@@ -3,8 +3,13 @@ import { instanceStorage } from '../instance.js';
 import { Status } from './types.js';
 import type { AdlState, MarketConfig } from './types.js';
 import { parseAdlState, parseMarketConfig } from './types.js';
+import { Buffer } from 'buffer';
 
 
+/**
+ * A market's instance storage, as `parseMarketInstance` decodes it.
+ * `MarketData`, positions and orders live in persistent entries outside it.
+ */
 export interface MarketInstanceState {
     /** Global trading parameters, mostly SCALAR_18 rates and ratios; mutable at runtime via the owner-only `set_config`. */
     config: MarketConfig;

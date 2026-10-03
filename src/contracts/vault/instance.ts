@@ -1,6 +1,7 @@
 import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
+/** A strategy vault's instance storage, as `parseVaultInstance` decodes it. */
 export interface VaultInstanceState {
     /** Underlying asset token contract (`AssetAddress`). */
     asset: string;

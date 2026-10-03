@@ -15,7 +15,7 @@ import {
 import { tokenBalanceLedgerKey } from '../src/token.js';
 import { toFixed, toFloat, mulDivFloor, mulDivCeil, SCALAR_18 } from '../src/math/index.js';
 import { simulateAndParse } from '../src/simulate.js';
-import { ZenexError } from '../src/errors.js';
+import { ZenexError, ZenexErrorCode } from '../src/errors.js';
 import { TreasuryContract } from '../src/contracts/treasury/contract.js';
 import { Network } from '../src/index.js';
 
@@ -134,5 +134,82 @@ describe('simulateAndParse', () => {
         await expect(
             simulateAndParse(network, op, TreasuryContract.parsers.getRate),
         ).rejects.toThrow(/Simulation failed/);
+    });
+
+    it('throws a ZenexError that keeps the decoded code and the raw error', async () => {
+        const raw = 'HostError: Error(Contract, #713)\n\nEvent log ...';
+        vi.spyOn(rpc.Server.prototype, 'simulateTransaction').mockResolvedValue(
+            { id: '1', latestLedger: 42, events: [], error: raw } as never,
+        );
+        const error = await simulateAndParse(
+            network,
+            op,
+            TreasuryContract.parsers.getRate,
+        ).catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(ZenexError);
+        expect((error as ZenexError).code).toBe(ZenexErrorCode.InsufficientMargin);
+        expect((error as ZenexError).message).toBe(
+            `Simulation failed: ${new ZenexError(ZenexErrorCode.InsufficientMargin).message}`,
+        );
+        expect((error as ZenexError).cause).toBe(raw);
+    });
+
+    it('names a host error outside any contract', async () => {
+        vi.spyOn(rpc.Server.prototype, 'simulateTransaction').mockResolvedValue(
+            {
+                id: '1',
+                latestLedger: 42,
+                events: [],
+                error: 'HostError: Error(Storage, MissingValue)',
+            } as never,
+        );
+        await expect(
+            simulateAndParse(network, op, TreasuryContract.parsers.getRate),
+        ).rejects.toMatchObject({
+            code: ZenexErrorCode.UnknownError,
+            message: 'Simulation failed: Host error Error(Storage, MissingValue)',
+        });
+    });
+
+    it('passes the auth mode through to the RPC', async () => {
+        const spy = vi
+            .spyOn(rpc.Server.prototype, 'simulateTransaction')
+            .mockResolvedValue({
+                id: '1',
+                latestLedger: 42,
+                events: [],
+                _parsed: true,
+                transactionData: new SorobanDataBuilder(),
+                minResourceFee: '0',
+                result: { auth: [], xdr: '', retval: nativeToScVal(9n, { type: 'i128' }) },
+            } as never);
+        await simulateAndParse(network, op, TreasuryContract.parsers.getRate, {
+            authMode: 'record_allow_nonroot',
+        });
+        expect(spy.mock.calls[0][2]).toBe('record_allow_nonroot');
+        await simulateAndParse(network, op, TreasuryContract.parsers.getRate);
+        expect(spy.mock.calls[1][2]).toBeUndefined();
+    });
+
+    it('reports a needed restore as an archived-entry error', async () => {
+        vi.spyOn(rpc.Server.prototype, 'simulateTransaction').mockResolvedValue({
+            id: '1',
+            latestLedger: 42,
+            events: [],
+            _parsed: true,
+            transactionData: new SorobanDataBuilder(),
+            minResourceFee: '0',
+            result: { auth: [], xdr: '', retval: nativeToScVal(9n, { type: 'i128' }) },
+            restorePreamble: {
+                minResourceFee: '1',
+                transactionData: new SorobanDataBuilder(),
+            },
+        } as never);
+        await expect(
+            simulateAndParse(network, op, TreasuryContract.parsers.getRate),
+        ).rejects.toMatchObject({
+            code: ZenexErrorCode.InvokeHostFunctionEntryArchived,
+            message: 'Simulation failed: restore required',
+        });
     });
 });

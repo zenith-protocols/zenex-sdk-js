@@ -15,6 +15,8 @@ export type {
     VaultDepositEvent,
     VaultWithdrawEvent,
     VaultStrategyWithdrawEvent,
+    VaultTransferEvent,
+    VaultApproveEvent,
     VaultEvent,
 } from './events.js';
 

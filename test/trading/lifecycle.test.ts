@@ -268,6 +268,7 @@ describe('position lifecycle state', () => {
             value: {
                 equity: expected.returned,
                 maintenanceRequired: 50_000_000n,
+                forced: false,
                 liquidatable: false,
             },
         });
@@ -289,6 +290,7 @@ describe('position lifecycle state', () => {
             value: {
                 equity: 0n,
                 maintenanceRequired: 5n,
+                forced: false,
                 liquidatable: true,
             },
         });

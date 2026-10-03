@@ -80,6 +80,7 @@ function loadedMarket(
         marketData(data),
         { long: false, short: false },
         undefined,
+        undefined,
         vaultAssets,
         vaultAssets,
         0,

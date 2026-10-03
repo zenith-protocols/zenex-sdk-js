@@ -6,7 +6,7 @@ import type { Market } from './market.js';
 import { MarketPosition } from './position.js';
 import type { PositionEstimate } from './position_est.js';
 import { estimatePosition } from './position_est.js';
-import { Price, resolvePrice } from './price.js';
+import { Price, marketPrice, quoteTime, resolvePrice } from './price.js';
 import type { PriceInput } from './price.js';
 import type { MarketContext } from './internal/apply.js';
 import {
@@ -21,6 +21,7 @@ import {
     withdrawMarginParams,
     openLimitParams,
     openMarketParams,
+    openStopParams,
     stopLossParams,
     takeProfitParams,
     isDecreaseOrderKind,
@@ -39,15 +40,15 @@ export {
 /**
  * Order factory bound to one ticket's context: a market snapshot, an owner,
  * and a side. Each method builds one complete, signable `OrderParams` in a
- * single call — preview it with `previewOrder` / `position.preview`, sign
- * the identical object.
+ * single call. Preview it with `previewOrder` or `position.preview`, then
+ * sign the identical object.
  *
  * The bound market supplies what a caller would otherwise wire by hand:
  * `expiration` derives from `market.ledger + ttlLedgers`, and a fill bound
  * derives from `slippageBps` against the execution price the kind fills at.
  * The methods also encode the contract's conventions that `OrderKind` alone
  * does not express: the `FULL_CLOSE` sentinel, margin-only orders as
- * `notional: 0n`, and the trigger-direction rules for TP/SL.
+ * `notional: 0n`, and the trigger-direction rules for entries and TP/SL.
  */
 export class OrderIntent {
     constructor(
@@ -73,14 +74,22 @@ export class OrderIntent {
     }
 
     /** @throws {RangeError} when a slippage bound is configured but no price was given to measure it against. */
-    private bound(kind: OrderKind, price?: PriceInput): bigint {
-        if (this.slippageBps === 0n) return 0n;
-        if (price === undefined) {
+    private bound(
+        kind: OrderKind,
+        price?: PriceInput,
+        slippageBps: bigint = this.slippageBps,
+    ): bigint {
+        if (slippageBps === 0n) return 0n;
+        // A wound-down market fills at its terminal price, whatever the
+        // caller passes, so the bound measures against that.
+        const terminal = this.market.terminalPrice;
+        const measured = terminal !== undefined ? Price.from(terminal) : price;
+        if (measured === undefined) {
             throw new RangeError(
                 'slippageBps is set, so a price is required to derive the fill bound',
             );
         }
-        return orderPriceBound(price, this.isLong, kind, this.slippageBps);
+        return orderPriceBound(measured, this.isLong, kind, slippageBps);
     }
 
     /** Open or increase a position at market. */
@@ -100,9 +109,15 @@ export class OrderIntent {
         });
     }
 
-    /** Open once the trigger price is crossed. The bound is measured against the trigger. */
+    /**
+     * Open once the price crosses the trigger FAVORABLY: `LimitIncrease`,
+     * which a long fills at or below the trigger and a short at or above.
+     * The bound is measured against the trigger.
+     */
     openLimit(args: {
+        /** Size to open, token-dec. */
         notional: bigint;
+        /** Margin to escrow with the position, token-dec. */
         margin: bigint;
         /** Crossing price that makes the order eligible, 18-dec. Must be positive. */
         triggerPrice: bigint;
@@ -114,6 +129,33 @@ export class OrderIntent {
             triggerPrice: args.triggerPrice,
             priceBound: this.bound(
                 OrderKind.LimitIncrease,
+                Price.from(args.triggerPrice),
+            ),
+        });
+    }
+
+    /**
+     * Open once the price crosses the trigger ADVERSELY: `StopIncrease`, a
+     * breakout entry that a long fills at or above the trigger and a short
+     * at or below. The bound is measured against the trigger, so a nonzero
+     * `slippageBps` caps how far past it a gap may fill; beyond that the
+     * order rests (#741) until the price comes back.
+     */
+    openStop(args: {
+        /** Size to open, token-dec. */
+        notional: bigint;
+        /** Margin to escrow with the position, token-dec. */
+        margin: bigint;
+        /** Crossing price that makes the order eligible, 18-dec. Must be positive. */
+        triggerPrice: bigint;
+    }): OrderParams {
+        return openStopParams({
+            ...this.base(),
+            notional: args.notional,
+            margin: args.margin,
+            triggerPrice: args.triggerPrice,
+            priceBound: this.bound(
+                OrderKind.StopIncrease,
                 Price.from(args.triggerPrice),
             ),
         });
@@ -163,13 +205,16 @@ export class OrderIntent {
     /**
      * Close (part of) the position once the price crosses the trigger
      * FAVORABLY: `LimitDecrease`, which a long fills at or above the trigger
-     * and a short at or below. The bound is measured against the trigger.
+     * and a short at or below. It fills unbounded unless the call passes
+     * `slippageBps`; the intent's own default does not apply.
      */
     takeProfit(args: {
         /** Crossing price, 18-dec. Must be positive. */
         triggerPrice: bigint;
         /** Size to close on trigger, token-dec. Defaults to `FULL_CLOSE`. */
         notional?: bigint;
+        /** Maximum adverse slippage from the trigger, basis points. Defaults to `0n`, unbounded. */
+        slippageBps?: bigint;
     }): OrderParams {
         return takeProfitParams({
             ...this.base(),
@@ -178,6 +223,7 @@ export class OrderIntent {
             priceBound: this.bound(
                 OrderKind.LimitDecrease,
                 Price.from(args.triggerPrice),
+                args.slippageBps ?? 0n,
             ),
         });
     }
@@ -185,11 +231,18 @@ export class OrderIntent {
     /**
      * Close (part of) the position once the price crosses the trigger
      * ADVERSELY: `StopDecrease`, which a long fills at or below the trigger
-     * and a short at or above.
+     * and a short at or above. A stop exists to exit, so it fills unbounded
+     * unless the call passes `slippageBps`; the intent's own default does not
+     * apply. A nonzero bound keeps a stop that gaps past it from filling
+     * (#741) until the price recovers.
      */
     stopLoss(args: {
+        /** Crossing price, 18-dec. Must be positive. */
         triggerPrice: bigint;
+        /** Size to close on trigger, token-dec. Defaults to `FULL_CLOSE`. */
         notional?: bigint;
+        /** Maximum adverse slippage from the trigger, basis points. Defaults to `0n`, unbounded. */
+        slippageBps?: bigint;
     }): OrderParams {
         return stopLossParams({
             ...this.base(),
@@ -198,6 +251,7 @@ export class OrderIntent {
             priceBound: this.bound(
                 OrderKind.StopDecrease,
                 Price.from(args.triggerPrice),
+                args.slippageBps ?? 0n,
             ),
         });
     }
@@ -250,13 +304,23 @@ export interface OrderEstimate {
     escrowed: number;
     /** Execution price the fill is sized at (entry side for an increase, exit side for a decrease). */
     executionPrice: number;
-    /** What actually pays out on a decrease (the paid withdrawal plus the profit the fees did not consume), token units. */
+    /**
+     * What a decrease pays out (the paid withdrawal plus the profit the fees
+     * did not consume), token units. A full close also refunds the escrowed
+     * fee of each pending decrease order it sweeps, which is not included.
+     */
     payout: number;
     /** The position after the fill. `undefined` unless `outcome === 'fills'`; a full close yields a flat position. */
     position: PositionEstimate | undefined;
 }
 
-/** @internal Assemble the engine's context record from the public objects. */
+/**
+ * @internal Assemble the engine's context record from the public objects.
+ * The ledger time is `now` (default: the wall clock), never before the
+ * market's stored accrual. A bare bigint price is stamped at that time, but
+ * never behind the position's own last mark, since a keeper fills with a
+ * report at least that fresh. A terminal price replaces `price` entirely.
+ */
 export function marketContext(
     market: Market,
     position: MarketPosition,
@@ -264,28 +328,37 @@ export function marketContext(
     now?: bigint,
     user = '',
 ): MarketContext {
+    const ledgerTime = quoteTime(market, now);
+    const stamp =
+        position.pricedAt > ledgerTime ? position.pricedAt : ledgerTime;
     return {
         subject: { user, isLong: position.isLong },
         ledger: market.ledger,
-        ledgerTime: now ?? BigInt(Math.floor(Date.now() / 1000)),
+        ledgerTime,
         status: market.status,
         config: market.config,
         market: market.data,
         position,
-        price: resolvePrice(price),
+        price: marketPrice(market, price, ledgerTime, stamp),
         vault: market.vaultAtomic(),
         treasuryRate: market.treasuryRate,
         adl: market.adl,
-        retirement: market.retirement,
+        terminalPrice: market.terminalPrice,
     };
 }
 
 /**
  * The creation pre-flight: preview applying `order` (the same `OrderParams`
  * you will sign, e.g. from `OrderIntent`) to `position` at `price`. Runs
- * the exact fill engine — what you preview is what the chain would do. This
- * catches what creation does not: the chain accepts orders that can never
- * fill (a decrease that would break the margin gate, #713).
+ * the exact fill engine, so what you preview is what the chain would do.
+ * This catches what creation does not: the chain accepts orders that can
+ * never fill (a decrease that would break the margin gate, #713).
+ *
+ * @param price The fill price. A bare bigint is published at the quote
+ *   time, but never behind the position's last fill. A market's terminal
+ *   price replaces it.
+ * @param now Quote time, unix seconds. Defaults to the wall clock and never
+ *   reads earlier than the market's stored accrual.
  */
 export function previewOrder(
     market: Market,
@@ -314,7 +387,9 @@ export function previewOrder(
         position: undefined,
     };
 
-    const context = marketContext(market, position, price, now, order.user);
+    // One clock for the fill and the resulting position.
+    const at = quoteTime(market, now);
+    const context = marketContext(market, position, price, at, order.user);
     const applied = applyOrder(context, order, {
         executionFee: market.config.execFee,
     });
@@ -359,7 +434,7 @@ export function previewOrder(
             market.withData(outcome.postMarket),
             post,
             price,
-            now,
+            at,
         ),
     };
 }
@@ -382,7 +457,7 @@ export function maxMarginForBalance(
     price: PriceInput,
 ): number {
     if (balance <= market.config.execFee || leverage <= 0) return 0;
-    const priceData = resolvePrice(price);
+    const priceData = marketPrice(market, price, quoteTime(market));
     const entry = isLong ? priceData.ask : priceData.bid;
     if (entry <= 0n) return 0;
     const leverageScaled = BigInt(Math.round(leverage * Number(LEVERAGE_SCALE)));

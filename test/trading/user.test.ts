@@ -11,8 +11,11 @@ import {
     marketClaimableCreditLedgerKey,
     marketDataLedgerKey,
     marketOrderCounterLedgerKey,
+    marketOrderLedgerKey,
     marketPositionLedgerKey,
+    marketVaultOrderLedgerKey,
 } from '../../src/contracts/market/keys.js';
+import { OrderKind, VaultOrderKind } from '../../src/contracts/market/types.js';
 import { tokenBalanceLedgerKey } from '../../src/token.js';
 import type { Network } from '../../src/index.js';
 import type { PriceData } from '../../src/trading/internal/math.js';
@@ -24,7 +27,9 @@ import {
     treasuryInstanceScVal,
     balanceMapScVal,
     ledgerEntryFor,
+    mapEntry,
 } from '../helpers/market_state.js';
+import { linkedEntries } from './market_fixture.js';
 
 const MARKET = StrKey.encodeContract(Buffer.alloc(32, 1));
 const OTHER_MARKET = StrKey.encodeContract(Buffer.alloc(32, 9));
@@ -51,17 +56,32 @@ function mockEntries(entries: unknown[], latestLedger = 4242) {
 
 function userEntries(
     user: string,
-    opts: { long?: boolean; short?: boolean; counter?: number; credit?: bigint } = {},
+    opts: {
+        long?: boolean;
+        short?: boolean;
+        counter?: number;
+        credit?: bigint;
+        /** TTL of every user entry; below the mocked latest ledger means archived. */
+        liveUntil?: number;
+    } = {},
 ) {
     const entries = [];
     if (opts.long !== false) {
         entries.push(
-            ledgerEntryFor(marketPositionLedgerKey(MARKET, user, true), positionScVal()),
+            ledgerEntryFor(
+                marketPositionLedgerKey(MARKET, user, true),
+                positionScVal(),
+                opts.liveUntil,
+            ),
         );
     }
     if (opts.short) {
         entries.push(
-            ledgerEntryFor(marketPositionLedgerKey(MARKET, user, false), positionScVal()),
+            ledgerEntryFor(
+                marketPositionLedgerKey(MARKET, user, false),
+                positionScVal(),
+                opts.liveUntil,
+            ),
         );
     }
     if (opts.counter !== undefined) {
@@ -69,6 +89,7 @@ function userEntries(
             ledgerEntryFor(
                 marketOrderCounterLedgerKey(MARKET, user),
                 nativeToScVal(opts.counter, { type: 'u32' }),
+                opts.liveUntil,
             ),
         );
     }
@@ -77,10 +98,37 @@ function userEntries(
             ledgerEntryFor(
                 marketClaimableCreditLedgerKey(MARKET, user),
                 nativeToScVal(opts.credit, { type: 'i128' }),
+                opts.liveUntil,
             ),
         );
     }
     return entries;
+}
+
+function orderScVal(): xdr.ScVal {
+    const i128 = (v: bigint) => nativeToScVal(v, { type: 'i128' });
+    return xdr.ScVal.scvMap([
+        mapEntry('created_at', nativeToScVal(100n, { type: 'u64' })),
+        mapEntry('exec_fee', i128(7n)),
+        mapEntry('expiration', xdr.ScVal.scvU32(9_000)),
+        mapEntry('is_long', xdr.ScVal.scvBool(true)),
+        mapEntry('kind', xdr.ScVal.scvU32(OrderKind.StopDecrease)),
+        mapEntry('margin', i128(0n)),
+        mapEntry('notional', i128(500n)),
+        mapEntry('price_bound', i128(0n)),
+        mapEntry('trigger_price', i128(90n)),
+    ]);
+}
+
+function vaultOrderScVal(): xdr.ScVal {
+    const i128 = (v: bigint) => nativeToScVal(v, { type: 'i128' });
+    return xdr.ScVal.scvMap([
+        mapEntry('amount', i128(1_000n)),
+        mapEntry('created_at', nativeToScVal(100n, { type: 'u64' })),
+        mapEntry('exec_fee', i128(7n)),
+        mapEntry('kind', xdr.ScVal.scvU32(VaultOrderKind.Deposit)),
+        mapEntry('min_out', i128(0n)),
+    ]);
 }
 
 afterEach(() => {
@@ -122,10 +170,12 @@ describe('MarketUser.load', () => {
         expect(user.long.decreaseOrders).not.toBe(user.short.decreaseOrders);
     });
 
-    it('defaults an absent counter to 0, since the contract allocates from 1', async () => {
+    // storage.rs get_order_counter reads an absent counter as 1, the id the
+    // first order gets.
+    it('reads an absent counter as 1, the id the first order gets', async () => {
         mockEntries(userEntries(USER));
         const user = await MarketUser.load(network, MARKET, USER);
-        expect(user.orderCounter).toBe(0);
+        expect(user.orderCounter).toBe(1);
         expect(user.claimableCredit).toBe(0n);
     });
 
@@ -168,6 +218,7 @@ describe('marketContext', () => {
                 }),
             ),
             ledgerEntryFor(tokenBalanceLedgerKey(TOKEN, VAULT), balanceMapScVal(500n)),
+            ...linkedEntries(),
             ...userEntries(USER),
         ]);
         const market = await Market.load(network, contracts);
@@ -330,5 +381,123 @@ describe('loadTreasuryRate', () => {
         await expect(loadTreasuryRate(network, TREASURY)).rejects.toMatchObject({
             code: 'MISSING_STATE',
         });
+    });
+});
+
+describe('archived user entries', () => {
+    // User rows archive after about 120 idle days, and the RPC still returns
+    // their last value with a lapsed TTL. Protocol 23 restores them on the
+    // user's next transaction, so that value is still the user's state.
+
+    it('decodes archived rows and lists them instead of failing the read', async () => {
+        mockEntries(
+            userEntries(USER, {
+                short: true,
+                counter: 7,
+                credit: 250n,
+                liveUntil: 0,
+            }),
+        );
+        const user = await MarketUser.load(network, MARKET, USER);
+
+        expect(user.long.isOpen()).toBe(true);
+        expect(user.short.notional).toBe(1000n);
+        expect(user.orderCounter).toBe(7);
+        expect(user.claimableCredit).toBe(250n);
+        expect(user.archived).toEqual([
+            'long',
+            'short',
+            'orderCounter',
+            'claimableCredit',
+        ]);
+    });
+
+    it('lists only the archived rows', async () => {
+        mockEntries([
+            ...userEntries(USER, { counter: 7 }),
+            ...userEntries(USER, { long: false, credit: 250n, liveUntil: 4241 }),
+        ]);
+        const user = await MarketUser.load(network, MARKET, USER);
+        expect(user.archived).toEqual(['claimableCredit']);
+        expect(user.claimableCredit).toBe(250n);
+    });
+
+    it('loads a market with an archived user, but fails closed on archived market state', async () => {
+        const market = [
+            ledgerEntryFor(
+                contractInstanceLedgerKey(MARKET),
+                marketInstanceScVal({
+                    vault: VAULT,
+                    token: TOKEN,
+                    oracle: ORACLE,
+                    treasury: TREASURY,
+                }),
+            ),
+            ledgerEntryFor(marketDataLedgerKey(MARKET), marketDataScVal()),
+            ledgerEntryFor(
+                contractInstanceLedgerKey(VAULT),
+                vaultInstanceScVal({ asset: TOKEN, totalSupply: 1_000n }),
+            ),
+            ...linkedEntries(),
+        ];
+        mockEntries([...market, ...userEntries(USER, { counter: 3, liveUntil: 0 })]);
+        const { user } = await Market.loadWithUser(network, contracts, USER);
+        expect(user.archived).toEqual(['long', 'orderCounter']);
+        expect(user.long.isOpen()).toBe(true);
+
+        vi.restoreAllMocks();
+        mockEntries([
+            ledgerEntryFor(
+                contractInstanceLedgerKey(MARKET),
+                marketInstanceScVal({
+                    vault: VAULT,
+                    token: TOKEN,
+                    oracle: ORACLE,
+                    treasury: TREASURY,
+                }),
+                0,
+            ),
+            ...market.slice(1),
+            ...userEntries(USER, { counter: 3 }),
+        ]);
+        await expect(
+            Market.loadWithUser(network, contracts, USER),
+        ).rejects.toMatchObject({ code: 'MISSING_STATE' });
+    });
+});
+
+describe('MarketUser.loadOrders', () => {
+    // Only the counter matters to the probe window.
+    const user = new MarketUser(MARKET, USER, null as never, null as never, 4, 0n);
+
+    it('returns live trade and vault orders, flagging an archived one', async () => {
+        const spy = mockEntries([
+            ledgerEntryFor(marketOrderLedgerKey(MARKET, USER, 1), orderScVal(), 0),
+            ledgerEntryFor(marketVaultOrderLedgerKey(MARKET, USER, 3), vaultOrderScVal()),
+        ]);
+        const orders = await user.loadOrders(network);
+
+        // Ids 1..3: two keys each.
+        expect(spy.mock.calls[0]).toHaveLength(6);
+        expect(orders).toHaveLength(2);
+        expect(orders[0]).toMatchObject({ id: 1, type: 'order', archived: true });
+        expect(orders[0].order).toMatchObject({ kind: OrderKind.StopDecrease, notional: 500n });
+        expect(orders[1]).toMatchObject({ id: 3, type: 'vaultOrder', archived: false });
+    });
+
+    it('rejects a lookback that is not a non-negative safe integer', async () => {
+        const spy = mockEntries([]);
+        for (const lookback of [-1, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+            await expect(user.loadOrders(network, lookback)).rejects.toThrow(RangeError);
+        }
+        expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('makes no request for a zero lookback or an empty counter', async () => {
+        const spy = mockEntries([]);
+        expect(await user.loadOrders(network, 0)).toEqual([]);
+        const fresh = new MarketUser(MARKET, USER, null as never, null as never, 0, 0n);
+        expect(await fresh.loadOrders(network)).toEqual([]);
+        expect(spy).not.toHaveBeenCalled();
     });
 });
