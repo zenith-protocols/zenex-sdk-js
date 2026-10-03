@@ -133,6 +133,19 @@ export type {
     OrderParams,
 } from './contracts/router/index.js';
 
+export {
+    FeeForwarderContract,
+    FeeForwarderEventType,
+} from './contracts/fee_forwarder/index.js';
+
+export type {
+    ForwardTarget,
+    RelayFee,
+    BaseFeeForwarderEvent,
+    FeeForwarderFeeCollectedEvent,
+    FeeForwarderEvent,
+} from './contracts/fee_forwarder/index.js';
+
 // =============================================================================
 // Factory Module
 // =============================================================================

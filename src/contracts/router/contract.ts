@@ -23,11 +23,16 @@ function priceBuffer(price: Buffer | Uint8Array): Buffer {
 /**
  * Operation builder for the Zenex market router (zenex-util-contracts
  * `market-router`): generic batching plus the create-and-fill flows. The
- * router collects no fee. A relayed transaction pays its relayer through the
- * fee forwarder, which wraps the router call.
+ * router collects no fee and needs no authorization. Every method returns a
+ * base64-encoded XDR operation.
  *
- * Every method returns a base64-encoded XDR operation for transaction
- * building.
+ * A batched call that needs a user's authorization carries the user's own
+ * auth entry. With the router as the transaction's root call, that entry is
+ * not rooted at the root invocation. Simulate the batch with
+ * `simulateAndParse(network, op, parser, { authMode: 'record_allow_nonroot' })`,
+ * because `prepareTransaction` simulates in the default mode and fails. To
+ * pay a relayer in a token, relay the call through `FeeForwarderContract`
+ * instead. The user's entries then nest under the forwarder's root.
  */
 export class MarketRouterContract extends Contract {
     /** Parsed spec for the router contract; used to encode and decode invocations. */

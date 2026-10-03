@@ -8,10 +8,11 @@
 // - The core contracts come from `wasm/` in the zenex-contracts checkout. That
 //   is the release build `make release` commits, the same bytes the deployer
 //   uploads.
-// - The market router moved to zenex-util-contracts (zenex-contracts #220).
-//   That repo publishes its release WASMs as attested GitHub release assets
-//   rather than committing them, so the router comes from its build output:
-//   run `make build` there at the released tag.
+// - The market router moved to zenex-util-contracts (zenex-contracts #220),
+//   which also holds the fee forwarder. That repo publishes its release
+//   WASMs as attested GitHub release assets rather than committing them, so
+//   both come from its build output: run `make build` there at the released
+//   tag.
 //
 // A contract's spec is a custom section inside its own WASM, so `Spec.fromWasm`
 // reads it directly: no Stellar CLI, no temp dirs, no TypeScript AST parsing.
@@ -55,6 +56,7 @@ const UTIL_HINT = 'Run `make build` in zenex-util-contracts at the released tag,
 const CONTRACTS = [
     ['market', 'marketSpec', coreWasmDir, CORE_HINT],
     ['market_router', 'marketRouterSpec', utilWasmDir, UTIL_HINT],
+    ['fee_forwarder', 'feeForwarderSpec', utilWasmDir, UTIL_HINT],
     ['factory', 'factorySpec', coreWasmDir, CORE_HINT],
     ['strategy_vault', 'strategyVaultSpec', coreWasmDir, CORE_HINT],
     ['oracle', 'oracleSpec', coreWasmDir, CORE_HINT],

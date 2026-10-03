@@ -15,6 +15,7 @@ describe('package root exports', () => {
     it('exports every contract class', () => {
         expect(SDK.MarketContract).toBeTypeOf('function');
         expect(SDK.MarketRouterContract).toBeTypeOf('function');
+        expect(SDK.FeeForwarderContract).toBeTypeOf('function');
         expect(SDK.FactoryContract).toBeTypeOf('function');
         expect(SDK.VaultContract).toBeTypeOf('function');
         expect(SDK.OracleContract).toBeTypeOf('function');
@@ -108,7 +109,9 @@ describe('package root exports', () => {
         expect(SDK.GovernanceEventType.StatusSet).toBe('status_set');
         expect(SDK.decodeGovernanceEvent).toBeUndefined();
         expect(SDK.FactoryEventType.Deploy).toBe('deploy');
+        expect(SDK.FeeForwarderEventType.FeeCollected).toBe('fee_collected');
         expect(SDK.ZenexContractType.Market).toBe('market');
+        expect(SDK.ZenexContractType.FeeForwarder).toBe('fee_forwarder');
         // The event surface is types-only; consumers own their decode path.
         expect(SDK.decodeEvent).toBeUndefined();
         expect(SDK.normalizeRpc).toBeUndefined();

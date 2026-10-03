@@ -2,6 +2,7 @@ import type { MarketEvent } from './contracts/market/events.js';
 import type { VaultEvent } from './contracts/vault/events.js';
 import type { GovernanceEvent } from './contracts/governance/events.js';
 import type { FactoryEvent } from './contracts/factory/events.js';
+import type { FeeForwarderEvent } from './contracts/fee_forwarder/events.js';
 
 /** Identifies which Zenex contract raised an event, discriminating `ZenexEvent`. */
 export enum ZenexContractType {
@@ -9,6 +10,7 @@ export enum ZenexContractType {
     Market = 'market',
     Factory = 'factory',
     Governance = 'governance',
+    FeeForwarder = 'fee_forwarder',
 }
 
 /** Fields common to every Zenex contract event. */
@@ -28,4 +30,9 @@ export interface BaseZenexEvent {
  * each event's own `eventType`. These are types only. Decode a raw event
  * yourself from the values `getEvents` returns; the SDK ships no decoder.
  */
-export type ZenexEvent = MarketEvent | VaultEvent | GovernanceEvent | FactoryEvent;
+export type ZenexEvent =
+    | MarketEvent
+    | VaultEvent
+    | GovernanceEvent
+    | FactoryEvent
+    | FeeForwarderEvent;
