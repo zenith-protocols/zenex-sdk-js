@@ -110,7 +110,8 @@ check(
 
 // --- 3. A chain-derived price -----------------------------------------------
 // The PriceCache temporary entry holds the newest verified price the market
-// consumed (16-ledger TTL). Fall back to the book's implied entry price.
+// consumed, already spread-reduced. A write extends it to about a day, so it
+// can be stale; fall back to the book's implied entry price when it is gone.
 let price;
 const server = new rpc.Server(NETWORK.rpc, NETWORK.opts);
 try {

@@ -133,17 +133,14 @@ export function quoteTradeFees(
     const after = isLong ? addI128(before, tokenDelta) : subI128(before, tokenDelta);
     const deltaTokens = magnitude(tokenDelta);
 
+    // The improving leg is the notional remainder, as on chain.
     let worseningTokens: bigint;
-    let improvingTokens: bigint;
     if (before !== 0n && after !== 0n && (before < 0n) !== (after < 0n)) {
         worseningTokens = magnitude(after);
-        improvingTokens = magnitude(before);
     } else if (magnitude(after) > magnitude(before)) {
         worseningTokens = deltaTokens;
-        improvingTokens = 0n;
     } else {
         worseningTokens = 0n;
-        improvingTokens = deltaTokens;
     }
 
     const notional = magnitude(notionalDelta);

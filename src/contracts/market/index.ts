@@ -11,6 +11,8 @@ export {
     VaultOrderKind,
     FULL_CLOSE,
     MAX_ORDERS_PER_SIDE,
+    DELIST_GRACE,
+    DELIST_DEADLINE,
     marketConfigToScVal,
     parseSidePair,
     parseOrder,

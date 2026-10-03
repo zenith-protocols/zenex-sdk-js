@@ -38,6 +38,9 @@ describe('package root exports', () => {
         expect(SDK.FULL_CLOSE).toBe(2n ** 127n - 1n);
         // constants.rs MAX_ORDERS_PER_SIDE: the 9th pending decrease traps 733.
         expect(SDK.MAX_ORDERS_PER_SIDE).toBe(8);
+        // constants.rs DELIST_GRACE / DELIST_DEADLINE, seconds after the delist.
+        expect(SDK.DELIST_GRACE).toBe(86_400n);
+        expect(SDK.DELIST_DEADLINE).toBe(604_800n);
         expect(SDK.marketConfigToScVal).toBeTypeOf('function');
         expect(SDK.parseSidePair).toBeTypeOf('function');
         expect(SDK.parseOrder).toBeTypeOf('function');

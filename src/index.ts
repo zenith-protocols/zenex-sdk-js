@@ -5,20 +5,28 @@
 import { rpc } from '@stellar/stellar-sdk';
 
 // Types - Primitives and Network
+/** A Soroban `u32`, carried as a number. */
 export type u32 = number;
+/** A Soroban `i32`, carried as a number. */
 export type i32 = number;
+/** A Soroban `u64` (timestamps, ledger-time seconds), carried as a bigint. */
 export type u64 = bigint;
+/** A Soroban `i64`, carried as a bigint. */
 export type i64 = bigint;
+/** A Soroban `u128`, carried as a bigint. */
 export type u128 = bigint;
+/** A Soroban `i128` (token amounts, prices, fixed-point values), carried as a bigint. */
 export type i128 = bigint;
+/** A Soroban `Option<T>`: the value, or `undefined` for `None`. */
 export type Option<T> = T | undefined;
 
+/** The Stellar network every loader and simulation runs against. */
 export interface Network {
-    /** RPC URL (e.g., 'https://soroban-testnet.stellar.org') */
+    /** Stellar RPC URL: your own node, or a provider's endpoint for the network. */
     rpc: string;
-    /** Network passphrase for tx signing (use Networks from @stellar/stellar-sdk) */
+    /** Network passphrase, for example `Networks.PUBLIC` (from @stellar/stellar-sdk) for mainnet. */
     passphrase: string;
-    /** Optional RPC server options */
+    /** Options for the RPC client, such as `allowHttp` for a node reached over plain HTTP. */
     opts?: rpc.Server.Options;
 }
 
@@ -48,6 +56,8 @@ export {
     VaultOrderKind,
     FULL_CLOSE,
     MAX_ORDERS_PER_SIDE,
+    DELIST_GRACE,
+    DELIST_DEADLINE,
     marketConfigToScVal,
     parseSidePair,
     parseOrder,

@@ -1,9 +1,9 @@
 import { DELIST_DEADLINE, Status } from '../../contracts/market/types.js';
 import type { MarketData, Position, SidePair, MarketConfig } from '../../contracts/market/types.js';
-import { SCALAR_18, addI128, checkedI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
+import { SCALAR_18, addI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
 import { advanceMarketAccruals, exactPositionPnl, marketSidePnl, quoteTradeFees, sideCapacity } from './math.js';
 import type { PriceData } from './math.js';
-import { decodeLedgerSequence, estimate, exact, unavailable } from './quote.js';
+import { estimate, exact, unavailable } from './quote.js';
 import type { PositionQuoteContext, QuoteResult } from './quote.js';
 
 /**
