@@ -103,25 +103,22 @@ export function formatAnnualPercent(perSecondRate: bigint): number {
 
 /**
  * Converts an exact token amount to the largest float whose text never
- * exceeds it, for MAX-button values. Both `String(x)` and
- * `x.toFixed(decimals)` read at most `value`, so either parses back through
- * `parseAtomic` at `decimals` without exceeding the original. Below 1e-6,
- * or at 1e21 and above, `String(x)` prints exponent notation, which
- * `parseAtomic` rejects: use `toFixed`, or render the bigint with
- * `formatAtomic`.
+ * exceeds it, for MAX-button values: `String(x)` parses back through
+ * `parseAtomic` at `decimals` to at most `value`, and an exact amount stays
+ * exact. Below 1e-6, or at 1e21 and above, `String(x)` prints exponent
+ * notation, which `parseAtomic` rejects. Past about 15 significant digits,
+ * `x.toFixed(decimals)` can print the float's binary excess above `value`.
+ * For exact text in either case, format the bigint with `formatAtomic`.
  *
  * @throws {RangeError} if `decimals` is not an integer in `[0, 38]`.
  */
 export function formatTokenFloor(value: bigint, decimals: number): number {
     checkDecimals(decimals);
-    // The nearest float can print as a decimal just above `value` once the
-    // amount needs more digits than a float holds; step down until neither
-    // text form exceeds it.
+    // Once the amount needs more digits than a float holds, the nearest
+    // float can print as a decimal just above `value`; step down until its
+    // text does not.
     let result = Number(formatAtomic(value, decimals));
-    while (
-        textExceeds(String(result), value, decimals) ||
-        textExceeds(result.toFixed(decimals), value, decimals)
-    ) {
+    while (textExceeds(String(result), value, decimals)) {
         result = nextDown(result);
     }
     return result;

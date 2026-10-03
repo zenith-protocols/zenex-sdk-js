@@ -6,12 +6,6 @@ import { formatAtomic, parseAtomic } from '../../src/math/atomic.js';
 // parseAtomic. The parsed amount must never exceed the true balance, or the
 // order it builds escrows more than the wallet holds.
 
-/** `x.toFixed(decimals)`, read back exactly; it too turns exponent from 1e21. */
-function fixedValue(x: number, decimals: number): bigint | undefined {
-    const text = x.toFixed(decimals);
-    return text.includes('e') ? undefined : parseAtomic(text, decimals);
-}
-
 /** The shortest text JavaScript prints, read back exactly. */
 function textValue(x: number, decimals: number): bigint | undefined {
     const text = String(x);
@@ -23,7 +17,6 @@ describe('formatTokenFloor never exceeds the original', () => {
         const supply = 101_250_511_114_930_157n;
         const shown = formatTokenFloor(supply, 13);
         expect(textValue(shown, 13)! <= supply).toBe(true);
-        expect(fixedValue(shown, 13)! <= supply).toBe(true);
         // The plain double floor printed 10125.051111493016, three units over.
         expect(shown).toBe(10125.051111493014);
     });
@@ -43,8 +36,6 @@ describe('formatTokenFloor never exceeds the original', () => {
             for (let i = 0; i < digits; i++) value = value * 10n + (next() % 10n);
             const shown = formatTokenFloor(value, decimals);
             const label = `${value} at ${decimals}`;
-            const fixed = fixedValue(shown, decimals);
-            if (fixed !== undefined) expect(fixed <= value, label).toBe(true);
             const parsed = textValue(shown, decimals);
             if (parsed !== undefined) expect(parsed <= value, label).toBe(true);
             // And it stays the nearest float a few steps below the value.
@@ -57,6 +48,12 @@ describe('formatTokenFloor never exceeds the original', () => {
         expect(formatTokenFloor(123_456_789n, 7)).toBe(12.3456789);
         expect(formatTokenFloor(0n, 7)).toBe(0);
         expect(formatTokenFloor(-123_456_789n, 7)).toBe(-12.3456789);
+        // An 18-decimal balance of exactly 0.1 or 1.1 stays round, though the
+        // float's binary value sits a few wei above it.
+        expect(formatTokenFloor(10n ** 17n, 18)).toBe(0.1);
+        expect(formatTokenFloor(11n * 10n ** 17n, 18)).toBe(1.1);
+        expect(formatTokenFloor(10n ** 18n, 18)).toBe(1);
+        expect(formatTokenFloor(1_000n * 10n ** 13n, 13)).toBe(1000);
     });
 
     it('returns a tiny value exactly, though String() prints it in exponent form', () => {
