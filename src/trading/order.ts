@@ -21,6 +21,7 @@ import {
     withdrawMarginParams,
     openLimitParams,
     openMarketParams,
+    openStopParams,
     stopLossParams,
     takeProfitParams,
     isDecreaseOrderKind,
@@ -39,15 +40,15 @@ export {
 /**
  * Order factory bound to one ticket's context: a market snapshot, an owner,
  * and a side. Each method builds one complete, signable `OrderParams` in a
- * single call — preview it with `previewOrder` / `position.preview`, sign
- * the identical object.
+ * single call. Preview it with `previewOrder` or `position.preview`, then
+ * sign the identical object.
  *
  * The bound market supplies what a caller would otherwise wire by hand:
  * `expiration` derives from `market.ledger + ttlLedgers`, and a fill bound
  * derives from `slippageBps` against the execution price the kind fills at.
  * The methods also encode the contract's conventions that `OrderKind` alone
  * does not express: the `FULL_CLOSE` sentinel, margin-only orders as
- * `notional: 0n`, and the trigger-direction rules for TP/SL.
+ * `notional: 0n`, and the trigger-direction rules for entries and TP/SL.
  */
 export class OrderIntent {
     constructor(
@@ -73,8 +74,12 @@ export class OrderIntent {
     }
 
     /** @throws {RangeError} when a slippage bound is configured but no price was given to measure it against. */
-    private bound(kind: OrderKind, price?: PriceInput): bigint {
-        if (this.slippageBps === 0n) return 0n;
+    private bound(
+        kind: OrderKind,
+        price?: PriceInput,
+        slippageBps: bigint = this.slippageBps,
+    ): bigint {
+        if (slippageBps === 0n) return 0n;
         // A wound-down market fills at its terminal price, whatever the
         // caller passes, so the bound measures against that.
         const terminal = this.market.terminalPrice;
@@ -84,7 +89,7 @@ export class OrderIntent {
                 'slippageBps is set, so a price is required to derive the fill bound',
             );
         }
-        return orderPriceBound(measured, this.isLong, kind, this.slippageBps);
+        return orderPriceBound(measured, this.isLong, kind, slippageBps);
     }
 
     /** Open or increase a position at market. */
@@ -104,9 +109,15 @@ export class OrderIntent {
         });
     }
 
-    /** Open once the trigger price is crossed. The bound is measured against the trigger. */
+    /**
+     * Open once the price crosses the trigger FAVORABLY: `LimitIncrease`,
+     * which a long fills at or below the trigger and a short at or above.
+     * The bound is measured against the trigger.
+     */
     openLimit(args: {
+        /** Size to open, token-dec. */
         notional: bigint;
+        /** Margin to escrow with the position, token-dec. */
         margin: bigint;
         /** Crossing price that makes the order eligible, 18-dec. Must be positive. */
         triggerPrice: bigint;
@@ -118,6 +129,33 @@ export class OrderIntent {
             triggerPrice: args.triggerPrice,
             priceBound: this.bound(
                 OrderKind.LimitIncrease,
+                Price.from(args.triggerPrice),
+            ),
+        });
+    }
+
+    /**
+     * Open once the price crosses the trigger ADVERSELY: `StopIncrease`, a
+     * breakout entry that a long fills at or above the trigger and a short
+     * at or below. The bound is measured against the trigger, so a nonzero
+     * `slippageBps` caps how far past it a gap may fill; beyond that the
+     * order rests (#741) until the price comes back.
+     */
+    openStop(args: {
+        /** Size to open, token-dec. */
+        notional: bigint;
+        /** Margin to escrow with the position, token-dec. */
+        margin: bigint;
+        /** Crossing price that makes the order eligible, 18-dec. Must be positive. */
+        triggerPrice: bigint;
+    }): OrderParams {
+        return openStopParams({
+            ...this.base(),
+            notional: args.notional,
+            margin: args.margin,
+            triggerPrice: args.triggerPrice,
+            priceBound: this.bound(
+                OrderKind.StopIncrease,
                 Price.from(args.triggerPrice),
             ),
         });
@@ -167,13 +205,16 @@ export class OrderIntent {
     /**
      * Close (part of) the position once the price crosses the trigger
      * FAVORABLY: `LimitDecrease`, which a long fills at or above the trigger
-     * and a short at or below. The bound is measured against the trigger.
+     * and a short at or below. It fills unbounded unless the call passes
+     * `slippageBps`; the intent's own default does not apply.
      */
     takeProfit(args: {
         /** Crossing price, 18-dec. Must be positive. */
         triggerPrice: bigint;
         /** Size to close on trigger, token-dec. Defaults to `FULL_CLOSE`. */
         notional?: bigint;
+        /** Maximum adverse slippage from the trigger, basis points. Defaults to `0n`, unbounded. */
+        slippageBps?: bigint;
     }): OrderParams {
         return takeProfitParams({
             ...this.base(),
@@ -182,6 +223,7 @@ export class OrderIntent {
             priceBound: this.bound(
                 OrderKind.LimitDecrease,
                 Price.from(args.triggerPrice),
+                args.slippageBps ?? 0n,
             ),
         });
     }
@@ -189,11 +231,18 @@ export class OrderIntent {
     /**
      * Close (part of) the position once the price crosses the trigger
      * ADVERSELY: `StopDecrease`, which a long fills at or below the trigger
-     * and a short at or above.
+     * and a short at or above. A stop exists to exit, so it fills unbounded
+     * unless the call passes `slippageBps`; the intent's own default does not
+     * apply. A nonzero bound keeps a stop that gaps past it from filling
+     * (#741) until the price recovers.
      */
     stopLoss(args: {
+        /** Crossing price, 18-dec. Must be positive. */
         triggerPrice: bigint;
+        /** Size to close on trigger, token-dec. Defaults to `FULL_CLOSE`. */
         notional?: bigint;
+        /** Maximum adverse slippage from the trigger, basis points. Defaults to `0n`, unbounded. */
+        slippageBps?: bigint;
     }): OrderParams {
         return stopLossParams({
             ...this.base(),
@@ -202,6 +251,7 @@ export class OrderIntent {
             priceBound: this.bound(
                 OrderKind.StopDecrease,
                 Price.from(args.triggerPrice),
+                args.slippageBps ?? 0n,
             ),
         });
     }

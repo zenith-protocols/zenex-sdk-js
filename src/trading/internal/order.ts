@@ -138,6 +138,9 @@ export interface OpenLimitArgs extends OrderIntentBase {
     priceBound: i128;
 }
 
+/** Open a position once the price crosses the trigger adversely; same fields as `OpenLimitArgs`. */
+export type OpenStopArgs = OpenLimitArgs;
+
 /** Fully close a position at market. */
 export interface ClosePositionArgs extends OrderIntentBase {
     /** Fill slippage limit, price_scalar. 0 = unbounded. */
@@ -242,6 +245,25 @@ export function openLimitParams(args: OpenLimitArgs): OrderParams {
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.LimitIncrease,
+        notional: args.notional,
+        margin: args.margin,
+        triggerPrice: args.triggerPrice,
+        priceBound: args.priceBound,
+        expiration: args.expiration,
+    };
+}
+
+/**
+ * Open a position once the trigger price is crossed adversely
+ * (`StopIncrease`): a breakout entry, where a long buys at-or-above the
+ * trigger and a short sells at-or-below it.
+ */
+export function openStopParams(args: OpenStopArgs): OrderParams {
+    return {
+        market: args.market,
+        user: args.user,
+        isLong: args.isLong,
+        kind: OrderKind.StopIncrease,
         notional: args.notional,
         margin: args.margin,
         triggerPrice: args.triggerPrice,
