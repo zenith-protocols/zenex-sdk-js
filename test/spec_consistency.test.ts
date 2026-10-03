@@ -122,11 +122,21 @@ describe('contract spec consistency', () => {
         const declared = new Set(
             entry.contract.spec.funcs().map((func) => func.name().toString()),
         );
-        const invoked = [
-            ...source.matchAll(/this\.call\(\s*'([a-z0-9_]+)'/g),
-            ...source.matchAll(/func: '([a-z0-9_]+)'/g),
-        ].map((match) => match[1]);
+        const named = [...source.matchAll(/this\.call\(\s*(['"`])([a-z0-9_]+)\1/g)];
+        const forwarded = source.match(/this\.call\(\s*call\.func\b/g) ?? [];
+        const built = [...source.matchAll(/\bfunc:\s*(['"`])([a-z0-9_]+)\1/g)];
 
+        // Every invocation must be readable here: a literal name in any quote
+        // style, or a `call.func` forwarded from a builder's literal `func:`.
+        // An invocation named any other way would escape the check below.
+        expect(named.length + forwarded.length).toBe(
+            source.match(/this\.call\(/g)?.length ?? 0,
+        );
+        expect(built.length).toBe(
+            source.match(/\bfunc:(?!\s*string\b)/g)?.length ?? 0,
+        );
+
+        const invoked = [...named, ...built].map((match) => match[2]);
         expect(invoked.length).toBeGreaterThan(0);
         expect(invoked.filter((name) => !declared.has(name))).toEqual([]);
     });
