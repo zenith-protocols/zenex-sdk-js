@@ -113,4 +113,21 @@ describe('contract spec consistency', () => {
         expect(source).toContain(`static spec: contract.Spec = new contract.Spec(${entry.exportName});`);
         expect(source).not.toMatch(/new contract\.Spec\(\[\s*['"]/);
     });
+
+    // A binding that names an entry point the deployed contract lacks builds
+    // operations that fail on chain. The router once kept three `*_with_fee`
+    // builders after the deployed router dropped them.
+    it.each(contracts)('$source invokes only entry points its spec declares', (entry) => {
+        const source = readFileSync(`${repoRoot}/${entry.source}`, 'utf8');
+        const declared = new Set(
+            entry.contract.spec.funcs().map((func) => func.name().toString()),
+        );
+        const invoked = [
+            ...source.matchAll(/this\.call\(\s*'([a-z0-9_]+)'/g),
+            ...source.matchAll(/func: '([a-z0-9_]+)'/g),
+        ].map((match) => match[1]);
+
+        expect(invoked.length).toBeGreaterThan(0);
+        expect(invoked.filter((name) => !declared.has(name))).toEqual([]);
+    });
 });

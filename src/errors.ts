@@ -228,8 +228,8 @@ export enum ZenexErrorCode {
 
     // Fee Abstraction Errors (5000-5006)
     // Emitted by OpenZeppelin's stellar-fee-abstraction library inside the
-    // market router (the relay's fee-bump gateway); mirrored so relay
-    // simulations decode end-to-end.
+    // fee forwarder (zenex-util-contracts `fee-forwarder`), which wraps a
+    // relayed router call; mirrored so relay simulations decode end-to-end.
     FeeTokenNotAllowed = 5000,
     FeeTokenAlreadyAllowed = 5001,
     TokenCountOverflow = 5002,

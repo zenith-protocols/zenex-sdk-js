@@ -131,8 +131,6 @@ export type {
     Call,
     CallOutcome,
     OrderParams,
-    CreateAndFillWithFeeArgs,
-    MulticallWithFeeArgs,
 } from './contracts/router/index.js';
 
 // =============================================================================

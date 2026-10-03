@@ -177,6 +177,10 @@ schemas.
 
 ## Build verification
 
+`specs:check` compares the committed contract specs with the release WASMs:
+`../zenex-contracts/wasm/` for the core contracts, and the market router built
+in `../zenex-util-contracts` (run `make build` there at the released tag).
+
 ```bash
 npm run specs:check
 npm run architecture:check
