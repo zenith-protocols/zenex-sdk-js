@@ -1,6 +1,6 @@
 // Contract binding + its constructor arguments. Named-order helpers live in
-// `src/trading/order/intents.ts`, not here -- this file is the entrypoint
-// binding surface and nothing else.
+// `src/trading/order.ts`, not here. This file is the entrypoint binding
+// surface and nothing else.
 export { MarketContract } from './contract.js';
 export type { DeployArgs } from './contract.js';
 
@@ -38,7 +38,7 @@ export { parseMarketInstance } from './instance.js';
 export type { MarketInstanceState } from './instance.js';
 
 // State loaders live in the trading tier (`src/trading/`): `Market.load`,
-// `MarketUser.load`, `loadTreasuryRate` — plus `loadTokenBalance` in
+// `MarketUser.load` and `loadTreasuryRate`. `loadTokenBalance` lives in
 // `src/token.ts`.
 
 export type {

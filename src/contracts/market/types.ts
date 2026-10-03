@@ -96,7 +96,7 @@ export interface Position {
     margin: i128;
     /** Size in quote, token-dec. */
     notional: i128;
-    /** Size in base, base-dec. Not SCALAR_18: entry sizing divides a token-dec notional by a price_scalar price, flooring for a long and ceiling for a short. Entry price is `notional / tokens`. */
+    /** Size in base, base-dec: each fill adds `notional * SCALAR_18 / price`, floored for a long and ceiled for a short. The implied entry price is `notional * SCALAR_18 / tokens` (price_scalar). */
     tokens: i128;
     /** Funding index snapshot at last change (SCALAR_18). */
     fundingIdx: i128;
@@ -144,9 +144,9 @@ export interface MarketData {
 
 /** ADL state (instance storage singleton): the per-side enable flags driving the open-stop. */
 export interface AdlState {
-    /** Long-side ADL enabled: long increases blocked. */
+    /** Long-side ADL enabled: long increases that add notional are blocked. */
     long: boolean;
-    /** Short-side ADL enabled: short increases blocked. */
+    /** Short-side ADL enabled: short increases that add notional are blocked. */
     short: boolean;
 }
 
@@ -155,7 +155,7 @@ export interface AdlState {
  * owner-only `set_config`. Rates are per second.
  */
 export interface MarketConfig {
-    /** Keeper share of trade and vault fill fees, up to 50% (SCALAR_18). */
+    /** Keeper share of trade, liquidation and vault fill fees, up to 50% (SCALAR_18). */
     keeperRate: i128;
     /** Minimum position notional, token-dec; > 0. */
     minPositionNotional: i128;
@@ -175,15 +175,21 @@ export interface MarketConfig {
     feeNonDom: i128;
     /** Impact-fee divisor, token-dec. Fee = `notional * min(notional / impactScalar, MAX_IMPACT_RATE)` on every fill; floored so a minPositionNotional chunk pays at most 0.1%. */
     impactScalar: i128;
-    /** Opens blocked above this, in (0, 1000%]; also each side's borrow-reserve denominator (SCALAR_18; util = open interest / vault). */
+    /**
+     * Cap on a side's utilization after a size-growing increase, in
+     * (0, 1000%] (SCALAR_18). Utilization is the side's reserve over half
+     * the vault: a long reserves its base size marked at the ask, a short
+     * its notional. A side's capacity, `maxUtilOpen * vault / 2`, is also
+     * its borrow-reserve denominator.
+     */
     maxUtilOpen: i128;
-    /** Withdrawals blocked above this; retains min vault liquidity, in [maxUtilOpen, 1000%] (SCALAR_18). */
+    /** Cap on both sides' utilization after a redeem fill, on the `maxUtilOpen` measure; in [maxUtilOpen, 1000%] (SCALAR_18). */
     maxUtilWithdraw: i128;
     /** Initial margin; max leverage = 1/initMargin. In [0.1%, 50%] and > maintenanceMargin (SCALAR_18). */
     initMargin: i128;
     /** Hard liquidation floor; > liqFee and < initMargin (SCALAR_18). */
     maintenanceMargin: i128;
-    /** Liquidation fee rate, charged on every liquidation as min(equity, ceil(liqFee * notional)); up to 25% and < maintenanceMargin (SCALAR_18). */
+    /** Liquidation fee rate, charged on every liquidation as `min(max(equity, 0), ceil(liqFee * notional))`; up to 25% and < maintenanceMargin (SCALAR_18). */
     liqFee: i128;
     /** Decrease lock on newly added notional, seconds; in [15, 86400] (1 day max). */
     notionalLock: u64;
@@ -219,7 +225,7 @@ export interface MarketConfig {
     depositFee: i128;
     /** Redeem fill fee rate on moved assets (SCALAR_18); up to 1%. */
     redeemFee: i128;
-    /** Minimum assets per vault order fill, token-dec; > 0 and <= maxVaultBalance / 100. */
+    /** Minimum assets per deposit order at creation, token-dec; > 0 and <= maxVaultBalance / 100. A redeem has no floor. */
     minDeposit: i128;
     /** Vault balance ceiling enforced on deposit fills, token-dec; > 0. */
     maxVaultBalance: i128;

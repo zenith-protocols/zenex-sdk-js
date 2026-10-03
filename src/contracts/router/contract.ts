@@ -75,11 +75,12 @@ export class MarketRouterContract extends Contract {
     /**
      * Run `calls` in order, isolating each call's failure. A failing call
      * rolls back its own effects and the batch continues with the next call.
+     * A budget or footprint limit still aborts the whole transaction.
      *
      * @returns base64 XDR operation. Parse the result with
      * `parsers.multicallTry` to get one [`CallOutcome`] per call, in call
      * order: `ok: true` with the call's return value, or `ok: false` with the
-     * contract error code.
+     * contract error code. A non-contract failure reads `UNTYPED_FAILURE`.
      */
     multicallTry(calls: Call[]): string {
         return this.call(
@@ -131,14 +132,16 @@ export class MarketRouterContract extends Contract {
      *
      * The batch is strict; the fill is isolated. A failed fill leaves every
      * created order resting for a later keeper fill, and its error code
-     * comes back in the appended outcome instead of trapping. Arguments
-     * match `createAndFill`.
+     * comes back in the appended outcome instead of trapping. A budget or
+     * footprint limit still aborts the whole transaction. Arguments match
+     * `createAndFill`.
      *
      * @returns base64 XDR operation. Parse the result with
      * `parsers.createAndTryFill` to get the `N` call results with the
      * isolated fill outcome appended last; `results[0]` is the created order
      * id. The last [`CallOutcome`] is `ok: true` with the payout when the
-     * fill lands, or `ok: false` when the order rests.
+     * fill lands, or `ok: false` when the order rests. A non-contract fill
+     * failure reads `UNTYPED_FAILURE`.
      *
      * # Errors
      * - Traps if `calls` is empty or `calls[0]` does not return a `u32`
