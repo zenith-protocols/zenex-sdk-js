@@ -25,7 +25,11 @@ export class Price {
         public publishTime: bigint,
     ) {}
 
-    /** A zero-spread price: `bid = ask = price`. `publishTime` defaults to the wall clock. */
+    /**
+     * A zero-spread price: `bid = ask = price`. `publishTime` defaults to the
+     * wall clock. A bare bigint `PriceInput` is stamped by each preview at
+     * its own quote time instead.
+     */
     static from(price: bigint, publishTime?: bigint): Price {
         return new Price(price, price, publishTime ?? wallClock());
     }
