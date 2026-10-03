@@ -38,6 +38,7 @@ export {
     OrderKind,
     VaultOrderKind,
     FULL_CLOSE,
+    MAX_ORDERS_PER_SIDE,
     marketConfigToScVal,
     parseSidePair,
     parseOrder,

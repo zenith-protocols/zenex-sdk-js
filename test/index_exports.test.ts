@@ -36,6 +36,8 @@ describe('package root exports', () => {
         expect(SDK.VaultOrderKind.Deposit).toBe(0);
         expect(SDK.VaultOrderKind.Redeem).toBe(1);
         expect(SDK.FULL_CLOSE).toBe(2n ** 127n - 1n);
+        // constants.rs MAX_ORDERS_PER_SIDE: the 9th pending decrease traps 733.
+        expect(SDK.MAX_ORDERS_PER_SIDE).toBe(8);
         expect(SDK.marketConfigToScVal).toBeTypeOf('function');
         expect(SDK.parseSidePair).toBeTypeOf('function');
         expect(SDK.parseOrder).toBeTypeOf('function');
