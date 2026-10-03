@@ -1,6 +1,7 @@
 import { governanceSpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { u32, u64 } from '../../index.js';
+import { Buffer } from 'buffer';
 
 /** A queued admin call. Returned by `getQueued`. */
 export interface QueuedCall {

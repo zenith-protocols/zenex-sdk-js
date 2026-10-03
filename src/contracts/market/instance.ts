@@ -3,6 +3,7 @@ import { instanceStorage } from '../instance.js';
 import { Status } from './types.js';
 import type { AdlState, MarketConfig } from './types.js';
 import { parseAdlState, parseMarketConfig } from './types.js';
+import { Buffer } from 'buffer';
 
 
 /**

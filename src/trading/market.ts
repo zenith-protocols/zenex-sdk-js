@@ -38,6 +38,7 @@ import {
 } from './internal/vault.js';
 import type { VaultAtomicState } from './internal/vault.js';
 import type { PriceData } from './internal/math.js';
+import { Buffer } from 'buffer';
 
 /**
  * The contracts a market is read from. The load checks every address given

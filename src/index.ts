@@ -298,12 +298,3 @@ export { simulateAndParse } from './simulate.js';
 
 export * from './math/index.js';
 export * from './trading/index.js';
-
-
-// =============================================================================
-// Browser compatibility
-// =============================================================================
-if (typeof window !== 'undefined') {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).Buffer = (window as any).Buffer || Buffer;
-}

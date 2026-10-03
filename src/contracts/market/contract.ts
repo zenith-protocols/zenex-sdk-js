@@ -8,6 +8,7 @@ import {
     marketConfigToScVal,
     parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState, parseMarketConfig,
 } from './types.js';
+import { Buffer } from 'buffer';
 
 /** Deploy-time constructor arguments (`__constructor`). */
 export interface DeployArgs {

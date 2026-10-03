@@ -1,6 +1,7 @@
 import { oracleSpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { u32, u64, i128 } from '../../index.js';
+import { Buffer } from 'buffer';
 
 /**
  * Verified price returned by the oracle. Bid and ask share one scale:

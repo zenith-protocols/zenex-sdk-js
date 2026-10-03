@@ -64,6 +64,7 @@
     "files": [
         "/dist"
     ],
+    "sideEffects": false,
     "publishConfig": {
         "access": "public",
         "tag": "latest"
@@ -77,6 +78,9 @@
         "url": "https://github.com/zenith-protocols/zenex-sdk-js/issues"
     },
     "homepage": "https://github.com/zenith-protocols/zenex-sdk-js#readme",
+    "dependencies": {
+        "buffer": "^6.0.3"
+    },
     "devDependencies": {
         "@stellar/stellar-sdk": "^16.2.0",
         "@types/node": "^25.0.9",

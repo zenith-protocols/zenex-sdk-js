@@ -14,6 +14,7 @@ import {
     createOrderCall,
     parseCallOutcome,
 } from './types.js';
+import { Buffer } from 'buffer';
 
 /** Coerce a `Buffer | Uint8Array` price update into a `Buffer`. */
 function priceBuffer(price: Buffer | Uint8Array): Buffer {

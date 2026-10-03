@@ -3,6 +3,7 @@ import { Address, Contract, contract, nativeToScVal, xdr } from '@stellar/stella
 import type { i128, u32 } from '../../index.js';
 import { MarketRouterContract } from '../router/contract.js';
 import { Call, CallOutcome, callToScVal, parseCallOutcome } from '../router/types.js';
+import { Buffer } from 'buffer';
 
 /**
  * The fee terms of one relayed router call. The user signs every field
