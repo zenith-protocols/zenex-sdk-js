@@ -36,17 +36,12 @@ describe('MarketRouterContract extras', () => {
             xdr.ScVal.scvU32(3), nativeToScVal(9n, { type: 'i128' }),
         ]).toXDR('base64');
         expect(p.createAndFill(fillResult)).toEqual([3, 9n]);
-        expect(p.createAndFillWithFee(fillResult)).toEqual([3, 9n]);
 
         // Try variant returns Vec<Val> split into CallOutcome[]; last outcome is the fill.
         const attempt = xdr.ScVal.scvVec([
             xdr.ScVal.scvU32(3), nativeToScVal(5n, { type: 'i128' }),
         ]).toXDR('base64');
         expect(p.createAndTryFill(attempt)).toEqual([
-            { ok: true, value: 3, error: 0 },
-            { ok: true, value: 5n, error: 0 },
-        ]);
-        expect(p.createAndTryFillWithFee(attempt)).toEqual([
             { ok: true, value: 3, error: 0 },
             { ok: true, value: 5n, error: 0 },
         ]);

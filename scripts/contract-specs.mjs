@@ -1,23 +1,28 @@
-// Regenerate the committed contract specs from the contracts build output.
+// Regenerate the committed contract specs from the release contract WASMs.
 //
 //   node scripts/contract-specs.mjs generate   # write
 //   node scripts/contract-specs.mjs check      # fail on drift
 //
-// Specs are read straight out of `target/wasm32v1-none/release/*.wasm` in the
-// contracts worktree — the freshest local build, so there is no artifact
-// bundle to fall out of date and no rebuild-then-republish step between
-// changing a contract and picking the change up here. Run `make build` in the
-// contracts worktree first; that is the only prerequisite.
+// The SDK binds what is deployed, so the specs come from release artifacts:
+//
+// - The core contracts come from `wasm/` in the zenex-contracts checkout. That
+//   is the release build `make release` commits, the same bytes the deployer
+//   uploads.
+// - The market router moved to zenex-util-contracts (zenex-contracts #220).
+//   That repo publishes its release WASMs as attested GitHub release assets
+//   rather than committing them, so the router comes from its build output:
+//   run `make build` there at the released tag.
 //
 // A contract's spec is a custom section inside its own WASM, so `Spec.fromWasm`
 // reads it directly: no Stellar CLI, no temp dirs, no TypeScript AST parsing.
 //
-// This script does not verify provenance. It does not pin a source commit, a
-// toolchain, or per-WASM hashes, and it reads whatever was last built rather
-// than an approved bundle — including uncommitted contract edits, which is the
-// point. Deployment provenance is enforced where it belongs: zenex-ops
-// re-verifies every artifact hash against zenex-contracts/artifacts/v2/ on the
-// deploy path. Nothing here feeds that path.
+// ZENEX_CONTRACTS_ROOT and ZENEX_UTIL_CONTRACTS_ROOT move the two checkouts.
+// ZENEX_CONTRACTS_WASM_DIR points the core contracts at another directory,
+// such as `target/wasm32v1-none/release`, to bind an unreleased build.
+//
+// This script does not verify provenance. It pins no source commit and no
+// per-WASM hashes. Deployment provenance belongs to the zenex-ops deployer
+// and verifier, which check every artifact hash on the deploy path.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
@@ -25,46 +30,52 @@ import { fileURLToPath } from 'node:url';
 import { contract } from '@stellar/stellar-sdk';
 
 const sdkRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-// The contracts worktree. A bare absolute path here silently rotted once
-// already: the checkout moved and every run died on ENOENT. The sibling
-// default tracks the standard workspace layout; ZENEX_CONTRACTS_ROOT covers
-// everything else.
+// The sibling defaults track the standard workspace layout; the env overrides
+// cover everything else. A bare absolute path here silently rotted once
+// already: the checkout moved and every run died on ENOENT.
 const contractsRoot = resolve(
     process.env.ZENEX_CONTRACTS_ROOT ?? resolve(sdkRoot, '../zenex-contracts'),
 );
-const wasmDir = resolve(contractsRoot, 'target/wasm32v1-none/release');
+const utilContractsRoot = resolve(
+    process.env.ZENEX_UTIL_CONTRACTS_ROOT
+        ?? resolve(sdkRoot, '../zenex-util-contracts'),
+);
+const coreWasmDir = resolve(
+    process.env.ZENEX_CONTRACTS_WASM_DIR ?? resolve(contractsRoot, 'wasm'),
+);
+const utilWasmDir = resolve(utilContractsRoot, 'target/wasm32v1-none/release');
 
-// Keyed by WASM stem (also the fixture filename). Order fixes the layout of
-// the generated module.
+const CORE_HINT = 'Check out zenex-contracts main, whose `wasm/` holds the release '
+    + 'build, or point ZENEX_CONTRACTS_ROOT at it.';
+const UTIL_HINT = 'Run `make build` in zenex-util-contracts at the released tag, '
+    + 'or point ZENEX_UTIL_CONTRACTS_ROOT at it.';
+
+// Keyed by WASM stem (also the fixture filename), with the directory the WASM
+// is read from. Order fixes the layout of the generated module.
 const CONTRACTS = [
-    ['market', 'marketSpec'],
-    ['market_router', 'marketRouterSpec'],
-    ['factory', 'factorySpec'],
-    ['strategy_vault', 'strategyVaultSpec'],
-    ['oracle', 'oracleSpec'],
-    ['treasury', 'treasurySpec'],
-    ['governance', 'governanceSpec'],
+    ['market', 'marketSpec', coreWasmDir, CORE_HINT],
+    ['market_router', 'marketRouterSpec', utilWasmDir, UTIL_HINT],
+    ['factory', 'factorySpec', coreWasmDir, CORE_HINT],
+    ['strategy_vault', 'strategyVaultSpec', coreWasmDir, CORE_HINT],
+    ['oracle', 'oracleSpec', coreWasmDir, CORE_HINT],
+    ['treasury', 'treasurySpec', coreWasmDir, CORE_HINT],
+    ['governance', 'governanceSpec', coreWasmDir, CORE_HINT],
 ];
 
 function fail(message) {
     throw new Error(`Contract spec generation failed: ${message}`);
 }
 
-async function specEntries(stem) {
+async function specEntries(stem, wasmDir, hint) {
     const wasmPath = resolve(wasmDir, `${stem}.wasm`);
-    if (!existsSync(wasmPath)) {
-        fail(
-            `no build output for ${stem} at ${wasmPath}. Run \`make build\` in the contracts `
-            + 'worktree, or point ZENEX_CONTRACTS_ROOT at it.',
-        );
-    }
+    if (!existsSync(wasmPath)) fail(`no release WASM for ${stem} at ${wasmPath}. ${hint}`);
     const spec = await contract.Spec.fromWasm(readFileSync(wasmPath));
     return spec.entries.map((entry) => entry.toXDR('base64'));
 }
 
 function renderGeneratedModule(generated) {
     const lines = [
-        '// Generated by scripts/contract-specs.mjs from the contracts build output.',
+        '// Generated by scripts/contract-specs.mjs from the release contract WASMs.',
         '// Do not edit these base64 XDR arrays by hand.',
         '',
     ];
@@ -99,7 +110,9 @@ async function run(mode) {
     }
 
     const generated = new Map();
-    for (const [stem] of CONTRACTS) generated.set(stem, await specEntries(stem));
+    for (const [stem, , wasmDir, hint] of CONTRACTS) {
+        generated.set(stem, await specEntries(stem, wasmDir, hint));
+    }
 
     writeOrCheck(
         resolve(sdkRoot, 'src/contracts/contract_specs.ts'),
@@ -115,7 +128,8 @@ async function run(mode) {
     }
 
     process.stdout.write(
-        `Core contract specs ${mode === 'generate' ? 'generated' : 'verified'} from ${relative(sdkRoot, wasmDir)}.\n`,
+        `Contract specs ${mode === 'generate' ? 'generated' : 'verified'} from `
+        + `${relative(sdkRoot, coreWasmDir)} and ${relative(sdkRoot, utilWasmDir)}.\n`,
     );
 }
 

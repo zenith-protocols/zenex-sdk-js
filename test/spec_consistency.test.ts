@@ -30,8 +30,8 @@ import treasuryFixture from './fixtures/specs/treasury.json';
 // contract class that consumes it — that a class reads its own generated
 // export and nothing else. They deliberately do NOT pin artifact provenance
 // (source commit, toolchain, per-WASM hashes): specs are generated from the
-// contracts worktree's current build output, and the deploy path in
-// zenex-ops is what verifies artifact hashes before anything reaches chain.
+// release WASMs, and the zenex-ops deployer and verifier check artifact hashes
+// before anything reaches chain.
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 const contracts = [
@@ -112,5 +112,32 @@ describe('contract spec consistency', () => {
         expect(source).toContain(`import { ${entry.exportName} } from '../contract_specs.js';`);
         expect(source).toContain(`static spec: contract.Spec = new contract.Spec(${entry.exportName});`);
         expect(source).not.toMatch(/new contract\.Spec\(\[\s*['"]/);
+    });
+
+    // A binding that names an entry point the deployed contract lacks builds
+    // operations that fail on chain. The router once kept three `*_with_fee`
+    // builders after the deployed router dropped them.
+    it.each(contracts)('$source invokes only entry points its spec declares', (entry) => {
+        const source = readFileSync(`${repoRoot}/${entry.source}`, 'utf8');
+        const declared = new Set(
+            entry.contract.spec.funcs().map((func) => func.name().toString()),
+        );
+        const named = [...source.matchAll(/this\.call\(\s*(['"`])([a-z0-9_]+)\1/g)];
+        const forwarded = source.match(/this\.call\(\s*call\.func\b/g) ?? [];
+        const built = [...source.matchAll(/\bfunc:\s*(['"`])([a-z0-9_]+)\1/g)];
+
+        // Every invocation must be readable here: a literal name in any quote
+        // style, or a `call.func` forwarded from a builder's literal `func:`.
+        // An invocation named any other way would escape the check below.
+        expect(named.length + forwarded.length).toBe(
+            source.match(/this\.call\(/g)?.length ?? 0,
+        );
+        expect(built.length).toBe(
+            source.match(/\bfunc:(?!\s*string\b)/g)?.length ?? 0,
+        );
+
+        const invoked = [...named, ...built].map((match) => match[2]);
+        expect(invoked.length).toBeGreaterThan(0);
+        expect(invoked.filter((name) => !declared.has(name))).toEqual([]);
     });
 });

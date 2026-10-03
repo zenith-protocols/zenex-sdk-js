@@ -1,4 +1,4 @@
-// Validate the SDK against the LIVE testnet stack, read-only.
+// Validate the SDK against a LIVE stack, read-only.
 //
 //   npm run build && node scripts/live-check.mjs
 //
@@ -23,13 +23,15 @@ import {
 } from '../dist/esm/index.js';
 import { rpc } from '@stellar/stellar-sdk';
 
-// Defaults target the lan-rpc Data Streams stack (zenex-v2-local-xlm-20260817),
-// the freshest deployment built from contracts main. Override with env vars to
-// point elsewhere (e.g. the public testnet stack once it is redeployed):
-//   ZENEX_RPC, ZENEX_MARKET, ZENEX_VAULT, ZENEX_TOKEN, ZENEX_PROBE_USER
+// Defaults target the mainnet xlm-usd market (contracts release 644a4c4)
+// through the homelab mainnet RPC. Override with env vars to point elsewhere,
+// such as a testnet stack (passphrase 'Test SDF Network ; September 2015'):
+//   ZENEX_RPC, ZENEX_PASSPHRASE, ZENEX_MARKET, ZENEX_VAULT, ZENEX_TOKEN,
+//   ZENEX_PROBE_USER
 const NETWORK = {
-    rpc: process.env.ZENEX_RPC ?? 'http://192.168.2.50:8000',
-    passphrase: 'Test SDF Network ; September 2015',
+    rpc: process.env.ZENEX_RPC ?? 'http://192.168.2.150:8000',
+    passphrase:
+        process.env.ZENEX_PASSPHRASE ?? 'Public Global Stellar Network ; September 2015',
     opts: { allowHttp: true },
 };
 
@@ -44,9 +46,9 @@ function fmt(value) {
 }
 
 const contracts = {
-    market: process.env.ZENEX_MARKET ?? 'CBGG6W2K7QAYJEOSMJLONW2RSEAXL5RMD76DTVDZZUR7A5N27C37M25Z',
-    vault: process.env.ZENEX_VAULT ?? 'CBVQ5ZQNO7VGLNTDCIKLKAK3BHU5ES6U4EK7CN3SDXLBYEBK7BYDSSVV',
-    token: process.env.ZENEX_TOKEN ?? 'CBHJFR3Z56NCY3RNDU2MPHJCLFBVLIM6C65POU4Z7AMMSUYYPAYOIYQL',
+    market: process.env.ZENEX_MARKET ?? 'CAOZCITWHWAXH5FRU4EULQ5EN2HMTCHICRNC4R5ZAOVD7XHCCQSJ42IB',
+    vault: process.env.ZENEX_VAULT ?? 'CB2MX4WXJHOHCTDTN5DCFC7G3TLFLOYLCRCINPK7G2A3EUVW2AYVA56N',
+    token: process.env.ZENEX_TOKEN ?? 'CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75',
 };
 console.log(`\nLive market xlm-usd via ${NETWORK.rpc}`);
 console.log(`  market  ${contracts.market}\n  vault   ${contracts.vault}\n  token   ${contracts.token}\n`);
@@ -135,7 +137,7 @@ console.log(`\nPrice: ${fmt(price.value)} (${price.source})`);
 // --- 4. Estimate tier end to end at the live state --------------------------
 const est = estimateMarket(market, price.value);
 console.log('\nestimateMarket');
-console.log(`  fundingApr=${est.fundingAprPercent}% charge=${est.fundingChargeAprPercent}% maxLev=${est.maxLeverage}`);
+console.log(`  funding/1h=${est.fundingRatePercent1h}% charge/1h=${est.fundingChargeRatePercent1h}% maxLev=${est.maxLeverage}`);
 console.log(`  long : util=${est.long.utilizationPercent}% oi=${est.long.openInterestValue} cap=${est.long.openCapacity} net/1h=${est.long.netRatePercent1h}%`);
 console.log(`  short: util=${est.short.utilizationPercent}% oi=${est.short.openInterestValue} cap=${est.short.openCapacity} net/1h=${est.short.netRatePercent1h}%`);
 console.log(`  sharePrice=${est.sharePrice} netPnl=${est.netPnl} maxRedeem=${est.maxRedeemableShares}`);
