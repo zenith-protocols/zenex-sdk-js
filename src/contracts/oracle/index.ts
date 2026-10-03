@@ -8,3 +8,12 @@ export type {
 // Instance-storage walker (getLedgerEntries reads)
 export { parseOracleInstance } from './instance.js';
 export type { OracleInstanceState } from './instance.js';
+
+// Events
+export { OracleEventType } from './events.js';
+export type {
+    BaseOracleEvent,
+    OracleStalenessUpdateEvent,
+    OracleSpreadReductionUpdateEvent,
+    OracleEvent,
+} from './events.js';

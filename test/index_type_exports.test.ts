@@ -161,4 +161,87 @@ describe('package root type exports', () => {
 
         expect(diagnostics).toEqual([]);
     }, 15_000);
+
+    it('exports the relay and event types of the contract tier', () => {
+        const consumerPath = fileURLToPath(
+            new URL('./root-contract-tier-consumer.ts', import.meta.url),
+        );
+        const source = `
+            import type {
+                ForwardTarget,
+                RelayFee,
+                FeeForwarderEvent,
+                OwnableEvent,
+                OwnershipTransferEvent,
+                OracleEvent,
+                TreasuryEvent,
+                FactoryInitMetaUpdateEvent,
+                VaultTransferEvent,
+                VaultApproveEvent,
+                MarketEvent,
+                ZenexEvent,
+            } from '../src/index.js';
+            import {
+                FeeForwarderContract,
+                MAX_ORDERS_PER_SIDE,
+                OwnableEventType,
+                ZenexContractType,
+            } from '../src/index.js';
+
+            const fee: RelayFee = {
+                feeToken: 'C',
+                feeAmount: 1n,
+                maxFeeAmount: 2n,
+                expirationLedger: 3,
+                feeRecipient: 'G',
+            };
+            const target: ForwardTarget = 'create_and_try_fill';
+            export const signed = FeeForwarderContract.authorizedArgs(target, 'C', [], fee);
+            export const op: string = new FeeForwarderContract('C').forwardMulticall('C', [], 'G', fee);
+            export const cap: number = MAX_ORDERS_PER_SIDE;
+
+            declare const ownership: OwnershipTransferEvent<ZenexContractType.Market>;
+            export const asMarket: MarketEvent = ownership;
+            export const asOwnable: OwnableEvent = ownership;
+            export const kind: OwnableEventType = ownership.eventType;
+            declare const oracle: OracleEvent;
+            declare const treasury: TreasuryEvent;
+            declare const forwarder: FeeForwarderEvent;
+            declare const initMeta: FactoryInitMetaUpdateEvent;
+            declare const transfer: VaultTransferEvent;
+            declare const approve: VaultApproveEvent;
+            export const all: ZenexEvent[] = [
+                oracle, treasury, forwarder, initMeta, transfer, approve, ownership,
+            ];
+        `;
+        const options: ts.CompilerOptions = {
+            target: ts.ScriptTarget.ES2022,
+            module: ts.ModuleKind.Node16,
+            moduleResolution: ts.ModuleResolutionKind.Node16,
+            strict: true,
+            skipLibCheck: true,
+            noEmit: true,
+        };
+        const host = ts.createCompilerHost(options);
+        const readFile = host.readFile.bind(host);
+        const fileExists = host.fileExists.bind(host);
+        host.fileExists = (path) => path === consumerPath || fileExists(path);
+        host.readFile = (path) =>
+            path === consumerPath ? source : readFile(path);
+        host.getSourceFile = (path, languageVersion) => {
+            const contents = host.readFile(path);
+            return contents === undefined
+                ? undefined
+                : ts.createSourceFile(path, contents, languageVersion, true);
+        };
+
+        const program = ts.createProgram([consumerPath], options, host);
+        const diagnostics = ts
+            .getPreEmitDiagnostics(program)
+            .map((diagnostic) =>
+                ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
+            );
+
+        expect(diagnostics).toEqual([]);
+    }, 15_000);
 });

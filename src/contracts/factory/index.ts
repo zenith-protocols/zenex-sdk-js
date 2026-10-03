@@ -10,6 +10,7 @@ export { FactoryEventType } from './events.js';
 export type {
     BaseFactoryEvent,
     FactoryDeployEvent,
+    FactoryInitMetaUpdateEvent,
     FactoryEvent,
 } from './events.js';
 

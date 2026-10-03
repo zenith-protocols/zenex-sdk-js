@@ -111,8 +111,16 @@ describe('package root exports', () => {
         expect(SDK.GovernanceEventType.StatusSet).toBe('status_set');
         expect(SDK.decodeGovernanceEvent).toBeUndefined();
         expect(SDK.FactoryEventType.Deploy).toBe('deploy');
+        expect(SDK.FactoryEventType.InitMetaUpdate).toBe('init_meta_update');
         expect(SDK.FeeForwarderEventType.FeeCollected).toBe('fee_collected');
+        expect(SDK.OracleEventType.StalenessUpdate).toBe('staleness_update');
+        expect(SDK.TreasuryEventType.RateUpdate).toBe('rate_update');
+        expect(SDK.OwnableEventType.OwnershipTransfer).toBe('ownership_transfer');
+        expect(SDK.VaultEventType.Transfer).toBe('transfer');
+        expect(SDK.VaultEventType.Approve).toBe('approve');
         expect(SDK.ZenexContractType.Market).toBe('market');
+        expect(SDK.ZenexContractType.Oracle).toBe('oracle');
+        expect(SDK.ZenexContractType.Treasury).toBe('treasury');
         expect(SDK.ZenexContractType.FeeForwarder).toBe('fee_forwarder');
         // The event surface is types-only; consumers own their decode path.
         expect(SDK.decodeEvent).toBeUndefined();

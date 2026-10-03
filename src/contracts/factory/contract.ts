@@ -129,7 +129,7 @@ export class FactoryContract extends Contract {
      *   token. Higher values reduce inflation-attack risk on share pricing.
      *
      * # Returns
-     * - The `(trading, vault)` address pair. Parse with `parsers.deployMarket`.
+     * - The `(market, vault)` address pair. Parse with `parsers.deployMarket`.
      *
      * # Errors
      * - Propagates the market contract's constructor validation.
@@ -139,7 +139,9 @@ export class FactoryContract extends Contract {
      *   `config` is negative.
      *
      * # Events
-     * - Emits `Deploy` with topics `(market: Address, vault: Address)`.
+     * - Emits `Deploy` with the market and vault addresses as topics. The
+     *   market topic keeps its wire name `trading`; `FactoryDeployEvent` names
+     *   it `market`.
      */
     deployMarket(
         admin: string,

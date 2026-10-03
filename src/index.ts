@@ -25,6 +25,15 @@ export interface Network {
 // Typed event surface (types only; consumers own their decode path)
 export { ZenexContractType } from './base_event.js';
 export type { BaseZenexEvent, ZenexEvent } from './base_event.js';
+export { OwnableEventType } from './contracts/ownable/index.js';
+export type {
+    OwnableContractType,
+    BaseOwnableEvent,
+    OwnershipTransferEvent,
+    OwnershipTransferCompletedEvent,
+    OwnershipRenouncedEvent,
+    OwnableEvent,
+} from './contracts/ownable/index.js';
 
 // =============================================================================
 // Market Module (order -> keeper-execute contract)
@@ -158,6 +167,7 @@ export type {
     FactoryConstructorArgs,
     BaseFactoryEvent,
     FactoryDeployEvent,
+    FactoryInitMetaUpdateEvent,
     FactoryEvent,
 } from './contracts/factory/index.js';
 
@@ -186,20 +196,34 @@ export type {
 // Oracle Module (Chainlink Data Streams verifier)
 // =============================================================================
 
-export { OracleContract } from './contracts/oracle/index.js';
+export { OracleContract, OracleEventType } from './contracts/oracle/index.js';
 
 export type {
     OraclePriceData,
     OracleConstructorArgs,
+    BaseOracleEvent,
+    OracleStalenessUpdateEvent,
+    OracleSpreadReductionUpdateEvent,
+    OracleEvent,
 } from './contracts/oracle/index.js';
 
 // =============================================================================
 // Treasury Module
 // =============================================================================
 
-export { TreasuryContract, parseTreasuryRate } from './contracts/treasury/index.js';
+export {
+    TreasuryContract,
+    TreasuryEventType,
+    parseTreasuryRate,
+} from './contracts/treasury/index.js';
 
-export type { TreasuryConstructorArgs } from './contracts/treasury/index.js';
+export type {
+    TreasuryConstructorArgs,
+    BaseTreasuryEvent,
+    TreasuryWithdrawEvent,
+    TreasuryRateUpdateEvent,
+    TreasuryEvent,
+} from './contracts/treasury/index.js';
 
 // =============================================================================
 // Vault Module
@@ -220,6 +244,8 @@ export type {
     VaultDepositEvent,
     VaultWithdrawEvent,
     VaultStrategyWithdrawEvent,
+    VaultTransferEvent,
+    VaultApproveEvent,
     VaultEvent,
 } from './contracts/vault/index.js';
 
