@@ -26,7 +26,6 @@ import {
     advanceFunding,
     advanceMarketAccruals,
     borrowingRate,
-    marketNetPnl,
     marketSidePnl,
     reserveUtilization,
     sideCapacity,
@@ -267,9 +266,10 @@ export class Market {
     }
 
     /**
-     * Notional (token-dec) that can still open on a side before an open gate
-     * trips: the smaller of the `max_util_open` headroom at `price` and the
-     * `max_open_interest` headroom. The "max size" a trade ticket shows.
+     * Notional (token-dec) the side can still take before a side-level open
+     * gate trips: the smaller of the `max_util_open` headroom at `price` and
+     * the `max_open_interest` headroom. One order is also capped at
+     * `config.maxPositionNotional` less the position's own notional (#712).
      */
     openCapacity(isLong: boolean, price: PriceInput): bigint {
         const reserved = sideReserved(this.data, this.priceAt(price), isLong);
@@ -312,21 +312,42 @@ export class Market {
         return marketSidePnl(this.data, this.priceAt(price), isLong, true);
     }
 
-    /** Net unrealized trader PnL across both sides at `price`, token-dec. The quantity share pricing nets out. */
+    /**
+     * Net unrealized trader PnL across both sides at `price`, token-dec, as a
+     * redeem fill nets it out of the share price: each side marked in the
+     * traders' favour, its profit capped at the haircut allowance
+     * (`maxPnlTrader` of half the vault). The uncapped sum is
+     * `sidePnl(true, price) + sidePnl(false, price)`.
+     */
     netPnl(price: PriceInput): bigint {
-        return marketNetPnl(this.data, this.priceAt(price), true);
+        return cappedNetPnl(
+            this.data,
+            this.config,
+            this.priceAt(price),
+            this.vaultAssets,
+            true,
+        );
     }
 
-    /** The per-second borrowing rate a side pays at its current utilization (SCALAR_18). */
+    /**
+     * The per-second borrowing rate (SCALAR_18) the side is charged at
+     * `price`: the kink rate at its utilization while it holds at least as
+     * many base tokens as the other side, else `0n`. Only the dominant side
+     * pays, and a tie charges both.
+     */
     borrowingRate(isLong: boolean, price: PriceInput): bigint {
+        const own = isLong ? this.data.tokens.long : this.data.tokens.short;
+        const other = isLong ? this.data.tokens.short : this.data.tokens.long;
+        if (own < other) return 0n;
         return borrowingRate(this.config, this.utilization(isLong, price));
     }
 
     /**
-     * The per-second funding rate as accrual would charge it at `now`
-     * (defaults to the wall clock): the stored rate evolved over the elapsed
-     * window by the book's skew. Signed, SCALAR_18: positive means longs pay
-     * shorts. Skew-driven, so no price is involved.
+     * The stored per-second funding rate, evolved to `now` (defaults to the
+     * wall clock) by the book's skew. Signed, SCALAR_18: positive means longs
+     * pay shorts. This is the unfloored rate the market keeps. Accrual
+     * charges the payer `max(|rate|, config.fundingMin)`, and nothing at a
+     * zero rate. Skew-driven, so no price is involved.
      */
     fundingRate(now?: bigint): bigint {
         const elapsed = quoteTime(this, now) - this.data.accruedAt;
