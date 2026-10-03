@@ -323,14 +323,13 @@ describe('parseContractErrorCode (strict Error(Contract, #N) shape)', () => {
 });
 
 describe('package exports', () => {
-    it('exposes ./errors as a standalone subpath (types + cjs + esm)', () => {
+    it('exposes ./errors as a standalone subpath, typed per module format', () => {
         const packageJson = JSON.parse(
             readFileSync(new URL('../package.json', import.meta.url), 'utf8')
-        ) as { exports: Record<string, Record<string, string>> };
+        ) as { exports: Record<string, unknown> };
         expect(packageJson.exports['./errors']).toEqual({
-            types: './dist/types/errors.d.ts',
-            require: './dist/cjs/errors.js',
-            import: './dist/esm/errors.js',
+            import: { types: './dist/esm/errors.d.ts', default: './dist/esm/errors.js' },
+            require: { types: './dist/cjs/errors.d.ts', default: './dist/cjs/errors.js' },
         });
     });
 

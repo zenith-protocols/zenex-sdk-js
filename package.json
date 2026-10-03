@@ -2,7 +2,7 @@
     "name": "@zenith-protocols/zenex-sdk",
     "version": "3.0.0",
     "type": "module",
-    "description": "Javascript SDK for Zenex",
+    "description": "TypeScript SDK for the Zenex perpetuals DEX on Stellar (Soroban): contract bindings, ledger-state loaders and exact quotes",
     "author": "Robeart",
     "keywords": [
         "stellar",
@@ -19,10 +19,10 @@
         "clean": "rimraf dist",
         "build:cjs": "npx tsc -p ./scripts/tsconfig.cjs.json",
         "build:esm": "npx tsc -p ./scripts/tsconfig.esm.json",
-        "build:types": "npx tsc -p ./scripts/tsconfig.types.json",
         "build:pkg": "node -e \"fs=require('fs');fs.writeFileSync('dist/esm/package.json','{\\\"type\\\":\\\"module\\\"}');fs.writeFileSync('dist/cjs/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
-        "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types && npm run build:pkg",
+        "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:pkg",
         "prepare": "npm run build",
+        "prepublishOnly": "npm test && npm run architecture:check",
         "test": "vitest run",
         "test:coverage": "vitest run --coverage",
         "specs:generate": "node scripts/contract-specs.mjs generate",
@@ -32,17 +32,35 @@
     },
     "exports": {
         ".": {
-            "types": "./dist/types/index.d.ts",
-            "require": "./dist/cjs/index.js",
-            "import": "./dist/esm/index.js"
+            "import": {
+                "types": "./dist/esm/index.d.ts",
+                "default": "./dist/esm/index.js"
+            },
+            "require": {
+                "types": "./dist/cjs/index.d.ts",
+                "default": "./dist/cjs/index.js"
+            }
         },
         "./errors": {
-            "types": "./dist/types/errors.d.ts",
-            "require": "./dist/cjs/errors.js",
-            "import": "./dist/esm/errors.js"
+            "import": {
+                "types": "./dist/esm/errors.d.ts",
+                "default": "./dist/esm/errors.js"
+            },
+            "require": {
+                "types": "./dist/cjs/errors.d.ts",
+                "default": "./dist/cjs/errors.js"
+            }
+        },
+        "./package.json": "./package.json"
+    },
+    "types": "./dist/cjs/index.d.ts",
+    "typesVersions": {
+        "*": {
+            "errors": [
+                "./dist/cjs/errors.d.ts"
+            ]
         }
     },
-    "typings": "dist/types/index.d.ts",
     "files": [
         "/dist"
     ],
@@ -75,6 +93,9 @@
         "vitest": "^4.1.10"
     },
     "peerDependencies": {
-        "@stellar/stellar-sdk": ">=16.0.0"
+        "@stellar/stellar-sdk": ">=16.0.0 <17.0.0"
+    },
+    "engines": {
+        "node": ">=22"
     }
 }
