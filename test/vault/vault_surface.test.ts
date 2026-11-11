@@ -33,14 +33,15 @@ describe('VaultContract surface', () => {
 
     it('deploy builds the constructor op', () => {
         const op = VaultContract.deploy(OWNER, Buffer.alloc(32, 9), {
-            name: 'Zenex Vault', symbol: 'zXLM', asset: ASSET, decimals_offset: 2, strategy: STRATEGY,
+            name: 'Zenex Vault', symbol: 'zXLM', asset: ASSET, strategy: STRATEGY,
         });
         const create = xdr.Operation.fromXDR(op, 'base64').body()
             .invokeHostFunctionOp().hostFunction().createContractV2();
-        expect(create.constructorArgs().length).toBe(5);
+        expect(create.constructorArgs().length).toBe(4);
         expect(scValToNative(create.constructorArgs()[0])).toBe('Zenex Vault');
         expect(scValToNative(create.constructorArgs()[2])).toBe(ASSET);
-        expect(scValToNative(create.constructorArgs()[4])).toBe(STRATEGY);
+        expect(scValToNative(create.constructorArgs()[1])).toBe('zXLM');
+        expect(scValToNative(create.constructorArgs()[3])).toBe(STRATEGY);
     });
 
     it('builds share-token ops (string and Address arg forms)', () => {

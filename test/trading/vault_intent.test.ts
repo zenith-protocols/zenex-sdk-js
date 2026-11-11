@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Status, VaultOrderKind } from '../../src/contracts/market/types.js';
 import { ZenexErrorCode } from '../../src/errors.js';
 import { VaultOrderIntent } from '../../src/trading/vault_order.js';
-import { USER, fixtureMarket, px, unit } from './market_fixture.js';
+import { SHARE_SCALE, USER, fixtureMarket, px, unit } from './market_fixture.js';
 import type { MarketFixture } from './market_fixture.js';
 
 // fills() advises on an order about to be created, so create_vault_order's
@@ -14,6 +14,8 @@ const redeem = (amount: bigint, minOut = 0n) =>
     new VaultOrderIntent('C', USER, VaultOrderKind.Redeem, amount, minOut);
 const market = (fixture: MarketFixture = {}) =>
     fixtureMarket({ vaultAssets: unit(1000), ...fixture });
+/** Whole shares as share-dec: `n` shares of the 13-decimal share token. */
+const shares = (n: number) => unit(n) * SHARE_SCALE;
 
 describe('VaultOrderIntent.fills applies the creation rules', () => {
     it.each([
@@ -30,7 +32,7 @@ describe('VaultOrderIntent.fills applies the creation rules', () => {
     });
 
     it('reports a redeem on a frozen market as invalid (#704)', () => {
-        expect(redeem(unit(1)).fills(market({ status: Status.Frozen }), px(1), 10n)).toEqual({
+        expect(redeem(shares(1)).fills(market({ status: Status.Frozen }), px(1), 10n)).toEqual({
             fills: false,
             invalid: expect.objectContaining({ code: 704 }),
         });
@@ -46,7 +48,7 @@ describe('VaultOrderIntent.fills applies the creation rules', () => {
 
     it('fills a redeem on a retired market at creation, whatever its minOut', () => {
         const retired = market({ status: Status.Retired });
-        expect(redeem(unit(100), unit(999)).fills(retired, px(1), 10n)).toEqual({
+        expect(redeem(shares(100), unit(999)).fills(retired, px(1), 10n)).toEqual({
             fills: true,
         });
     });
@@ -74,15 +76,17 @@ describe('a redeem on a retired market', () => {
     it('quotes the fee-free direct redeem at zero pending PnL', () => {
         // 100 of 1000 shares against 1000.0 of assets: 100.0, with no
         // 0.1% redeem fee taken.
-        expect(redeem(unit(100)).expectedOut(retired, px(5))).toBe(unit(100));
-        expect(redeem(unit(100)).expectedOut(market(), px(5))).toBe(unit(100) - unit(100) / 1000n);
+        expect(redeem(shares(100)).expectedOut(retired, px(5), 10n)).toBe(unit(100));
+        expect(redeem(shares(100)).expectedOut(market(), px(5), 10n)).toBe(
+            unit(100) - unit(100) / 1000n,
+        );
     });
 
     it('builds with minOut unset and needs no price, since minOut is never read', () => {
-        const intent = VaultOrderIntent.create(retired, USER, VaultOrderKind.Redeem, unit(100), 50n);
+        const intent = VaultOrderIntent.create(retired, USER, VaultOrderKind.Redeem, shares(100), 50n);
         expect(intent.minOut).toBe(0n);
         expect(() =>
-            VaultOrderIntent.create(market(), USER, VaultOrderKind.Redeem, unit(100), 50n),
+            VaultOrderIntent.create(market(), USER, VaultOrderKind.Redeem, shares(100), 50n),
         ).toThrow(/price is required/);
     });
 });

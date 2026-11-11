@@ -34,7 +34,7 @@ export interface VaultDepositEvent extends BaseVaultEvent {
     receiver: string;
     /** Assets taken, token-dec. */
     assets: i128;
-    /** Shares minted, share-dec (asset decimals plus the vault's decimals offset). */
+    /** Shares minted, share-dec (asset decimals plus the vault's fixed offset of 6). */
     shares: i128;
 }
 
@@ -53,7 +53,7 @@ export interface VaultWithdrawEvent extends BaseVaultEvent {
     owner: string;
     /** Assets paid, token-dec. */
     assets: i128;
-    /** Shares burned, share-dec (asset decimals plus the vault's decimals offset). */
+    /** Shares burned, share-dec (asset decimals plus the vault's fixed offset of 6). */
     shares: i128;
 }
 

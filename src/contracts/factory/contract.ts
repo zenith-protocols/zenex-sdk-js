@@ -129,9 +129,9 @@ export class FactoryContract extends Contract {
      * @param feedId - 32-byte Data Streams stream id for the market. Fixed
      *   for the life of the deployed market contract.
      * @param config - Initial `MarketConfig` for the deployed market contract.
-     * @param vaultDecimalsOffset - Extra decimals on the vault's share
-     *   token, at most 10. Higher values reduce inflation-attack risk on
-     *   share pricing.
+     * @param vaultName - Name of the vault's share token.
+     * @param vaultSymbol - Symbol of the vault's share token. Shares carry
+     *   13 decimals: the token's 7 plus the vault's fixed offset of 6.
      *
      * # Returns
      * - The `(market, vault)` address pair. Parse with `parsers.deployMarket`.
@@ -139,13 +139,12 @@ export class FactoryContract extends Contract {
      * # Errors
      * A rejected constructor fails the call as `Error(Context,
      * InvalidAction)`, and its code is in the simulation diagnostics:
-     * - `InvalidConfig` (700) if `config` fails its bounds, or `feedId` is
-     *   not a V3 (`0x0003…`) stream id.
+     * - `InvalidConfig` (700) if `config` fails its bounds, `feedId` is not
+     *   a V3 (`0x0003…`) stream id, or `token` does not report exactly 7
+     *   decimals.
      * - `NegativeValueNotAllowed` (710) if a fee, margin, borrowing, funding,
      *   ADL or PnL field, `minOrderMargin`, `minDeposit` or `execFee` in
      *   `config` is negative.
-     * - `VaultMaxDecimalsOffsetExceeded` (409) if `vaultDecimalsOffset` is
-     *   above 10.
      *
      * A repeated `(admin, salt)` finds a contract at the derived address and
      * traps in the host as `Error(Storage, ExistingValue)`, which carries no
@@ -165,7 +164,6 @@ export class FactoryContract extends Contract {
         config: MarketConfig,
         vaultName: string,
         vaultSymbol: string,
-        vaultDecimalsOffset: u32,
     ): string {
         const saltBuffer = salt instanceof Buffer ? salt : Buffer.from(salt);
         const feedIdBuffer = feedId instanceof Buffer ? feedId : Buffer.from(feedId);
@@ -179,7 +177,6 @@ export class FactoryContract extends Contract {
             marketConfigToScVal(config),
             nativeToScVal(vaultName, { type: 'string' }),
             nativeToScVal(vaultSymbol, { type: 'string' }),
-            xdr.ScVal.scvU32(vaultDecimalsOffset),
         ).toXDR('base64');
     }
 

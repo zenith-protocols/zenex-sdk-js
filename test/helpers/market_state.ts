@@ -68,6 +68,8 @@ export function marketDataScVal(): xdr.ScVal {
     return xdr.ScVal.scvMap([
         mapEntry('accrued_at', u64(500n)),
         mapEntry('borrowing_idx', sidePair(3n * 10n ** 15n, 0n)),
+        // The one long position checkpointed at index 0, so the side's weight is 0.
+        mapEntry('borrowing_weight', sidePair(0n, 0n)),
         mapEntry('margin', sidePair(100n, 100n)),
         mapEntry('funding_idx', sidePair(-2n * 10n ** 16n, 0n)),
         mapEntry('credit_owed', i128(0n)),

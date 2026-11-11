@@ -35,6 +35,10 @@ const TOKEN_DECIMALS = 7;
 const unit = (whole: number) => BigInt(whole) * 10n ** BigInt(TOKEN_DECIMALS);
 /** An 18-dec price. Prices never use the token's decimals. */
 const px = (whole: number) => BigInt(whole) * SCALAR_18;
+/** The vault's fixed decimals offset: shares carry six decimals over the asset. */
+const SHARE_DECIMALS_OFFSET = 6;
+/** Shares per asset unit in a vault at the bootstrap rate, `10^6`. */
+const SHARE_SCALE = 1_000_000n;
 
 const MARKET = StrKey.encodeContract(Buffer.alloc(32, 1));
 const VAULT = StrKey.encodeContract(Buffer.alloc(32, 2));
@@ -51,6 +55,7 @@ function marketData(overrides: Partial<MarketData> = {}): MarketData {
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
+        borrowingWeight: pair(),
         fundingRate: 0n,
         accruedAt: 0n,
         creditPool: 0n,
@@ -82,8 +87,8 @@ function loadedMarket(
         undefined,
         undefined,
         vaultAssets,
-        vaultAssets,
-        0,
+        vaultAssets * SHARE_SCALE,
+        SHARE_DECIMALS_OFFSET,
         TOKEN_DECIMALS,
     );
 }
@@ -479,8 +484,9 @@ describe('VaultOrderIntent', () => {
             unit(100),
             100n,
             px(10),
+            1_000n,
         );
-        const expected = intent.expectedOut(market, px(10));
+        const expected = intent.expectedOut(market, px(10), 1_000n);
         expect(intent.minOut).toBe((expected * 9_900n) / 10_000n);
         expect(intent.minOut).toBeGreaterThan(0n);
     });
@@ -502,12 +508,13 @@ describe('VaultOrderIntent', () => {
     });
 
     it('quotes a deposit net of the deposit fee, so a pre-fee minOut rejects', () => {
-        // A 0.2% fee on 100 leaves 99.8 to mint at 1:1 on the empty book.
+        // A 0.2% fee on 100 leaves 99.8 to mint at the bootstrap rate on the
+        // empty book: 998_000_000 * 10^6 shares.
         const amount = unit(100);
         const expected = new VaultOrderIntent(
             MARKET, USER, VaultOrderKind.Deposit, amount, 0n,
-        ).expectedOut(market, px(10));
-        expect(expected).toBe(998_000_000n);
+        ).expectedOut(market, px(10), 1_000n);
+        expect(expected).toBe(998_000_000_000_000n);
 
         const atBound = new VaultOrderIntent(
             MARKET, USER, VaultOrderKind.Deposit, amount, expected,
@@ -517,7 +524,7 @@ describe('VaultOrderIntent', () => {
         // The pre-fee conversion overshoots the fee-net quote: a keeper
         // fill rejects the order rather than leaving it to rest.
         const preFee = market.assetsToShares(amount, px(10));
-        expect(preFee).toBe(amount);
+        expect(preFee).toBe(1_000_000_000_000_000n);
         const tooTight = new VaultOrderIntent(
             MARKET, USER, VaultOrderKind.Deposit, amount, preFee,
         );
@@ -529,10 +536,10 @@ describe('VaultOrderIntent', () => {
 
     it('advises a redeem rejection past its lock when the net quote misses minOut', () => {
         // 100 shares redeem 100 gross, 99.75 after the 0.25% fee.
-        const shares = unit(100);
+        const shares = unit(100) * SHARE_SCALE;
         const expected = new VaultOrderIntent(
             MARKET, USER, VaultOrderKind.Redeem, shares, 0n,
-        ).expectedOut(market, px(10));
+        ).expectedOut(market, px(10), 1_000n);
         expect(expected).toBe(997_500_000n);
 
         const atBound = new VaultOrderIntent(

@@ -12,7 +12,7 @@ import {
 //   market/src/errors.rs           (MarketError, 600 + 700-772)
 //   oracle/src/error.rs            (OracleError, 600 + 780-793)
 //   factory/src/errors.rs          (FactoryError, 600)
-//   strategy-vault/src/strategy.rs (StrategyVaultError, 800-801)
+//   strategy-vault/src/strategy.rs (StrategyVaultError, 800-803)
 //   governance/src/errors.rs       (GovernanceError, 810-812)
 //   treasury/src/lib.rs            (TreasuryError, 900)
 //   OpenZeppelin ownable           (OwnableError 2100-2102, RoleTransferError 2200-2203)
@@ -171,9 +171,13 @@ describe('ZenexErrorCode periphery codes (v2 contracts)', () => {
         expect(ZenexErrorCode.TransferExpired).toBe(2203);
     });
 
-    it('strategy-vault is the 800-801 pair from strategy.rs', () => {
+    it('strategy-vault is the 800-803 block from strategy.rs', () => {
         expect(ZenexErrorCode.StrategyInvalidAmount).toBe(800);
         expect(ZenexErrorCode.StrategyPnlExceedsAssets).toBe(801);
+        expect(ZenexErrorCode.StrategySupplyLimitExceeded).toBe(802);
+        expect(ZenexErrorCode.StrategyPayoutExceedsAssets).toBe(803);
+        expect(ZenexErrorCode[802]).toBe('StrategySupplyLimitExceeded');
+        expect(ZenexErrorCode[803]).toBe('StrategyPayoutExceedsAssets');
     });
 
     it('governance moved to 810-812 per governance/src/errors.rs', () => {
@@ -308,6 +312,18 @@ describe('messages state the contract condition', () => {
         expect(message(801)).not.toMatch(/withdrawal/i);
     });
 
+    it('754 covers the redeem gate and the deposit gate', () => {
+        expect(message(754)).toMatch(/max_pnl_withdraw/);
+        expect(message(754)).toMatch(/redeem/);
+        expect(message(754)).toMatch(/max_pnl_trader/);
+        expect(message(754)).toMatch(/deposit/);
+    });
+
+    it('802 is the share supply limit and 803 the payout past the balance', () => {
+        expect(message(802)).toMatch(/share supply/);
+        expect(message(803)).toMatch(/payout exceeds/);
+    });
+
     it('810 never claims a queued call expires', () => {
         expect(message(810)).not.toMatch(/expire/i);
         expect(message(810)).toMatch(/delay change/);
@@ -360,9 +376,11 @@ describe('zenexErrorFromCode (hint-free resolution)', () => {
         expect(zenexErrorFromCode(812).code).toBe(ZenexErrorCode.GovInvalidDelay);
     });
 
-    it('resolves strategy-vault 800-801 and the oracle feed/clock pair 790/793', () => {
+    it('resolves strategy-vault 800-803 and the oracle feed/clock pair 790/793', () => {
         expect(zenexErrorFromCode(800).code).toBe(ZenexErrorCode.StrategyInvalidAmount);
         expect(zenexErrorFromCode(801).code).toBe(ZenexErrorCode.StrategyPnlExceedsAssets);
+        expect(zenexErrorFromCode(802).code).toBe(ZenexErrorCode.StrategySupplyLimitExceeded);
+        expect(zenexErrorFromCode(803).code).toBe(ZenexErrorCode.StrategyPayoutExceedsAssets);
         expect(zenexErrorFromCode(790).code).toBe(ZenexErrorCode.OracleFeedMismatch);
         expect(zenexErrorFromCode(790).message).toBe(
             'Report prices a different stream than the feed anchor'

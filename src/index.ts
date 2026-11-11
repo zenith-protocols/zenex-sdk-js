@@ -241,6 +241,7 @@ export {
     VaultContract,
     VaultEventType,
     parseVaultInstance,
+    VIRTUAL_SHARES,
 } from './contracts/vault/index.js';
 
 

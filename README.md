@@ -195,10 +195,28 @@ const depositOp = deposit.toOperation();
 deposit mints, or the assets a redeem pays. A keeper fill quoted below it
 rejects the order. The principal returns to the user, the escrowed execution
 fee goes to the keeper, and the market emits `reject_vault_order`. The vault
-balance cap and the redeem exit gates revert instead, and the order keeps
-resting. `fills` is advisory: it reports whether a fill at `price` would
-succeed, be rejected or revert. A redeem on a `Retired` market fills at
-creation, with no execution fee and no `minOut`.
+balance cap, the deposit pending-PnL gate and the redeem exit gates revert
+instead, and the order keeps resting. `fills` is advisory: it reports whether
+a fill at `price` would succeed, be rejected or revert. A redeem on a
+`Retired` market fills at creation, with no execution fee and no `minOut`.
+
+A fill prices shares on the vault balance net of trader PnL at the mark, plus
+the vault's share of the borrowing positions have accrued and not yet settled
+(`market.pendingBorrowing()` less the treasury cut). A deposit does not fill
+while either side's unrealized profit is above `maxPnlTrader` of half the
+vault (`PendingPnlExceeded`, 754). Shares carry 13 decimals: the vault's
+decimals offset is fixed at 6.
+
+`VaultOrderIntent.create`, `expectedOut` and `fills` accrue the market to
+their own time first, as the fill does, so their quotes count the borrowing
+accrued since the last on-chain accrual. Each takes an optional trailing
+`now` (unix seconds, default the wall clock): `create` and `expectedOut`
+quote at `now`, and `fills` evaluates at the earliest legal fill after it. A
+fill lands later than the quote and accrues further, which lowers a deposit's
+quote, so a deposit bound needs room for the borrowing of the wait.
+`market.netPnl`, `pendingBorrowing`, `assetsToShares` and `sharesToAssets`
+read the market as loaded: pass `market.accrue(price)` to count the borrowing
+accrued since.
 
 ## Estimates
 
@@ -220,7 +238,7 @@ the SDK binds:
 | 600 | shared admin |
 | 700-772 | market |
 | 780-793 | oracle |
-| 800-801 | strategy vault |
+| 800-803 | strategy vault |
 | 810-812 | governance |
 | 900 | treasury |
 | 2100-2102, 2200-2203 | ownership and role transfer |
@@ -300,7 +318,9 @@ npm run build
 `specs:check` compares the committed contract specs with the release WASMs:
 `../zenex-contracts/wasm/` for the core contracts, and the market router and
 fee forwarder built in `../zenex-util-contracts` (run `make build` there at
-the released tag). `npm run live:check` validates a build read-only against a
+the released tag). Set `ZENEX_CONTRACTS_WASM_DIR` to compare the core
+contracts with another build, such as
+`../zenex-contracts/target/wasm32v1-none/release`. `npm run live:check` validates a build read-only against a
 live market; set `ZENEX_RPC` and the other `ZENEX_*` variables listed in
 `scripts/live-check.mjs`.
 

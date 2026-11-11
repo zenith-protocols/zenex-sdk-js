@@ -6,6 +6,7 @@ import {
     parseOrder, parseVaultOrder, parsePosition, parseMarketData, parseAdlState,
     parseMarketConfig, MarketConfig,
 } from '../../src/contracts/market/types.js';
+import { MarketStateError } from '../../src/entries.js';
 
 // Each field gets a unique value, numbered in the declaration order of
 // zenex-contracts/market/src/trading/config.rs (101 = keeper_rate, the
@@ -238,6 +239,7 @@ describe('trading_types', () => {
             borrowing_idx: { long: 9n, short: 10n }, funding_rate: 11n,
             accrued_at: 12n, credit_pool: 14n,
             credit_owed: 15n,
+            borrowing_weight: { long: 16n, short: 17n },
         });
         expect(marketData).toEqual({
             notional: { long: 1n, short: 2n },
@@ -245,12 +247,33 @@ describe('trading_types', () => {
             tokens: { long: 5n, short: 6n },
             fundingIdx: { long: 7n, short: 8n },
             borrowingIdx: { long: 9n, short: 10n },
+            borrowingWeight: { long: 16n, short: 17n },
             fundingRate: 11n,
             accruedAt: 12n,
             creditPool: 14n,
             creditOwed: 15n,
         });
         expect('lastPriceTime' in marketData).toBe(false);
+    });
+
+    // A MarketData entry written before the borrowing weight existed must
+    // not decode: pricing shares without the weight would misprice them.
+    it('parseMarketData refuses an entry without borrowing_weight', () => {
+        const parse = () =>
+            parseMarketData({
+                notional: { long: 1n, short: 2n }, margin: { long: 3n, short: 4n },
+                tokens: { long: 5n, short: 6n }, funding_idx: { long: 7n, short: 8n },
+                borrowing_idx: { long: 9n, short: 10n }, funding_rate: 11n,
+                accrued_at: 12n, credit_pool: 14n,
+                credit_owed: 15n,
+            });
+        expect(parse).toThrow(MarketStateError);
+        expect(parse).toThrow(
+            expect.objectContaining({
+                code: 'MISSING_STATE',
+                message: expect.stringContaining('no borrowing_weight: an earlier contract build'),
+            }),
+        );
     });
 
     it('parseAdlState maps the per-side flags', () => {
