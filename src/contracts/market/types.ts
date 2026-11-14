@@ -1,5 +1,6 @@
 import { xdr, nativeToScVal } from '@stellar/stellar-sdk';
 import { i128, u32, u64 } from '../../index.js';
+import { MarketStateError } from '../../entries.js';
 
 /** Contract operational status (instance storage singleton). */
 export enum Status {
@@ -86,7 +87,7 @@ export interface Order {
 export interface VaultOrder {
     /** This order's kind. See `VaultOrderKind`. */
     kind: VaultOrderKind;
-    /** Escrowed assets (deposit, token-dec) or shares (redeem, vault share decimals = asset decimals + decimalsOffset). */
+    /** Escrowed assets (deposit, token-dec) or shares (redeem, share-dec: 13 decimals, token-dec plus the vault's fixed offset of 6). */
     amount: i128;
     /** Minimum received at fill, net of the vault fee: shares (deposit, share-dec) or assets (redeem, token-dec); 0 = unset. A fill quoted below it rejects the order. */
     minOut: i128;
@@ -138,6 +139,8 @@ export interface MarketData {
     fundingIdx: SidePair;
     /** Cumulative borrowing index per side (SCALAR_18). */
     borrowingIdx: SidePair;
+    /** Borrowing checkpoint weight per side: the sum over open positions of `notional * borrowingIdx` at each position's last checkpoint (token-dec times SCALAR_18, exact). */
+    borrowingWeight: SidePair;
     /** Signed funding rate, + = longs pay (SCALAR_18, per second). */
     fundingRate: i128;
     /** Last accrual timestamp, unix seconds, shared by both indices. */
@@ -167,7 +170,7 @@ export interface MarketConfig {
     minPositionNotional: i128;
     /** Maximum position notional, token-dec; > minPositionNotional. */
     maxPositionNotional: i128;
-    /** Per-side open-interest ceiling, token-dec; >= maxPositionNotional. */
+    /** Per-side open-interest ceiling, token-dec; >= maxPositionNotional and at most `MAX_OPEN_INTEREST`, 10^11 tokens (10^18 token-dec). */
     maxOpenInterest: i128;
     /** Minimum |notional| per order, token-dec (dust floor); > 0 and <= minPositionNotional. */
     minOrderNotional: i128;
@@ -332,14 +335,27 @@ export function parsePosition(raw: Record<string, unknown>): Position {
     };
 }
 
-/** Parse a `scValToNative`-decoded `MarketData` into its camelCase interface. */
+/**
+ * Parse a `scValToNative`-decoded `MarketData` into its camelCase interface.
+ *
+ * @throws {MarketStateError} `MISSING_STATE` if the entry has no
+ * `borrowing_weight`: an earlier contract build wrote it, and share pricing
+ * without the weight would misprice.
+ */
 export function parseMarketData(raw: Record<string, unknown>): MarketData {
+    if (raw.borrowing_weight === undefined || raw.borrowing_weight === null) {
+        throw new MarketStateError(
+            'MISSING_STATE',
+            'MarketData has no borrowing_weight: an earlier contract build wrote this market, and this SDK cannot price it',
+        );
+    }
     return {
         notional: parseSidePair(raw.notional as Record<string, unknown>),
         margin: parseSidePair(raw.margin as Record<string, unknown>),
         tokens: parseSidePair(raw.tokens as Record<string, unknown>),
         fundingIdx: parseSidePair(raw.funding_idx as Record<string, unknown>),
         borrowingIdx: parseSidePair(raw.borrowing_idx as Record<string, unknown>),
+        borrowingWeight: parseSidePair(raw.borrowing_weight as Record<string, unknown>),
         fundingRate: big(raw.funding_rate),
         accruedAt: big(raw.accrued_at),
         creditPool: big(raw.credit_pool),

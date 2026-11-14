@@ -41,6 +41,8 @@ describe('package root exports', () => {
         // constants.rs DELIST_GRACE / DELIST_DEADLINE, seconds after the delist.
         expect(SDK.DELIST_GRACE).toBe(86_400n);
         expect(SDK.DELIST_DEADLINE).toBe(604_800n);
+        // strategy.rs VIRTUAL_SHARES: the share supply's virtual addend.
+        expect(SDK.VIRTUAL_SHARES).toBe(1_000_000n);
         expect(SDK.marketConfigToScVal).toBeTypeOf('function');
         expect(SDK.parseSidePair).toBeTypeOf('function');
         expect(SDK.parseOrder).toBeTypeOf('function');
@@ -176,6 +178,8 @@ describe('package root exports', () => {
         expect(SDK.ZenexErrorCode.OracleFeedMismatch).toBe(790);
         expect(SDK.ZenexErrorCode.OraclePriceAhead).toBe(793);
         expect(SDK.ZenexErrorCode.StrategyInvalidAmount).toBe(800);
+        expect(SDK.ZenexErrorCode.StrategySupplyLimitExceeded).toBe(802);
+        expect(SDK.ZenexErrorCode.StrategyPayoutExceedsAssets).toBe(803);
         expect(SDK.ZenexErrorCode.GovNotQueued).toBe(810);
         expect(SDK.ZenexErrorCode.QuoteInvalidInput).toBe(-1001);
         expect(SDK.ZenexErrorCode.QuoteOverflow).toBe(-1002);

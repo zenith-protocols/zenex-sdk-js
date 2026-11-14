@@ -328,6 +328,30 @@ function addPair(pair: SidePair, isLong: boolean, delta: bigint): void {
     else pair.short = addI128(pair.short, delta);
 }
 
+/**
+ * Set the position's `notional` and `borrowingIdx`, and mirror the change
+ * into the side's open interest and borrowing weight. Ports
+ * `Position::set_checkpoint`, the only writer of `borrowingWeight`: the whole
+ * old `notional * borrowingIdx` contribution leaves and the whole new one
+ * enters.
+ */
+function setCheckpoint(
+    position: Position,
+    market: MarketData,
+    isLong: boolean,
+    notional: bigint,
+    borrowingIdx: bigint,
+): void {
+    const weightChange = subI128(
+        checkedI128(notional * borrowingIdx),
+        checkedI128(position.notional * position.borrowingIdx),
+    );
+    addPair(market.borrowingWeight, isLong, weightChange);
+    addPair(market.notional, isLong, subI128(notional, position.notional));
+    position.notional = notional;
+    position.borrowingIdx = borrowingIdx;
+}
+
 function clonePosition(position: Position): Position {
     return {
         ...position,
@@ -397,7 +421,13 @@ function settleFees(
     if (earnedFunding > 0n)
         market.creditOwed = addI128(market.creditOwed, earnedFunding);
     position.fundingIdx = pairValue(market.fundingIdx, isLong);
-    position.borrowingIdx = pairValue(market.borrowingIdx, isLong);
+    setCheckpoint(
+        position,
+        market,
+        isLong,
+        position.notional,
+        pairValue(market.borrowingIdx, isLong),
+    );
 
     return {
         fees: quoted.fees,
@@ -569,8 +599,13 @@ function increaseTransition(
 
     position.tokens = addI128(position.tokens, tokensAdded);
     addPair(market.tokens, input.isLong, tokensAdded);
-    position.notional = addI128(position.notional, notional);
-    addPair(market.notional, input.isLong, notional);
+    setCheckpoint(
+        position,
+        market,
+        input.isLong,
+        addI128(position.notional, notional),
+        position.borrowingIdx,
+    );
 
     const marginAdded = subI128(margin, settled.fees.marginDebit);
     position.margin = addI128(position.margin, marginAdded);
@@ -677,7 +712,9 @@ function closeSettledTransition(
     const returned = settled.equity > 0n ? settled.equity : 0n;
     const badDebt = settled.equity < 0n ? subI128(0n, settled.equity) : 0n;
 
-    addPair(market.notional, input.isLong, subI128(0n, position.notional));
+    // Runs before the row resets, so the side's weight drops the position's
+    // whole checkpoint.
+    setCheckpoint(position, market, input.isLong, 0n, position.borrowingIdx);
     addPair(market.tokens, input.isLong, subI128(0n, position.tokens));
     addPair(market.margin, input.isLong, subI128(0n, position.margin));
 
@@ -764,8 +801,13 @@ function partialDecreaseTransition(
     // Anchor the position's price floor at this fill's price.
     position.pricedAt = input.price.publishTime;
 
-    position.notional = subI128(position.notional, notional);
-    addPair(market.notional, input.isLong, subI128(0n, notional));
+    setCheckpoint(
+        position,
+        market,
+        input.isLong,
+        subI128(position.notional, notional),
+        position.borrowingIdx,
+    );
     position.tokens = subI128(position.tokens, tokens);
     addPair(market.tokens, input.isLong, subI128(0n, tokens));
 

@@ -253,8 +253,8 @@ describe('a terminal price replaces the caller price', () => {
             unit(10),
             0n,
         );
-        expect(deposit.expectedOut(flat, px(20))).toBe(
-            deposit.expectedOut(atTerminal, terminal),
+        expect(deposit.expectedOut(flat, px(20), 3_600n)).toBe(
+            deposit.expectedOut(atTerminal, terminal, 3_600n),
         );
     });
 });

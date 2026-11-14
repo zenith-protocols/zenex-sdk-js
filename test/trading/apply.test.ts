@@ -74,6 +74,7 @@ function marketFor(open: Position, isLong = true): MarketData {
         tokens: isLong ? pair(open.tokens, 0n) : pair(0n, open.tokens),
         fundingIdx: pair(),
         borrowingIdx: pair(),
+        borrowingWeight: pair(),
         fundingRate: 0n,
         accruedAt: 1n,
         creditPool: 0n,

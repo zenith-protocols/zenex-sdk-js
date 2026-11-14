@@ -124,7 +124,7 @@ export interface MarketDepositFillEvent extends BaseMarketEvent {
     shares: i128;
     /** Vault fill fee deducted (keeper, treasury, and vault cuts), token-dec. */
     fee: i128;
-    /** Capped net pending trader PnL the share mint priced against, signed, token-dec. */
+    /** The NAV adjustment the share mint priced against, signed, token-dec: capped net pending trader PnL less the vault's share of pending borrowing. */
     netPnl: i128;
 }
 
@@ -145,7 +145,7 @@ export interface MarketRedeemFillEvent extends BaseMarketEvent {
     assets: i128;
     /** Vault fill fee deducted (keeper, treasury, and vault cuts), token-dec. */
     fee: i128;
-    /** Capped net pending trader PnL the share burn priced against, signed, token-dec. */
+    /** The NAV adjustment the share burn priced against, signed, token-dec: capped net pending trader PnL less the vault's share of pending borrowing. `0` for an instant redeem. */
     netPnl: i128;
 }
 
@@ -167,7 +167,7 @@ export interface MarketRejectVaultOrderEvent extends BaseMarketEvent {
     keeper: string;
     /** What the fill would have paid, below `minOut`: shares a deposit would mint (share-dec), or a redeem's assets net of the vault fee (token-dec). */
     quoted: i128;
-    /** Capped net pending trader PnL the quote priced against, signed, token-dec. */
+    /** The NAV adjustment the quote priced against, signed, token-dec: capped net pending trader PnL less the vault's share of pending borrowing. */
     netPnl: i128;
 }
 

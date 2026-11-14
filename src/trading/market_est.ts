@@ -18,7 +18,7 @@ import {
     marketSidePnl,
 } from './internal/math.js';
 import {
-    cappedNetPnl,
+    lpNetPnl,
     convertVaultAssetsToShares,
     convertVaultSharesToAssets,
     evaluateVaultWithdrawGates,
@@ -88,13 +88,13 @@ export interface MarketEstimate {
     long: SideRatesEstimate;
     /** Short-side utilization and rates at the current book. */
     short: SideRatesEstimate;
-    /** Vault share price, assets per share (uPnL-aware at the estimate price). */
+    /** Vault share price, assets per share (uPnL-aware at the estimate price, the vault's share of pending borrowing counted). */
     sharePrice: number;
     /** Long-side traders' unrealized PnL, token units. Positive: traders up, vault down. */
     longPnl: number;
     /** Short-side traders' unrealized PnL, token units. */
     shortPnl: number;
-    /** Net unrealized trader PnL as a redeem prices shares: each side's profit capped at `maxPnlTrader` of half the vault, token units. */
+    /** The NAV adjustment a redeem prices shares against, token units: net unrealized trader PnL, each side's profit capped at `maxPnlTrader` of half the vault, less the vault's share of pending borrowing. */
     netPnl: number;
     /**
      * Largest redeem that clears the exit gates (utilization and pending-PnL
@@ -206,9 +206,17 @@ export function estimateMarket(
               : config.fundingMin;
 
     // Share price and max redeem run in the redeem direction: capped uPnL
-    // maximized against the redeemer, mirroring the fill.
+    // maximized against the redeemer, less the vault's share of pending
+    // borrowing, mirroring the fill.
     const vault = market.vaultAtomic();
-    const redeemPnl = cappedNetPnl(data, config, p, market.vaultAssets, true);
+    const redeemPnl = lpNetPnl(
+        data,
+        config,
+        p,
+        market.vaultAssets,
+        market.treasuryRate,
+        true,
+    );
     let sharePrice = 0;
     let maxRedeemableShares = 0;
     try {
@@ -245,10 +253,7 @@ export function estimateMarket(
         sharePrice,
         longPnl: formatToken(longPnl, decimals),
         shortPnl: formatToken(shortPnl, decimals),
-        netPnl: formatToken(
-            cappedNetPnl(data, config, p, market.vaultAssets, true),
-            decimals,
-        ),
+        netPnl: formatToken(redeemPnl, decimals),
         maxRedeemableShares,
     };
 }

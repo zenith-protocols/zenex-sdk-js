@@ -26,15 +26,16 @@ import {
     advanceFunding,
     advanceMarketAccruals,
     borrowingRate,
+    marketPendingBorrowing,
     marketSidePnl,
     reserveUtilization,
     sideCapacity,
     sideReserved,
 } from './internal/math.js';
 import {
-    cappedNetPnl,
     convertVaultAssetsToShares,
     convertVaultSharesToAssets,
+    lpNetPnl,
 } from './internal/vault.js';
 import type { VaultAtomicState } from './internal/vault.js';
 import type { PriceData } from './internal/math.js';
@@ -114,7 +115,7 @@ export class Market {
         public vaultAssets: bigint,
         /** Vault shares in circulation, share-dec. */
         public vaultShares: bigint,
-        /** Virtual-share decimals offset (share decimals = asset decimals + offset). */
+        /** Virtual-share decimals offset (share decimals = asset decimals + offset). Every vault stores the contract's fixed offset, 6. */
         public vaultDecimalsOffset: number,
         /** Settlement-token decimals. */
         public assetDecimals: number,
@@ -122,7 +123,8 @@ export class Market {
          * Protocol fee rate (SCALAR_18) the treasury takes from fees, read
          * from the treasury instance by the load. Previews use it to split
          * fees and to gate a fill on the settled vault balance (#714, #753).
-         * A directly constructed snapshot defaults to `0n`.
+         * Share pricing uses it to take the vault's share of pending
+         * borrowing. A directly constructed snapshot defaults to `0n`.
          */
         public treasuryRate: bigint = 0n,
         /**
@@ -317,20 +319,44 @@ export class Market {
     }
 
     /**
-     * Net unrealized trader PnL across both sides at `price`, token-dec, as a
-     * redeem fill nets it out of the share price: each side marked in the
-     * traders' favour, its profit capped at the haircut allowance
-     * (`maxPnlTrader` of half the vault). The uncapped sum is
-     * `sidePnl(true, price) + sidePnl(false, price)`.
+     * The NAV adjustment a redeem fill nets out of the share price at
+     * `price`, token-dec, mirroring the contract's `lp_net_pnl`. It is the
+     * net unrealized trader PnL across both sides, less the vault's share of
+     * pending borrowing.
+     *
+     * Each side is marked in the traders' favour, its profit capped at the
+     * haircut allowance (`maxPnlTrader` of half the vault). The uncapped PnL
+     * sum is `sidePnl(true, price) + sidePnl(false, price)`. The vault's
+     * share is {@link Market.pendingBorrowing} less the
+     * {@link Market.treasuryRate} cut, rounded down, and the cap does not
+     * clip it. Negative means the vault's backing is worth more than its
+     * balance.
+     *
+     * Reads the borrowing indices as this snapshot stores them. Pass
+     * `market.accrue(price)` to count the borrowing accrued since.
      */
     netPnl(price: PriceInput): bigint {
-        return cappedNetPnl(
+        return lpNetPnl(
             this.data,
             this.config,
             this.priceAt(price),
             this.vaultAssets,
+            this.treasuryRate,
             true,
         );
+    }
+
+    /**
+     * Borrowing both sides accrued that no position has settled yet,
+     * token-dec, rounded down. Mirrors the contract's `pending_borrowing`.
+     * The vault's share of it, after the treasury cut, counts toward the
+     * share price ahead of settlement.
+     *
+     * Reads the borrowing indices as this snapshot stores them. Pass
+     * `market.accrue(price)` to count the borrowing accrued since.
+     */
+    pendingBorrowing(): bigint {
+        return marketPendingBorrowing(this.data, true);
     }
 
     /**
@@ -360,9 +386,14 @@ export class Market {
 
     /**
      * Convert an asset amount to shares at the effective deposit fill rate:
-     * vault assets net of capped trader uPnL at `price`, virtual-offset
-     * rounding, mirroring `execute_vault_order`'s deposit branch pre-fee.
-     * Token-dec in, share-dec out.
+     * vault assets net of capped trader uPnL at `price`, plus the vault's
+     * share of pending borrowing, virtual-offset rounding, mirroring
+     * `execute_vault_order`'s deposit branch pre-fee. Token-dec in,
+     * share-dec out.
+     *
+     * Reads the borrowing indices as this snapshot stores them. Pass
+     * `market.accrue(price)` to count the borrowing accrued since, as the
+     * fill does.
      *
      * Pre-fee, so not a `minOut` source: a deposit order's `minOut` is
      * checked against the shares its assets mint after the `depositFee`
@@ -371,14 +402,18 @@ export class Market {
      */
     assetsToShares(assets: bigint, price: PriceInput): bigint {
         const p = this.priceAt(price);
-        const pnl = cappedNetPnl(this.data, this.config, p, this.vaultAssets, false);
+        const pnl = lpNetPnl(this.data, this.config, p, this.vaultAssets, this.treasuryRate, false);
         return convertVaultAssetsToShares(this.vaultAtomic(), assets, pnl);
     }
 
     /**
      * Convert shares to assets at the effective redeem fill rate (capped
-     * uPnL maximized against the redeemer at `price`, pre-fee). Share-dec
-     * in, token-dec out.
+     * uPnL maximized against the redeemer at `price`, the vault's share of
+     * pending borrowing counted, pre-fee). Share-dec in, token-dec out.
+     *
+     * Reads the borrowing indices as this snapshot stores them. Pass
+     * `market.accrue(price)` to count the borrowing accrued since, as the
+     * fill does.
      *
      * Pre-fee, so not a `minOut` source: a redeem order's `minOut` is
      * checked against these assets after the `redeemFee` cut, which is what
@@ -386,7 +421,7 @@ export class Market {
      */
     sharesToAssets(shares: bigint, price: PriceInput): bigint {
         const p = this.priceAt(price);
-        const pnl = cappedNetPnl(this.data, this.config, p, this.vaultAssets, true);
+        const pnl = lpNetPnl(this.data, this.config, p, this.vaultAssets, this.treasuryRate, true);
         return convertVaultSharesToAssets(this.vaultAtomic(), shares, pnl);
     }
 

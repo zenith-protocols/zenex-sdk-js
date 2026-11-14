@@ -7,9 +7,10 @@ from npm and are not an upgrade path.
 
 ### Contracts
 
-- Core contracts at zenex-contracts release `644a4c4` (market, strategy
-  vault, factory, oracle, treasury, governance). The committed specs are
-  byte-identical to the mainnet WASMs.
+- Core contracts at zenex-contracts `201a2f0` (market, strategy vault,
+  factory, oracle, treasury, governance): release `644a4c4` plus the
+  borrowing NAV change (zenex-contracts #223). The committed specs are
+  generated from that build's WASMs.
 - Market router and fee forwarder from zenex-util-contracts v0.0.2.
 
 ### Requirements
@@ -48,8 +49,40 @@ installs resolved to before this release.
 - Event unions include the ownership events and the vault share
   transfer/approve events, so exhaustive switches need new cases.
 - `@stellar/stellar-sdk` 17 no longer satisfies the peer range.
+- `MarketData` has a required `borrowingWeight: SidePair`, decoded from the
+  contract's `borrowing_weight`. A `MarketData` entry written by an earlier
+  contract build does not decode: `parseMarketData` and `Market.load` throw a
+  `MarketStateError` with code `MISSING_STATE`.
+- Share pricing counts the vault's share of pending borrowing. `Market.netPnl`,
+  `assetsToShares`, `sharesToAssets`, `VaultOrderIntent.expectedOut` and
+  `create`, and `estimateMarket`'s `sharePrice`, `netPnl` and
+  `maxRedeemableShares` change by that income, as do the `net_pnl` values of
+  the `deposit_fill`, `redeem_fill` and `reject_vault_order` events.
+- A deposit fill gates with `PendingPnlExceeded` (754) while either side's
+  unrealized profit is above `maxPnlTrader` of half the vault, so
+  `VaultOrderIntent.fills` can return a `block` with code 754 for a deposit.
+- A redeem quoted above the vault balance gates with
+  `StrategyPayoutExceedsAssets` (803). `fills` used to block it with
+  `QuoteInvalidInput`.
+- `VaultOrderIntent.create` and `expectedOut` accrue the market to the quote
+  time before they price, as `fills` and the fill do, so a bound cut by
+  `create` counts the borrowing accrued since the last on-chain accrual. Both
+  take an optional trailing `now` (unix seconds, default the wall clock), so
+  without it their result moves with the clock on a market that has open
+  positions. They used to price on the snapshot as loaded.
+- `FactoryContract.deployMarket` no longer takes `vaultDecimalsOffset`, and
+  `VaultConstructorArgs` has no `decimals_offset`. The vault fixes its offset
+  at 6, so shares carry 13 decimals.
 
 **Added**
+
+- `Market.pendingBorrowing`: the borrowing accrued and not yet settled, which
+  mirrors the contract's `pending_borrowing`.
+- Error codes `StrategySupplyLimitExceeded` (802) and
+  `StrategyPayoutExceedsAssets` (803).
+- `VIRTUAL_SHARES`: the vault's virtual shares, `10^6`, which mirrors the
+  contract's constant. Share pricing uses it whatever offset the vault
+  instance stores.
 
 - `FeeForwarderContract`: `forwardMulticall`, `forwardCreateAndFill`,
   `forwardCreateAndTryFill`, `authorizedArgs` and parsers, with the

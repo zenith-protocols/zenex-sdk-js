@@ -120,6 +120,7 @@ function emptyMarket(overrides: Partial<MarketData> = {}): MarketData {
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
+        borrowingWeight: pair(),
         fundingRate: 0n,
         accruedAt: 0n,
         creditPool: 0n,

@@ -133,8 +133,9 @@ export class MarketContract extends Contract {
      * starts `Status::Active`.
      *
      * # Errors
-     * - InvalidConfig (700) if `feedId` is not a V3 (`0x0003…`) stream id, or
-     *   a config bound or range check fails.
+     * - InvalidConfig (700) if `feedId` is not a V3 (`0x0003…`) stream id,
+     *   the collateral token does not report exactly 7 decimals, or a bound
+     *   or range check fails.
      * - NegativeValueNotAllowed (710) if a fee, margin, borrowing, funding,
      *   ADL or PnL field, `minOrderMargin`, `minDeposit` or `execFee` is
      *   negative. Any other negative field fails its own bound as 700.
@@ -370,7 +371,8 @@ export class MarketContract extends Contract {
      * @param kind - `Deposit` moves assets in for shares; `Redeem` moves
      *   shares in for assets.
      * @param amount - Assets to deposit (token-dec), or shares to redeem
-     *   (share-dec: token-dec plus the vault's decimals offset).
+     *   (share-dec, 13 decimals: the token's 7 plus the vault's fixed offset
+     *   of 6).
      * @param minOut - Minimum received at fill, net of the vault fee: shares
      *   for a deposit (share-dec), assets for a redeem (token-dec). `0`
      *   means unset. A fill quoted below it rejects the order rather than
@@ -659,7 +661,8 @@ export class MarketContract extends Contract {
      * the principal returns to `user` (a deposit refund `user` cannot receive
      * parks as claimable credit), and the escrowed `execFee` pays the keeper.
      * The capacity gates (753, 714, 754) revert instead and leave the order
-     * pending.
+     * pending. A deposit's pending-PnL gate (754) runs ahead of the `minOut`
+     * check, so it reverts a fill that would otherwise reject.
      *
      * @param price - The keeper's signed price update for this market's feed.
      *   The fill prices at the newer of this report and the market's cached
@@ -682,7 +685,13 @@ export class MarketContract extends Contract {
      * - UtilizationExceeded (714) if a redeem would leave either side's
      *   reserve above `maxUtilWithdraw` of half the remaining vault balance.
      * - PendingPnlExceeded (754) if a redeem would leave a side's pending PnL
-     *   above `maxPnlWithdraw` of half the remaining balance.
+     *   above `maxPnlWithdraw` of half the remaining balance, or a deposit
+     *   runs while it is above `maxPnlTrader` of half the balance.
+     * - StrategySupplyLimitExceeded (802) if a deposit's shares would lift
+     *   the vault's share supply above `i128::MAX` less the virtual shares.
+     * - StrategyPayoutExceedsAssets (803) if a redeem's payout exceeds the
+     *   vault's asset balance. The share price counts pending borrowing the
+     *   vault does not hold yet.
      */
     executeVaultOrder(keeper: string, user: string, id: u32, price: Buffer | Uint8Array): string {
         return this.call(

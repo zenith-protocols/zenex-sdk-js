@@ -143,6 +143,7 @@ export function marketData(overrides: Partial<MarketData> = {}): MarketData {
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
+        borrowingWeight: pair(),
         fundingRate: 0n,
         accruedAt: 0n,
         creditPool: 0n,
@@ -151,16 +152,25 @@ export function marketData(overrides: Partial<MarketData> = {}): MarketData {
     };
 }
 
+/** The vault's fixed decimals offset: shares carry six decimals over the asset. */
+export const SHARE_DECIMALS_OFFSET = 6;
+
+/** Shares per asset unit in a vault at the bootstrap rate, `10^6`. */
+export const SHARE_SCALE = 1_000_000n;
+
 export interface MarketFixture {
     data?: Partial<MarketData>;
     config?: Partial<MarketConfig>;
+    /** Vault assets, token-dec. Defaults to 1,000.0. */
     vaultAssets?: bigint;
+    /** Share supply, share-dec. Defaults to the bootstrap rate, `vaultAssets * SHARE_SCALE`. */
     vaultShares?: bigint;
     status?: Status;
     adl?: AdlState;
     ledger?: number;
     terminalPrice?: bigint;
     delistedAt?: bigint;
+    treasuryRate?: bigint;
 }
 
 /** A loaded `Market`, built by constructor on the contract `test_config`. */
@@ -183,9 +193,10 @@ export function fixtureMarket(fixture: MarketFixture = {}): Market {
         fixture.terminalPrice,
         fixture.delistedAt,
         vaultAssets,
-        fixture.vaultShares ?? vaultAssets,
-        0,
+        fixture.vaultShares ?? vaultAssets * SHARE_SCALE,
+        SHARE_DECIMALS_OFFSET,
         TOKEN_DECIMALS,
+        fixture.treasuryRate ?? 0n,
     );
 }
 

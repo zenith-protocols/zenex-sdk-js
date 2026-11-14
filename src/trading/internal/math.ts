@@ -260,6 +260,34 @@ export function marketNetPnl(data: MarketData, price: PriceData, maximize: boole
     );
 }
 
+/**
+ * Borrowing both sides accrued but no position has settled yet, token-dec.
+ * Ports `MarketData::pending_borrowing`.
+ *
+ * Per side it is `notional * borrowingIdx - borrowingWeight`, floored at
+ * zero. The two sides sum exactly, and the sum divides by SCALAR_18 once.
+ * `data.borrowingIdx` is used as passed: advance it first for a number as of
+ * a later time.
+ *
+ * @param maximize `true` marks it in the traders' favour, rounded down.
+ *   `false` marks it against them, rounded up.
+ * @throws {RangeError} if a side's product or the sum leaves the i128 range,
+ *   where the contract traps.
+ */
+export function marketPendingBorrowing(data: MarketData, maximize: boolean): bigint {
+    let pending = 0n;
+    for (const isLong of [true, false]) {
+        const side = subI128(
+            checkedI128(get(data.notional, isLong) * get(data.borrowingIdx, isLong)),
+            get(data.borrowingWeight, isLong),
+        );
+        pending = addI128(pending, side > 0n ? side : 0n);
+    }
+    return maximize
+        ? mulDivFloor(pending, 1n, SCALAR_18)
+        : mulDivCeil(pending, 1n, SCALAR_18);
+}
+
 /** Result of advancing a market's accrual indices to a quote time. */
 export interface AccrualResult {
     /** Market data with `borrowingIdx` and `fundingIdx` advanced to `elapsed` seconds past `accruedAt`. */
@@ -280,6 +308,7 @@ function cloneMarket(data: MarketData): MarketData {
         tokens: clonePair(data.tokens),
         fundingIdx: clonePair(data.fundingIdx),
         borrowingIdx: clonePair(data.borrowingIdx),
+        borrowingWeight: clonePair(data.borrowingWeight),
     };
 }
 

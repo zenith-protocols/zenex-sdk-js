@@ -11,9 +11,9 @@ import type { Market } from './market.js';
 import type { PriceInput } from './price.js';
 import { marketPrice, quoteTime } from './price.js';
 import {
-    cappedNetPnl,
     convertVaultAssetsToShares,
     convertVaultSharesToAssets,
+    lpNetPnl,
     quoteVaultDepositFill,
     quoteVaultOrderCreation,
     quoteVaultRedeemFill,
@@ -40,43 +40,52 @@ function redeemsAtCreation(market: Market, kind: VaultOrderKind): boolean {
     return market.status === Status.Retired && kind === VaultOrderKind.Redeem;
 }
 
-/** @internal Fee-net expected output of a fill, mirroring `execute_vault_order`'s two branches. */
+/**
+ * @internal Fee-net expected output of a fill at `now`, mirroring
+ * `execute_vault_order`'s two branches. The fill loads the market accrued to
+ * its ledger time, so the quote accrues to `now` before it prices.
+ */
 function expectedFillOutput(
     market: Market,
     kind: VaultOrderKind,
     amount: bigint,
     price: PriceInput,
+    now?: bigint,
 ): bigint {
     // The retirement clear-out left a flat book, so the direct redeem prices
     // at zero pending PnL and charges no fee.
     if (redeemsAtCreation(market, kind)) {
         return convertVaultSharesToAssets(market.vaultAtomic(), amount, 0n);
     }
-    const p = marketPrice(market, price, quoteTime(market));
+    const at = quoteTime(market, now);
+    const accrued = market.accrue(price, at);
+    const p = marketPrice(accrued, price, at);
     if (kind === VaultOrderKind.Deposit) {
-        const fee = mulDivFloor(amount, market.config.depositFee, SCALAR_18);
-        const pnl = cappedNetPnl(
-            market.data,
-            market.config,
+        const fee = mulDivFloor(amount, accrued.config.depositFee, SCALAR_18);
+        const pnl = lpNetPnl(
+            accrued.data,
+            accrued.config,
             p,
-            market.vaultAssets,
+            accrued.vaultAssets,
+            accrued.treasuryRate,
             false,
         );
         return convertVaultAssetsToShares(
-            market.vaultAtomic(),
+            accrued.vaultAtomic(),
             amount - fee,
             pnl,
         );
     }
-    const pnl = cappedNetPnl(
-        market.data,
-        market.config,
+    const pnl = lpNetPnl(
+        accrued.data,
+        accrued.config,
         p,
-        market.vaultAssets,
+        accrued.vaultAssets,
+        accrued.treasuryRate,
         true,
     );
-    const gross = convertVaultSharesToAssets(market.vaultAtomic(), amount, pnl);
-    return gross - mulDivFloor(gross, market.config.redeemFee, SCALAR_18);
+    const gross = convertVaultSharesToAssets(accrued.vaultAtomic(), amount, pnl);
+    return gross - mulDivFloor(gross, accrued.config.redeemFee, SCALAR_18);
 }
 
 /**
@@ -85,7 +94,8 @@ function expectedFillOutput(
  * `minOut` from a slippage bound; the constructor is the raw path.
  *
  * Share pricing is uPnL-aware in both directions: a fill values the vault's
- * assets net of trader PnL at the mark. {@link VaultOrderIntent.fills} is
+ * assets net of trader PnL at the mark, plus the vault's share of borrowing
+ * that positions have accrued and not yet settled. {@link VaultOrderIntent.fills} is
  * advice: `toOperation` builds the call whatever it says. An order a
  * capacity gate blocks rests until conditions clear, and cancel refunds it.
  * `minOut` does not wait: a keeper fill quoted below it rejects the order,
@@ -115,6 +125,15 @@ export class VaultOrderIntent {
      * market executes at creation and never reads `minOut`, so it keeps
      * `minOut` at `0n` and needs no price.
      *
+     * The output is estimated on the market accrued to `now`, as the fill
+     * prices it, so the bound counts the borrowing accrued since the stored
+     * accrual. A fill lands at least a second later and accrues further,
+     * which lowers a deposit's quote: a deposit bound needs room for the
+     * borrowing of the wait.
+     *
+     * @param now Quote time, unix seconds; read only with a nonzero
+     *   `slippageBps`. Defaults to the wall clock and never reads earlier
+     *   than the market's stored accrual.
      * @throws {RangeError} when `slippageBps` is outside `[0, 10_000]`, or
      *   nonzero with no price to estimate the output the bound is cut from.
      */
@@ -125,6 +144,7 @@ export class VaultOrderIntent {
         amount: bigint,
         slippageBps?: bigint,
         price?: PriceInput,
+        now?: bigint,
     ): VaultOrderIntent {
         const bps = checkedBps(slippageBps ?? 0n);
         let minOut = 0n;
@@ -134,7 +154,7 @@ export class VaultOrderIntent {
                     'slippageBps is set, so a price is required to derive minOut',
                 );
             }
-            const expected = expectedFillOutput(market, kind, amount, price);
+            const expected = expectedFillOutput(market, kind, amount, price, now);
             minOut = mulDivFloor(
                 expected,
                 BPS_DENOMINATOR - bps,
@@ -145,14 +165,22 @@ export class VaultOrderIntent {
     }
 
     /**
-     * What a fill right now would return at `price`, net of the
+     * What a fill at `now` would return at `price`, net of the
      * deposit/redeem fee, at the uPnL-aware rate: shares (share-dec) for a
      * deposit, assets (token-dec) for a redeem. This is the quote a keeper
      * fill checks `minOut` against. On a `Retired` market a redeem pays at
-     * creation instead: no fee, priced at zero pending PnL, `price` unused.
+     * creation instead: no fee, priced at zero pending PnL, `price` and
+     * `now` unused.
+     *
+     * The market accrues to `now` first, as the fill does, so the quote
+     * counts the borrowing accrued since the stored accrual. It equals the
+     * quote on `market.accrue(price, now)`.
+     *
+     * @param now Quote time, unix seconds. Defaults to the wall clock and
+     *   never reads earlier than the market's stored accrual.
      */
-    expectedOut(market: Market, price: PriceInput): bigint {
-        return expectedFillOutput(market, this.kind, this.amount, price);
+    expectedOut(market: Market, price: PriceInput, now?: bigint): bigint {
+        return expectedFillOutput(market, this.kind, this.amount, price, now);
     }
 
     /**
@@ -160,9 +188,11 @@ export class VaultOrderIntent {
      * at `price`. The creation rules of `create_vault_order` run first. Then
      * the checks `execute_vault_order` runs: the redeem lock (evaluated at
      * the earliest moment a fill is legal, so a fresh redeem reports its lock
-     * outcome rather than a false block), `minOut` against the uPnL-aware
-     * rate, the vault balance cap on a deposit, and the utilization and
-     * pending-PnL exit gates on a redeem.
+     * outcome rather than a false block), the pending-PnL gate on a deposit,
+     * `minOut` against the uPnL-aware rate, the supply limit and the vault
+     * balance cap on a deposit, and the payout bound and the utilization and
+     * pending-PnL exit gates on a redeem. The market accrues to the fill
+     * time first.
      *
      * - `{ fills: true }`: the order fills. A redeem on a `Retired` market
      *   fills at creation, with no fee and no `minOut` check.

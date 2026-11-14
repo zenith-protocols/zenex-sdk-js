@@ -151,7 +151,7 @@ export enum ZenexErrorCode {
     VaultExceededMaxWithdraw = 407,
     /** A redemption exceeds the maximum for the address. */
     VaultExceededMaxRedeem = 408,
-    /** The decimals offset exceeds the maximum of 10. */
+    /** The decimals offset exceeds the maximum of 10. The strategy vault sets a fixed offset of 6, so it never raises this. */
     VaultMaxDecimalsOffsetExceeded = 409,
     /** Vault math overflowed. */
     VaultMathOverflow = 410,
@@ -229,7 +229,7 @@ export enum ZenexErrorCode {
     // `reject_vault_order`.
     /** A deposit fill would push the vault balance above `max_vault_balance`. */
     VaultBalanceExceeded = 753,
-    /** A redeem fill ran while a side's pending PnL exceeds `max_pnl_withdraw` of half the post-redeem vault balance. */
+    /** A redeem fill ran while a side's pending PnL exceeds `max_pnl_withdraw` of half the post-redeem vault balance, or a deposit fill while it exceeds `max_pnl_trader` of half the balance. */
     PendingPnlExceeded = 754,
     /** A settlement's vault draw exceeds the vault's balance. */
     VaultInsolvent = 755,
@@ -274,11 +274,15 @@ export enum ZenexErrorCode {
     /** The report's validity window opens, or its observation sits, more than `trade_staleness` ahead of the ledger clock. */
     OraclePriceAhead = 793,
 
-    // Strategy Vault Errors (800-801)
+    // Strategy Vault Errors (800-803)
     /** An amount argument is negative, or zero where a positive value is required. */
     StrategyInvalidAmount = 800,
-    /** The pending trader PnL passed in exceeds the vault's asset balance. */
+    /** The pending trader profit exceeds the vault's asset balance. */
     StrategyPnlExceedsAssets = 801,
+    /** The deposit would lift the share supply above `i128::MAX` less the virtual shares. */
+    StrategySupplyLimitExceeded = 802,
+    /** A redeem's payout exceeds the vault's asset balance. */
+    StrategyPayoutExceedsAssets = 803,
 
     // Governance Errors (810-812)
     /** No call is queued under the nonce, or no delay change is pending. */
@@ -499,7 +503,7 @@ const errorMessages: Record<number, string> = {
     [750]: 'No vault order exists for (user, id)',
     [751]: 'Redeem filled before its redeem_lock cooldown elapsed',
     [753]: 'Deposit fill would push the vault balance above max_vault_balance',
-    [754]: 'Redeem fill would leave pending PnL above the max_pnl_withdraw gate',
+    [754]: 'Pending PnL is above the max_pnl_withdraw gate for a redeem fill or the max_pnl_trader gate for a deposit fill',
     [755]: 'Settlement vault draw exceeds the vault balance',
     [760]: 'No claimable credit balance, or the credit pool is empty',
     [770]: 'ADL attempted on a side not flagged by update_adl_state, or whose pending PnL is at or below the clear target',
@@ -519,6 +523,8 @@ const errorMessages: Record<number, string> = {
     // Strategy Vault
     [800]: 'Invalid amount for strategy operation',
     [801]: 'Pending trader PnL exceeds the vault asset balance',
+    [802]: 'Deposit would lift the share supply above the limit',
+    [803]: 'Redeem payout exceeds the vault asset balance',
 
     // Governance
     [810]: 'No call queued under this nonce, or no pending delay change',
@@ -606,7 +612,7 @@ export class ZenexError extends Error {
  *
  * The per-contract code namespaces are disjoint (Stellar Asset Contract
  * 1-13, fungible token 100-114, vault token 400-410, shared admin 600,
- * market 700-772, oracle 780-793, strategy-vault 800-801, governance
+ * market 700-772, oracle 780-793, strategy-vault 800-803, governance
  * 810-812, treasury 900, ownable 2100-2102, role transfer 2200-2203, smart
  * account 3000-3016, session policy 4002-4007, fee-abstraction 5000-5006,
  * fee forwarder 6001-6002, referral 7001), so every code resolves without a

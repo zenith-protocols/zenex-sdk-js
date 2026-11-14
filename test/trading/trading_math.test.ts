@@ -71,6 +71,7 @@ function makeMarket(overrides: Partial<MarketData> = {}): MarketData {
         tokens: pairOf(0n, 0n),
         fundingIdx: pairOf(0n, 0n),
         borrowingIdx: pairOf(0n, 0n),
+        borrowingWeight: pairOf(0n, 0n),
         fundingRate: 0n,
         accruedAt: 0n,
         creditPool: 0n,
