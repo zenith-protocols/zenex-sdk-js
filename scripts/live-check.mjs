@@ -110,7 +110,8 @@ check(
 
 // --- 3. A chain-derived price -----------------------------------------------
 // The PriceCache temporary entry holds the newest verified price the market
-// consumed (16-ledger TTL). Fall back to the book's implied entry price.
+// consumed, already spread-reduced. A write extends it to about a day, so it
+// can be stale; fall back to the book's implied entry price when it is gone.
 let price;
 const server = new rpc.Server(NETWORK.rpc, NETWORK.opts);
 try {
@@ -151,7 +152,7 @@ const PROBE_USER =
 const { market: m2, user } = await Market.loadWithUser(NETWORK, contracts, PROBE_USER);
 console.log(`\nMarket.loadWithUser(${PROBE_USER.slice(0, 8)}…)`);
 check('one batched read returns both', m2.ledger > 0 && user.userId === PROBE_USER);
-check('empty subject reads zeroed', !user.long.isOpen() && !user.short.isOpen() && user.orderCounter === 0);
+check('empty subject reads zeroed', !user.long.isOpen() && !user.short.isOpen() && user.orderCounter === 1);
 check('claimable capped at pool', user.claimable(market) === 0n);
 const orders = await user.loadOrders(NETWORK);
 check('loadOrders empty for fresh subject', orders.length === 0);

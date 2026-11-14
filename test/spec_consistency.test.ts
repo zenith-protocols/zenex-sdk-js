@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { MarketContract } from '../src/contracts/market/contract.js';
 import { MarketRouterContract } from '../src/contracts/router/contract.js';
+import { FeeForwarderContract } from '../src/contracts/fee_forwarder/contract.js';
 import { FactoryContract } from '../src/contracts/factory/contract.js';
 import { VaultContract } from '../src/contracts/vault/contract.js';
 import { OracleContract } from '../src/contracts/oracle/contract.js';
@@ -14,6 +15,7 @@ import {
     oracleSpec,
     strategyVaultSpec,
     marketRouterSpec,
+    feeForwarderSpec,
     marketSpec,
     treasurySpec,
 } from '../src/contracts/contract_specs.js';
@@ -24,6 +26,7 @@ import oracleFixture from './fixtures/specs/oracle.json';
 import strategyVaultFixture from './fixtures/specs/strategy_vault.json';
 import marketFixture from './fixtures/specs/market.json';
 import marketRouterFixture from './fixtures/specs/market_router.json';
+import feeForwarderFixture from './fixtures/specs/fee_forwarder.json';
 import treasuryFixture from './fixtures/specs/treasury.json';
 
 // These assertions cover the wiring between a generated spec array and the
@@ -50,6 +53,14 @@ const contracts = [
         fixture: marketRouterFixture,
         contract: MarketRouterContract,
         source: 'src/contracts/router/contract.ts',
+    },
+    {
+        package: 'fee-forwarder',
+        exportName: 'feeForwarderSpec',
+        spec: feeForwarderSpec,
+        fixture: feeForwarderFixture,
+        contract: FeeForwarderContract,
+        source: 'src/contracts/fee_forwarder/contract.ts',
     },
     {
         package: 'factory',

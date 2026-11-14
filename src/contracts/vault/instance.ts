@@ -1,12 +1,20 @@
 import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
+/**
+ * The vault's virtual shares, share-dec. The contract prices every mint and
+ * burn with this constant (`VIRTUAL_SHARES`, `10^6`), whatever offset the
+ * instance stores: `shares = assets * (supply + VIRTUAL_SHARES) / (backing + 1)`.
+ */
+export const VIRTUAL_SHARES = 1_000_000n;
+
+/** A strategy vault's instance storage, as `parseVaultInstance` decodes it. */
 export interface VaultInstanceState {
     /** Underlying asset token contract (`AssetAddress`). */
     asset: string;
     /** Total shares in circulation, share-dec atomic (`TotalSupply`). */
     totalSharesAtomic: bigint;
-    /** Virtual-share decimals offset (inflation-attack protection). */
+    /** Virtual-share decimals offset (inflation-attack protection), from `VirtualDecimalsOffset`. The constructor stores the contract's fixed offset, 6. */
     decimalsOffset: number;
     /** Share-token decimals, from `Meta`. Equals asset decimals plus the offset, so share amounts and asset amounts use different scales. */
     shareDecimals: number;
@@ -53,7 +61,7 @@ export function parseVaultInstance(instanceVal: xdr.ScVal): VaultInstanceState {
         decimalsOffset,
         shareDecimals,
         // The constructor sets the share token's metadata decimals to
-        // asset.decimals() + decimals_offset, so the asset decimals derive
+        // asset.decimals() + the stored offset, so the asset decimals derive
         // from the same instance read.
         assetDecimals: shareDecimals - decimalsOffset,
         strategy: storage.optionalAddress('Strategy'),

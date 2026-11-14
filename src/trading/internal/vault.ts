@@ -1,7 +1,8 @@
 import { Status } from '../../contracts/market/types.js';
 import type { MarketData, MarketConfig } from '../../contracts/market/types.js';
-import { BPS_DENOMINATOR, SCALAR_18, addI128, checkedBps, checkedI128, mulDivFloor, subI128 } from '../../math/fixed.js';
-import { advanceMarketAccruals, marketSidePnl, sideCapacity, sideReserved } from './math.js';
+import { VIRTUAL_SHARES } from '../../contracts/vault/instance.js';
+import { BPS_DENOMINATOR, I128_MAX, SCALAR_18, addI128, checkedBps, checkedI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
+import { advanceMarketAccruals, marketPendingBorrowing, marketSidePnl, sideCapacity, sideReserved } from './math.js';
 import type { PriceData } from './math.js';
 import { decodeLedgerSequence, estimate, exact, unavailable } from './quote.js';
 import type { QuoteResult } from './quote.js';
@@ -33,7 +34,10 @@ export interface VaultWithdrawHeadroom {
  * instead of throwing it to the caller.
  */
 export class VaultProtocolGateError extends Error {
-    constructor(readonly code: number) {
+    constructor(
+        /** The mirrored contract error number. */
+        readonly code: number,
+    ) {
         super(
             `contract error #${code}: ${WITHDRAW_GATE_REASONS[code] ?? 'protocol gate failed'}`,
         );
@@ -160,8 +164,11 @@ const ORDER_GATE_REASONS: Readonly<Record<number, string>> = {
     740: 'stale price',
     751: 'vault order locked',
     753: 'vault balance exceeded',
+    754: 'pending PnL exceeded',
     800: 'invalid strategy amount',
     801: 'pending PnL exceeds vault assets',
+    802: 'share supply limit exceeded',
+    803: 'payout exceeds vault assets',
 };
 
 class VaultQuoteGateError extends VaultProtocolGateError {
@@ -177,12 +184,13 @@ export interface VaultAtomicState {
     totalAssets: bigint;
     /** Outstanding share supply, share-dec. Mirrors `Base::total_supply`. */
     totalSupply: bigint;
-    /** Extra decimals shares carry over the asset. Share-dec equals token-dec plus this value; fixed at construction (`decimals_offset`). */
+    /** Extra decimals shares carry over the asset. Share-dec equals token-dec plus this value. Every vault stores the contract's fixed `DECIMALS_OFFSET`, 6. Share pricing does not read it: it uses `VIRTUAL_SHARES`, as the contract does. */
     decimalsOffset: number;
 }
 
 /** A caller-supplied fill estimate that `deriveVaultMinimumOutput` derives a `minOut` bound from. */
 export interface VaultEstimatedOutputReference {
+    /** Marks the output as a caller estimate, not a chain quote. */
     readonly kind: 'estimate';
     /** Estimated fill output: shares for a deposit, assets for a redeem (share-dec or token-dec, matching the order side). */
     readonly output: bigint;
@@ -210,9 +218,13 @@ export interface DeriveVaultMinimumOutputInput {
 
 /** Input to `quoteVaultOrderCreation`, mirroring `create_vault_order`'s arguments and the market state it reads. */
 export interface VaultOrderCreationQuoteInput {
+    /** Ledger sequence the quote is exact as of. */
     ledger: number;
+    /** Creation time, unix seconds: the order's `createdAt`. */
     now: bigint;
+    /** Market status at creation. */
     status: Status;
+    /** Market config at creation. */
     config: MarketConfig;
     /** Deposit escrows `amount` assets; redeem escrows `amount` shares. */
     action: 'deposit' | 'redeem';
@@ -226,8 +238,11 @@ export interface VaultOrderCreationQuoteInput {
 
 /** A vault order accepted to rest, mirroring the `VaultOrder` row `create_vault_order` stores. */
 export interface VaultRestingOrderCreation {
+    /** The order rests for a keeper fill. */
     kind: 'resting';
+    /** Creation never fills a non-retired order. */
     policy: 'restOnly';
+    /** Deposit or redeem. */
     action: 'deposit' | 'redeem';
     /** Assets escrowed (deposit, token-dec) or shares escrowed (redeem, share-dec). */
     amount: bigint;
@@ -257,14 +272,19 @@ export interface VaultRestingOrderCreation {
  * check, and no keeper `executionFee`.
  */
 export interface VaultRetiredImmediateRedeem {
+    /** The redeem settles inside creation. */
     kind: 'retiredImmediateRedeem';
+    /** Creation pays out directly. */
     policy: 'direct';
+    /** Only a redeem can settle this way. */
     action: 'redeem';
     /** Shares burned, share-dec. */
     shares: bigint;
     /** Assets paid, token-dec. Priced at `net_pnl = 0`, exact because a retired market's book is flat. */
     assets: bigint;
+    /** `minOut` is never checked. */
     minOutApplied: false;
+    /** No keeper fee is escrowed or paid. */
     executionFee: 0n;
 }
 
@@ -274,13 +294,17 @@ export type VaultOrderCreationOutcome =
 
 /** An exact `quoteVaultOrderCreation` result, unwrapped from its `QuoteResult` envelope. */
 export interface ExactVaultOrderCreationQuote {
+    /** Always `exact`. */
     kind: 'exact';
+    /** The creation outcome. */
     value: VaultOrderCreationOutcome;
+    /** Ledger sequence the quote is exact as of. */
     ledger: number;
 }
 
 /** `ExactVaultOrderCreationQuote` narrowed to the resting-order outcome. */
 export interface ExactVaultRestingOrderCreationQuote extends ExactVaultOrderCreationQuote {
+    /** The resting order. */
     value: VaultRestingOrderCreation;
 }
 
@@ -289,6 +313,7 @@ export interface ExactVaultRestingOrderCreationQuote extends ExactVaultOrderCrea
  * receipts `execute_vault_order` emits.
  */
 export interface VaultFillOutcome {
+    /** Which fill landed. */
     kind: 'deposit' | 'redeem';
     /** Assets deposited or shares redeemed, before fees: token-dec for a deposit, share-dec for a redeem. */
     input: bigint;
@@ -300,7 +325,7 @@ export interface VaultFillOutcome {
     vaultFee: bigint;
     /** Flat keeper fee escrowed at order creation, paid to the keeper on fill, token-dec. */
     executionFee: bigint;
-    /** Pending trader PnL the fill priced against, capped and signed, token-dec. Does not change what the user receives. */
+    /** NAV adjustment the fill priced against, signed, token-dec: capped pending trader PnL less the vault's share of pending borrowing. See `lpNetPnl`. */
     netPnl: bigint;
     /**
      * Vault backing projected after this fill, token-dec, including the
@@ -308,6 +333,7 @@ export interface VaultFillOutcome {
      * so this is not `vaultFee` added in full, and it does not change `output`.
      */
     postVaultAssets: bigint;
+    /** Shares price at the vault's uPnL-marked net asset value at fill. */
     valuation: 'transactionQuoteMarkedNav';
 }
 
@@ -319,7 +345,9 @@ export interface VaultFillOutcome {
  * through the vault.
  */
 export interface VaultRejectOutcome {
+    /** The keeper's call rejects the order. */
     kind: 'rejected';
+    /** Deposit or redeem. */
     action: 'deposit' | 'redeem';
     /** The fill's quote, below `minOut`: the shares a deposit would mint (share-dec), or a redeem's assets net of the vault fee (token-dec). */
     quoted: bigint;
@@ -329,10 +357,11 @@ export interface VaultRejectOutcome {
     refund: bigint;
     /** Flat keeper fee escrowed at order creation, token-dec: the keeper's whole payout on a rejection. */
     executionFee: bigint;
-    /** Pending trader PnL the quote priced against, capped and signed, token-dec. */
+    /** NAV adjustment the quote priced against, signed, token-dec: capped pending trader PnL less the vault's share of pending borrowing. See `lpNetPnl`. */
     netPnl: bigint;
     /** Vault backing after the rejection, token-dec: unchanged. */
     postVaultAssets: bigint;
+    /** The quote priced at the vault's uPnL-marked net asset value. */
     valuation: 'transactionQuoteMarkedNav';
 }
 
@@ -346,13 +375,19 @@ export type VaultQuoteOutcome = VaultFillOutcome | VaultRejectOutcome;
 
 /** Shared inputs for `quoteVaultDepositFill` and `quoteVaultRedeemFill`: the market and vault state a fill prices against. */
 export interface VaultQuoteContext {
+    /** Ledger sequence the quote is exact as of. */
     ledger: number;
+    /** Fill time, unix seconds; the market accrues to it first. */
     now: bigint;
+    /** The market's stored aggregates. */
     market: MarketData;
+    /** The market's config. */
     config: MarketConfig;
+    /** The verified fill price. */
     price: PriceData;
+    /** The vault's atomic state. */
     vault: VaultAtomicState;
-    /** Treasury's cut of the fill fee (SCALAR_18), read live like `execute_vault_order` reads it at fill time. */
+    /** Treasury's cut of the fill fee and of pending borrowing (SCALAR_18), read live like `execute_vault_order` reads it at fill time. */
     treasuryRate: bigint;
     /** Flat keeper fee escrowed on the order, settlement token, token-dec. */
     executionFee: bigint;
@@ -402,9 +437,8 @@ function exchangeBasis(
 ): { supply: bigint; assets: bigint } {
     const effectiveAssets = subI128(vault.totalAssets, netPnl);
     if (effectiveAssets < 0n) throw new VaultQuoteGateError(801);
-    const virtualShares = checkedI128(10n ** BigInt(vault.decimalsOffset));
     return {
-        supply: addI128(vault.totalSupply, virtualShares),
+        supply: addI128(vault.totalSupply, VIRTUAL_SHARES),
         assets: addI128(effectiveAssets, 1n),
     };
 }
@@ -415,8 +449,8 @@ function exchangeBasis(
  * favor.
  *
  * @param assets - assets to convert, token-dec. Must be nonnegative.
- * @param netPnl - signed pending trader PnL marked against the vault,
- *   token-dec. Positive is profit the vault still owes.
+ * @param netPnl - signed NAV adjustment marked against the vault,
+ *   token-dec; see `lpNetPnl`. Positive is profit the vault still owes.
  * @returns shares, share-dec (token-dec plus `vault.decimalsOffset`).
  * @throws {VaultQuoteGateError} 800 if `assets` is negative.
  * @throws {VaultQuoteGateError} 801 if `netPnl` exceeds `vault.totalAssets`.
@@ -437,8 +471,8 @@ export function convertVaultAssetsToShares(
  * favor.
  *
  * @param shares - shares to convert, share-dec. Must be nonnegative.
- * @param netPnl - signed pending trader PnL marked against the vault,
- *   token-dec. Positive is profit the vault still owes.
+ * @param netPnl - signed NAV adjustment marked against the vault,
+ *   token-dec; see `lpNetPnl`. Positive is profit the vault still owes.
  * @returns assets, token-dec.
  * @throws {VaultQuoteGateError} 800 if `shares` is negative.
  * @throws {VaultQuoteGateError} 801 if `netPnl` exceeds `vault.totalAssets`.
@@ -467,17 +501,60 @@ function feeSplit(
     };
 }
 
-export function cappedNetPnl(
+/**
+ * Signed NAV adjustment for share pricing, token-dec. Ports
+ * `Market::lp_net_pnl`.
+ *
+ * It is the net of both sides' pending PnL marked at `maximize`, each side's
+ * profit capped at `maxPnlTrader` of half `vaultAssets`, less the vault's
+ * share of `marketPendingBorrowing`. The vault's share is the pending
+ * borrowing less the `treasuryRate` cut, rounded with the same mark: down
+ * when `maximize`, up otherwise. The cap does not clip it. A redeem prices at
+ * `maximize = true`, a deposit at `false`.
+ *
+ * `market` is used as passed: advance its indices first for a number as of a
+ * later time.
+ *
+ * @param treasuryRate Treasury's cut of borrowing (SCALAR_18).
+ */
+export function lpNetPnl(
     market: MarketData,
     config: MarketConfig,
     price: PriceData,
     vaultAssets: bigint,
+    treasuryRate: bigint,
     maximize: boolean,
 ): bigint {
     const cap = sideCapacity(vaultAssets, config.maxPnlTrader);
     const long = marketSidePnl(market, price, true, maximize);
     const short = marketSidePnl(market, price, false, maximize);
-    return addI128(long < cap ? long : cap, short < cap ? short : cap);
+    const pnl = addI128(long < cap ? long : cap, short < cap ? short : cap);
+    const pending = marketPendingBorrowing(market, maximize);
+    const vaultRate = subI128(SCALAR_18, treasuryRate);
+    const income = maximize
+        ? mulDivFloor(pending, vaultRate, SCALAR_18)
+        : mulDivCeil(pending, vaultRate, SCALAR_18);
+    return subI128(pnl, income);
+}
+
+/**
+ * Mirror the deposit PnL gate `fill_deposit` runs first: neither side's
+ * pending profit, marked in the traders' favour, may exceed `maxPnlTrader`
+ * of half the pre-deposit `vaultAssets`. Exactly at the allowance passes.
+ */
+function requireDepositPnlGate(
+    market: MarketData,
+    config: MarketConfig,
+    price: PriceData,
+    vaultAssets: bigint,
+): void {
+    const allowance = sideCapacity(vaultAssets, config.maxPnlTrader);
+    if (
+        marketSidePnl(market, price, true, true) > allowance ||
+        marketSidePnl(market, price, false, true) > allowance
+    ) {
+        throw new VaultQuoteGateError(754);
+    }
 }
 
 /**
@@ -602,14 +679,16 @@ export function deriveVaultMinimumOutput(
  * mirroring `create_vault_order`'s direct-redeem branch; `input.vault` is
  * required for that case.
  *
- * Returns `unavailable`:
- * - `MISSING_STATE` if the market is Retired, the action is redeem, and
- *   `input.vault` was not supplied.
- * - `CONTRACT_GATE` 710 if `minOut` is negative.
- * - `CONTRACT_GATE` 704 if the market is Frozen.
- * - `CONTRACT_GATE` 702 if a deposit is quoted on a Retired market.
- * - `CONTRACT_GATE` 732 if a deposit falls under `config.minDeposit`, or a
- *   redeem's share `amount` is not positive.
+ * Returns `unavailable` with `CONTRACT_GATE`, checked in the contract's
+ * order:
+ * - 710 if `amount` or `minOut` is negative.
+ * - 704 if the market is Frozen.
+ * - 702 if a deposit is quoted on a Retired market.
+ * - 732 if `amount` is zero, a deposit falls under `config.minDeposit`, or
+ *   a deposit's `amount + execFee` escrow leaves the i128 range.
+ *
+ * Returns `unavailable` with `MISSING_STATE` if the market is Retired, the
+ * action is redeem, and `input.vault` was not supplied.
  */
 export function quoteVaultOrderCreation(
     input: VaultOrderCreationQuoteInput,
@@ -617,19 +696,29 @@ export function quoteVaultOrderCreation(
     try {
         const ledger = decodeLedgerSequence(input.ledger);
         const createdAt = input.now;
+        const amount = input.amount;
         const minOut = input.minOut;
-        if (minOut < 0n) throw new VaultQuoteGateError(710);
+        if (amount < 0n || minOut < 0n) throw new VaultQuoteGateError(710);
 
         const status = input.status;
         if (status === Status.Frozen) throw new VaultQuoteGateError(704);
-        if (status === Status.Retired) {
-            if (input.action === 'deposit') {
-                throw new VaultQuoteGateError(702);
+        if (status === Status.Retired && input.action === 'deposit') {
+            throw new VaultQuoteGateError(702);
+        }
+        // A zero order can never fill; a redeem has no other floor.
+        if (amount === 0n) throw new VaultQuoteGateError(732);
+        const executionFee = input.config.execFee;
+        if (input.action === 'deposit') {
+            if (amount < input.config.minDeposit) {
+                throw new VaultQuoteGateError(732);
             }
-            const shares = input.amount;
-            // Same guard as the pending-redeem branch below: the contract
-            // rejects a non-positive share amount before touching the vault.
-            if (shares <= 0n) throw new VaultQuoteGateError(732);
+            if (amount > I128_MAX - executionFee) {
+                throw new VaultQuoteGateError(732);
+            }
+        }
+
+        if (status === Status.Retired) {
+            const shares = amount;
             if (input.vault === undefined) {
                 return unavailable(
                     'MISSING_STATE',
@@ -653,16 +742,6 @@ export function quoteVaultOrderCreation(
                 },
                 ledger,
             );
-        }
-
-        const amount = input.amount;
-        const executionFee = input.config.execFee;
-        if (input.action === 'deposit') {
-            if (amount <= 0n || amount < input.config.minDeposit) {
-                throw new VaultQuoteGateError(732);
-            }
-        } else if (amount <= 0n) {
-            throw new VaultQuoteGateError(732);
         }
 
         const fillAfter = createdAt === U64_MAX ? null : createdAt + 1n;
@@ -707,16 +786,24 @@ export function quoteVaultOrderCreation(
  * The keeper, treasury, and vault split of `vaultFee` only changes
  * `postVaultAssets`; it does not change the shares minted.
  *
- * A set `minOut` is checked first, against the shares the post-fee assets
+ * The deposit PnL gate runs first, on the pre-deposit balance. Once it
+ * passes, a set `minOut` is checked against the shares the post-fee assets
  * mint. A quote below it returns an exact `rejected` outcome instead of a
  * fill: the keeper's call removes the order, refunds `assets`, and pays
- * `executionFee` to the keeper. The vault balance cap is never reached.
+ * `executionFee` to the keeper. The supply limit and the vault balance cap
+ * are never reached.
  *
- * Returns `unavailable` with `CONTRACT_GATE`:
+ * Returns `unavailable` with `CONTRACT_GATE`, checked in the contract's
+ * order:
  * - 740 if `price.publishTime` predates `createdAt`, or the fill runs in the
  *   creation ledger.
+ * - 754 if either side's pending profit exceeds `config.maxPnlTrader` of
+ *   half `vault.totalAssets`. The order stays resting, `minOut` or not. An
+ *   adverse price move or a smaller winning side clears it.
  * - 800 if `assets`, or the post-fee deposit amount, is not positive.
- * - 801 if the capped pending trader PnL exceeds `vault.totalAssets`.
+ * - 801 if the NAV adjustment exceeds `vault.totalAssets`.
+ * - 802 if the minted shares would lift the supply above the i128 maximum
+ *   less the virtual shares.
  * - 753 if the projected `postVaultAssets` would exceed `config.maxVaultBalance`.
  *   Wait for the vault to free up room, or deposit less.
  */
@@ -726,16 +813,25 @@ export function quoteVaultDepositFill(
     try {
         const prepared = prepareContext(input);
         requireFillTiming(input.price, input.createdAt, input.now);
+        // The gate reads the pre-deposit book ahead of the slippage bound,
+        // so an overhang reverts the fill and leaves the order resting.
+        requireDepositPnlGate(
+            prepared.market,
+            input.config,
+            input.price,
+            prepared.vault.totalAssets,
+        );
         const assets = input.assets;
         if (assets <= 0n) throw new VaultQuoteGateError(800);
 
         const vaultFee = mulDivFloor(assets, input.config.depositFee, SCALAR_18);
         const depositAssets = subI128(assets, vaultFee);
-        const netPnl = cappedNetPnl(
+        const netPnl = lpNetPnl(
             prepared.market,
             input.config,
             input.price,
             prepared.vault.totalAssets,
+            prepared.treasuryRate,
             false,
         );
         // The slippage bound reads the vault's own quote of the post-fee
@@ -765,6 +861,12 @@ export function quoteVaultDepositFill(
             depositAssets,
             netPnl,
         );
+        if (
+            shares >
+            I128_MAX - VIRTUAL_SHARES - prepared.vault.totalSupply
+        ) {
+            throw new VaultQuoteGateError(802);
+        }
         const postVaultAssets = addI128(
             addI128(prepared.vault.totalAssets, depositAssets),
             split.vault,
@@ -811,8 +913,8 @@ function saturatingTimestampAdd(left: bigint, right: bigint): bigint {
  * Once the redeem lock has passed, a set `minOut` is checked against the
  * assets paid net of the redeem fee. A quote below it returns an exact
  * `rejected` outcome instead of a fill: the keeper's call removes the order,
- * returns `shares`, and pays `executionFee` to the keeper. The withdraw
- * gates are never reached.
+ * returns `shares`, and pays `executionFee` to the keeper. The payout bound
+ * and the withdraw gates are never reached.
  *
  * Returns `unavailable` with `CONTRACT_GATE`:
  * - 740 if `price.publishTime` predates `createdAt`, or the fill runs in the
@@ -820,6 +922,11 @@ function saturatingTimestampAdd(left: bigint, right: bigint): bigint {
  * - 751 if the `config.redeemLock` cooldown from `createdAt` has not
  *   elapsed. Wait and requote.
  * - 732 if `shares` is not positive.
+ * - 801 if the NAV adjustment exceeds `vault.totalAssets`.
+ * - 803 if the payout before the fee exceeds `vault.totalAssets`. The NAV
+ *   counts pending borrowing the vault does not hold yet, so a redeem of
+ *   nearly the whole supply can price above the balance. A smaller redeem,
+ *   or positions settling their borrowing, clears it.
  * - 714 or 754 if the withdraw gates block the fill; see
  *   `evaluateVaultWithdrawGates` for the condition and what clears it.
  */
@@ -841,11 +948,12 @@ export function quoteVaultRedeemFill(
             throw new RangeError('redeem shares exceed total supply');
         }
 
-        const netPnl = cappedNetPnl(
+        const netPnl = lpNetPnl(
             prepared.market,
             input.config,
             input.price,
             prepared.vault.totalAssets,
+            prepared.treasuryRate,
             true,
         );
         const grossAssets = convertVaultSharesToAssets(
@@ -865,7 +973,7 @@ export function quoteVaultRedeemFill(
             );
         }
         if (grossAssets > prepared.vault.totalAssets) {
-            throw new RangeError('redeem exceeds raw vault assets');
+            throw new VaultQuoteGateError(803);
         }
         const split = feeSplit(
             vaultFee,

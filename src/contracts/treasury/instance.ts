@@ -1,6 +1,7 @@
 import { xdr, scValToBigInt } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
+/** The treasury's instance storage, as `parseTreasuryInstance` decodes it. */
 export interface TreasuryInstanceState {
     /** Protocol fee rate (SCALAR_18 fraction); `0n` when unset. */
     rate: bigint;

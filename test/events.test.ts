@@ -1,16 +1,33 @@
 import { describe, it, expect } from 'vitest';
+import { contract } from '@stellar/stellar-sdk';
 import { ZenexContractType } from '../src/base_event.js';
 import type { ZenexEvent } from '../src/base_event.js';
 import {
     MarketEventType,
 } from '../src/contracts/market/events.js';
+import { OwnableEventType } from '../src/contracts/ownable/events.js';
+import type { OwnableEvent, OwnershipTransferEvent } from '../src/contracts/ownable/events.js';
+import { OracleEventType } from '../src/contracts/oracle/events.js';
+import { TreasuryEventType } from '../src/contracts/treasury/events.js';
+import { FeeForwarderEventType } from '../src/contracts/fee_forwarder/events.js';
+import { MarketContract } from '../src/contracts/market/contract.js';
+import { FactoryContract } from '../src/contracts/factory/contract.js';
+import { VaultContract } from '../src/contracts/vault/contract.js';
+import { OracleContract } from '../src/contracts/oracle/contract.js';
+import { TreasuryContract } from '../src/contracts/treasury/contract.js';
+import { GovernanceContract } from '../src/contracts/governance/contract.js';
+import { FeeForwarderContract } from '../src/contracts/fee_forwarder/contract.js';
 import type {
     MarketCancelOrderEvent,
     MarketLiquidationEvent,
     MarketRejectVaultOrderEvent,
 } from '../src/contracts/market/events.js';
 import { VaultEventType } from '../src/contracts/vault/events.js';
-import type { VaultDepositEvent, VaultWithdrawEvent } from '../src/contracts/vault/events.js';
+import type {
+    VaultDepositEvent,
+    VaultTransferEvent,
+    VaultWithdrawEvent,
+} from '../src/contracts/vault/events.js';
 import { GovernanceEventType } from '../src/contracts/governance/events.js';
 import { FactoryEventType } from '../src/contracts/factory/events.js';
 import type { FactoryDeployEvent } from '../src/contracts/factory/events.js';
@@ -18,12 +35,27 @@ import type { FactoryDeployEvent } from '../src/contracts/factory/events.js';
 // =============================================================================
 // Event-type enums are hand-checked against the contract sources on v2 main:
 //   market/src/events.rs, strategy-vault/src/strategy.rs (+ OZ stellar-tokens
-//   v0.7.0 vault/mod.rs Deposit/Withdraw), governance/src/events.rs,
-//   factory/src/events.rs.
+//   v0.7.2 vault and fungible events), governance/src/events.rs,
+//   factory/src/events.rs, oracle/src/events.rs, treasury/src/events.rs,
+//   OZ stellar-access 0.7.2 ownable events, and the fee forwarder's
+//   fee_collected (OZ fee abstraction).
 // Every workspace event uses bare #[contractevent], so each name topic is the
 // snake_case of the struct name (soroban-sdk-macros default). The SDK ships
-// event TYPES only (no decoders); the shape checks here are compile-time.
+// event TYPES only (no decoders). The name sets are also checked against the
+// committed specs below; test/event_field_mapping.test.ts type-checks the
+// field names.
 // =============================================================================
+
+/** The name topic of every event a contract spec declares. */
+function specEventNames(spec: contract.Spec): string[] {
+    const names = spec.entries
+        .filter((entry) => entry.switch().name === 'scSpecEntryEventV0')
+        .map((entry) => entry.eventV0().prefixTopics()[0].toString());
+    return [...new Set(names)].sort();
+}
+
+const sorted = (values: string[]) => [...values].sort();
+const ownable = Object.values(OwnableEventType) as string[];
 
 const base = {
     id: 'e-1',
@@ -32,6 +64,61 @@ const base = {
     ledgerClosedAt: '2026-08-14T00:00:00Z',
     txHash: 't',
 } as const;
+
+describe('every spec event has an SDK event type', () => {
+    it.each([
+        ['market', MarketContract.spec, [...Object.values(MarketEventType), ...ownable]],
+        ['factory', FactoryContract.spec, [...Object.values(FactoryEventType), ...ownable]],
+        ['strategy vault', VaultContract.spec, Object.values(VaultEventType)],
+        ['oracle', OracleContract.spec, [...Object.values(OracleEventType), ...ownable]],
+        ['treasury', TreasuryContract.spec, [...Object.values(TreasuryEventType), ...ownable]],
+        ['governance', GovernanceContract.spec, [...Object.values(GovernanceEventType), ...ownable]],
+        ['fee forwarder', FeeForwarderContract.spec, Object.values(FeeForwarderEventType)],
+    ] as const)('%s', (_name, spec, sdkNames) => {
+        expect(sorted([...sdkNames])).toEqual(specEventNames(spec));
+    });
+});
+
+describe('ownership event surface', () => {
+    it('names the three OpenZeppelin ownable events', () => {
+        expect(OwnableEventType.OwnershipTransfer).toBe('ownership_transfer');
+        expect(OwnableEventType.OwnershipTransferCompleted).toBe('ownership_transfer_completed');
+        expect(OwnableEventType.OwnershipRenounced).toBe('ownership_renounced');
+    });
+
+    it('stays out of MarketEventType, whose values consumers route as trading events', () => {
+        for (const name of ownable) {
+            expect(Object.values(MarketEventType) as string[]).not.toContain(name);
+        }
+    });
+
+    it('carries the raising contract in contractType', () => {
+        const event: OwnershipTransferEvent<ZenexContractType.Treasury> = {
+            ...base,
+            contractType: ZenexContractType.Treasury,
+            eventType: OwnableEventType.OwnershipTransfer,
+            oldOwner: 'G-old',
+            newOwner: 'G-new',
+            liveUntilLedger: 0,
+        };
+        const asOwnable: OwnableEvent = event;
+        const union: ZenexEvent = event;
+        expect(asOwnable.contractType).toBe(ZenexContractType.Treasury);
+        expect(union.eventType).toBe('ownership_transfer');
+    });
+});
+
+describe('oracle, treasury and fee forwarder event surface', () => {
+    it('names the admin and fee events', () => {
+        expect(OracleEventType.StalenessUpdate).toBe('staleness_update');
+        expect(OracleEventType.SpreadReductionUpdate).toBe('spread_reduction_update');
+        expect(TreasuryEventType.Withdraw).toBe('withdraw');
+        expect(TreasuryEventType.RateUpdate).toBe('rate_update');
+        expect(FeeForwarderEventType.FeeCollected).toBe('fee_collected');
+        expect(ZenexContractType.Oracle).toBe('oracle');
+        expect(ZenexContractType.Treasury).toBe('treasury');
+    });
+});
 
 describe('market event surface', () => {
     it('cancel_order carries the escrow refund (owner cancel and closure sweep)', () => {
@@ -85,6 +172,22 @@ describe('vault event surface', () => {
         expect(VaultEventType.Deposit).toBe('deposit');
         expect(VaultEventType.Withdraw).toBe('withdraw');
         expect(VaultEventType.StrategyWithdraw).toBe('strategy_withdraw');
+        expect(VaultEventType.Transfer).toBe('transfer');
+        expect(VaultEventType.Approve).toBe('approve');
+    });
+
+    it('types a share transfer with and without a muxed recipient', () => {
+        const plain: VaultTransferEvent = {
+            ...base,
+            contractType: ZenexContractType.Vault,
+            eventType: VaultEventType.Transfer,
+            from: 'G-user',
+            to: 'C-market',
+            amount: 5n,
+        };
+        const muxed: VaultTransferEvent = { ...plain, toMuxedId: 7n };
+        expect(plain.toMuxedId).toBeUndefined();
+        expect(muxed.toMuxedId).toBe(7n);
     });
 
     it('models the OZ ERC-4626 Deposit/Withdraw receipts', () => {
@@ -126,6 +229,7 @@ describe('governance event surface', () => {
 describe('factory event surface', () => {
     it('models the deploy receipt and joins the ZenexEvent union', () => {
         expect(FactoryEventType.Deploy).toBe('deploy');
+        expect(FactoryEventType.InitMetaUpdate).toBe('init_meta_update');
         const event: FactoryDeployEvent = {
             ...base,
             contractType: ZenexContractType.Factory,

@@ -1,7 +1,16 @@
 import { strategyVaultSpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, Operation } from '@stellar/stellar-sdk';
 import { i128, u32 } from '../../index.js';
+import { Buffer } from 'buffer';
 
+/**
+ * Constructor arguments for {@link VaultContract.deploy}.
+ *
+ * The share decimals are not an argument: every vault adds a fixed offset
+ * of 6 to the asset's decimals, which contributes 1_000_000 virtual shares
+ * to the exchange rate as inflation-attack protection. Share amounts are
+ * therefore NOT the same scale as asset amounts.
+ */
 export interface VaultConstructorArgs {
     /** Name for the vault share token */
     name: string;
@@ -9,11 +18,6 @@ export interface VaultConstructorArgs {
     symbol: string;
     /** Address of the underlying settlement token contract */
     asset: string;
-    /** Extra share decimals on top of the asset's decimals; contributes
-     * `10^decimals_offset` virtual shares to the exchange rate as
-     * inflation-attack protection. Share amounts are therefore NOT the same
-     * scale as asset amounts. */
-    decimals_offset: u32;
     /** Market contract address; the only caller allowed to invoke the vault's
      * strategy mutations. Immutable for the vault's lifetime. */
     strategy: string;
@@ -66,8 +70,7 @@ export class VaultContract extends Contract {
 
     /**
      * Builds a `CreateContractV2` operation deploying a new Vault instance
-     * with the given constructor args (share metadata, asset, decimals
-     * offset, strategy).
+     * with the given constructor args (share metadata, asset, strategy).
      * @param format - Encoding of `wasmHash` when passed as a string
      */
     static deploy(
@@ -87,7 +90,6 @@ export class VaultContract extends Contract {
                 nativeToScVal(args.name, { type: 'string' }),
                 nativeToScVal(args.symbol, { type: 'string' }),
                 Address.fromString(args.asset).toScVal(),
-                xdr.ScVal.scvU32(args.decimals_offset),
                 Address.fromString(args.strategy).toScVal(),
             ],
         }).toXDR('base64');
@@ -177,8 +179,8 @@ export class VaultContract extends Contract {
     }
 
     /**
-     * Get the share token's decimals: the asset's decimals plus the
-     * constructor's `decimals_offset`.
+     * Get the share token's decimals: the asset's decimals plus the fixed
+     * offset of 6.
      */
     decimals(): string {
         return this.call('decimals').toXDR('base64');
@@ -222,12 +224,14 @@ export class VaultContract extends Contract {
     /**
      * Preview the shares a deposit of `assets` would mint at the
      * uPnL-marked share price, rounded down.
-     * @param assets - Assets to quote (token-dec); traps with `InvalidAmount`
-     *   (800) if negative
+     * @param assets - Assets to quote (token-dec); traps with
+     *   `StrategyInvalidAmount` (800) if negative
      * @param netPnl - Signed pending trader PnL to mark against the vault
-     *   (token-dec). The caller supplies this value; the vault cannot verify
-     *   it. Traps with `PnlExceedsAssets` (801) if it exceeds the vault's
-     *   total assets.
+     *   (token-dec). The market passes its NAV adjustment, which also nets
+     *   out the vault's share of pending borrowing. The caller supplies
+     *   this value; the vault cannot verify it. Traps with
+     *   `StrategyPnlExceedsAssets` (801) if it exceeds the vault's total
+     *   assets.
      */
     previewDeposit(assets: i128, netPnl: i128): string {
         return this.call(
@@ -240,12 +244,14 @@ export class VaultContract extends Contract {
     /**
      * Preview the assets a redemption of `shares` would pay at the
      * uPnL-marked share price, rounded down.
-     * @param shares - Shares to quote (share-dec); traps with `InvalidAmount`
-     *   (800) if negative
+     * @param shares - Shares to quote (share-dec); traps with
+     *   `StrategyInvalidAmount` (800) if negative
      * @param netPnl - Signed pending trader PnL to mark against the vault
-     *   (token-dec). The caller supplies this value; the vault cannot verify
-     *   it. Traps with `PnlExceedsAssets` (801) if it exceeds the vault's
-     *   total assets.
+     *   (token-dec). The market passes its NAV adjustment, which also nets
+     *   out the vault's share of pending borrowing. The caller supplies
+     *   this value; the vault cannot verify it. Traps with
+     *   `StrategyPnlExceedsAssets` (801) if it exceeds the vault's total
+     *   assets.
      */
     previewRedeem(shares: i128, netPnl: i128): string {
         return this.call(
@@ -263,14 +269,18 @@ export class VaultContract extends Contract {
      * Deposit `assets` and mint the uPnL-priced shares to `receiver`;
      * returns the shares minted (share-dec, rounded down in the vault's
      * favor). Strategy auth required.
+     *
+     * Traps with `StrategySupplyLimitExceeded` (802) if the shares would
+     * lift the supply above `i128::MAX` less the virtual shares.
      * @param assets - Assets to deposit (token-dec); traps with
-     *   `InvalidAmount` (800) if not positive
+     *   `StrategyInvalidAmount` (800) if not positive
      * @param receiver - Address receiving the minted shares
      * @param from - Address providing the assets
      * @param netPnl - Signed pending trader PnL marked against the vault
      *   (token-dec); positive is profit the vault still owes. The caller
      *   supplies this value; the vault cannot verify it. Traps with
-     *   `PnlExceedsAssets` (801) if it exceeds the vault's total assets.
+     *   `StrategyPnlExceedsAssets` (801) if it exceeds the vault's total
+     *   assets.
      */
     strategyDeposit(
         assets: i128,
@@ -293,14 +303,18 @@ export class VaultContract extends Contract {
      * Redeem `shares` from `owner` and pay the uPnL-priced assets to
      * `receiver`; returns the assets paid (token-dec, rounded down in the
      * vault's favor). Strategy auth required.
-     * @param shares - Shares to burn (share-dec); traps with `InvalidAmount`
-     *   (800) if not positive
+     *
+     * Traps with `StrategyPayoutExceedsAssets` (803) if the payout exceeds
+     * the vault's total assets, which a negative `netPnl` can cause.
+     * @param shares - Shares to burn (share-dec); traps with
+     *   `StrategyInvalidAmount` (800) if not positive
      * @param receiver - Address receiving the redeemed assets
      * @param owner - Address whose shares are burned
      * @param netPnl - Signed pending trader PnL marked against the vault
      *   (token-dec); positive is profit the vault still owes. The caller
      *   supplies this value; the vault cannot verify it. Traps with
-     *   `PnlExceedsAssets` (801) if it exceeds the vault's total assets.
+     *   `StrategyPnlExceedsAssets` (801) if it exceeds the vault's total
+     *   assets.
      */
     strategyRedeem(
         shares: i128,
@@ -324,7 +338,7 @@ export class VaultContract extends Contract {
      * winning positions. Decreases `total_assets` and thus the share price.
      * Strategy auth required.
      * @param amount - Assets to withdraw to the strategy (token-dec); traps
-     *   with `InvalidAmount` (800) if not positive
+     *   with `StrategyInvalidAmount` (800) if not positive
      */
     strategyWithdraw(amount: i128): string {
         return this.call(

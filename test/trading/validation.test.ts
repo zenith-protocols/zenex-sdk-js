@@ -1,6 +1,7 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import { describe, expect, it } from 'vitest';
 import { validateOrder } from '../../src/trading/internal/order.js';
+import { I128_MAX } from '../../src/math/fixed.js';
 import { ZenexErrorCode } from '../../src/errors.js';
 import { OrderKind, Status } from '../../src/contracts/market/types.js';
 import type {
@@ -138,6 +139,53 @@ describe('validateOrder', () => {
         ).toEqual([]);
         // Increases never join the decrease list, so the cap does not apply.
         expect(issueCodes(order(), { position: parked })).toEqual([]);
+    });
+
+    // create_order runs status, kind, check_valid (710, 732, 712, escrow
+    // 732, 731) and then the decrease-list push (733), stopping at the
+    // first. The first issue is the code creation returns.
+    it('lists issues in the order create_order checks them', () => {
+        expect(issueCodes(order({ notional: 1n }), { status: Status.Frozen })).toEqual([
+            704,
+            732,
+        ]);
+        expect(
+            issueCodes(order({ kind: 99 as OrderKind, notional: -1n }), {
+                status: Status.Retired,
+            }).slice(0, 3),
+        ).toEqual([704, 734, 710]);
+
+        const parked: Position = {
+            margin: 100n,
+            notional: 1_000n,
+            tokens: 1_000n,
+            fundingIdx: 0n,
+            borrowingIdx: 0n,
+            lockedNotional: 0n,
+            unlocksAt: 0n,
+            pricedAt: 0n,
+            decreaseOrders: [1, 2, 3, 4, 5, 6, 7, 8],
+        };
+        const expired = order({
+            kind: OrderKind.LimitDecrease,
+            notional: 100n,
+            margin: 0n,
+            triggerPrice: 120n,
+            priceBound: 0n,
+            expiration: 999,
+        });
+        expect(issueCodes(expired, { position: parked })).toEqual([731, 733]);
+    });
+
+    it('rejects an increase whose margin plus execution fee overflows the escrow', () => {
+        expect(issueCodes(order({ margin: I128_MAX }))).toEqual([732]);
+        expect(issueCodes(order({ margin: I128_MAX - 2n }))).toEqual([]);
+        // A decrease escrows only the execution fee.
+        expect(
+            issueCodes(
+                order({ kind: OrderKind.MarketDecrease, margin: I128_MAX, priceBound: 0n }),
+            ),
+        ).toEqual([]);
     });
 
     it('checks the exact market execution side against the bound', () => {

@@ -5,7 +5,7 @@ import { ZenexError, ZenexErrorCode } from '../src/errors.js';
 
 // =============================================================================
 // parseError code resolution against the disjoint v2 namespaces:
-// market 700-772, price-verifier 780-791, strategy-vault 800-801,
+// market 700-772, price-verifier 780-791, strategy-vault 800-803,
 // governance 810-812, treasury 900. No contract-type hint exists anymore.
 // =============================================================================
 
@@ -86,9 +86,11 @@ describe('parseError: periphery namespaces resolve unhinted', () => {
         expect(parseError(simulationError(812)).code).toBe(ZenexErrorCode.GovInvalidDelay);
     });
 
-    it('strategy-vault 800-801', () => {
+    it('strategy-vault 800-803', () => {
         expect(parseError(simulationError(800)).code).toBe(ZenexErrorCode.StrategyInvalidAmount);
         expect(parseError(simulationError(801)).code).toBe(ZenexErrorCode.StrategyPnlExceedsAssets);
+        expect(parseError(simulationError(802)).code).toBe(ZenexErrorCode.StrategySupplyLimitExceeded);
+        expect(parseError(simulationError(803)).code).toBe(ZenexErrorCode.StrategyPayoutExceedsAssets);
     });
 
     it('oracle feed/clock pair 790/793 (no longer strategy-vault codes)', () => {

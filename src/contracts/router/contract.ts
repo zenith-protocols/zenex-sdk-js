@@ -14,6 +14,7 @@ import {
     createOrderCall,
     parseCallOutcome,
 } from './types.js';
+import { Buffer } from 'buffer';
 
 /** Coerce a `Buffer | Uint8Array` price update into a `Buffer`. */
 function priceBuffer(price: Buffer | Uint8Array): Buffer {
@@ -23,11 +24,16 @@ function priceBuffer(price: Buffer | Uint8Array): Buffer {
 /**
  * Operation builder for the Zenex market router (zenex-util-contracts
  * `market-router`): generic batching plus the create-and-fill flows. The
- * router collects no fee. A relayed transaction pays its relayer through the
- * fee forwarder, which wraps the router call.
+ * router collects no fee and needs no authorization. Every method returns a
+ * base64-encoded XDR operation.
  *
- * Every method returns a base64-encoded XDR operation for transaction
- * building.
+ * A batched call that needs a user's authorization carries the user's own
+ * auth entry. When the router is the transaction's root call, that entry
+ * starts below the root invocation. Simulate such a batch with
+ * `simulateAndParse(network, op, parser, { authMode: 'record_allow_nonroot' })`,
+ * because `prepareTransaction` simulates in the default mode and fails. To
+ * pay a relayer in a token, relay the call through `FeeForwarderContract`
+ * instead. The user's entries then nest under the forwarder's root.
  */
 export class MarketRouterContract extends Contract {
     /** Parsed spec for the router contract; used to encode and decode invocations. */
@@ -45,7 +51,6 @@ export class MarketRouterContract extends Contract {
         // --- create-and-fill flows ---
         createAndFill: (result: string): unknown[] =>
             scValToNative(xdr.ScVal.fromXDR(result, 'base64')),
-        /** @deprecated Low-level ABI compatibility only. */
         createAndTryFill: (result: string): CallOutcome[] =>
             (xdr.ScVal.fromXDR(result, 'base64').vec() ?? []).map(
                 parseCallOutcome,
@@ -70,11 +75,12 @@ export class MarketRouterContract extends Contract {
     /**
      * Run `calls` in order, isolating each call's failure. A failing call
      * rolls back its own effects and the batch continues with the next call.
+     * A budget or footprint limit still aborts the whole transaction.
      *
      * @returns base64 XDR operation. Parse the result with
      * `parsers.multicallTry` to get one [`CallOutcome`] per call, in call
      * order: `ok: true` with the call's return value, or `ok: false` with the
-     * contract error code.
+     * contract error code. A non-contract failure reads `UNTYPED_FAILURE`.
      */
     multicallTry(calls: Call[]): string {
         return this.call(
@@ -126,14 +132,16 @@ export class MarketRouterContract extends Contract {
      *
      * The batch is strict; the fill is isolated. A failed fill leaves every
      * created order resting for a later keeper fill, and its error code
-     * comes back in the appended outcome instead of trapping. Arguments
-     * match `createAndFill`.
+     * comes back in the appended outcome instead of trapping. A budget or
+     * footprint limit still aborts the whole transaction. Arguments match
+     * `createAndFill`.
      *
      * @returns base64 XDR operation. Parse the result with
      * `parsers.createAndTryFill` to get the `N` call results with the
      * isolated fill outcome appended last; `results[0]` is the created order
      * id. The last [`CallOutcome`] is `ok: true` with the payout when the
-     * fill lands, or `ok: false` when the order rests.
+     * fill lands, or `ok: false` when the order rests. A non-contract fill
+     * failure reads `UNTYPED_FAILURE`.
      *
      * # Errors
      * - Traps if `calls` is empty or `calls[0]` does not return a `u32`
@@ -141,8 +149,9 @@ export class MarketRouterContract extends Contract {
      * - Propagates the market contract's `create_order` errors. A failed
      *   fill is reported in the appended outcome, not thrown.
      *
-     * @deprecated Low-level ABI compatibility only. User-facing instant
-     * execution should use `createAndFill`, the strict fill-or-kill path.
+     * Use it when an order that misses its immediate fill should rest for a
+     * keeper, as the relay's try-fill route does. For fill-or-kill, use
+     * `createAndFill`.
      */
     createAndTryFill(
         calls: Call[],

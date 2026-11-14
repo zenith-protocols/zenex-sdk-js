@@ -1,6 +1,7 @@
 import { xdr, scValToBigInt, scValToNative } from '@stellar/stellar-sdk';
 import { instanceStorage } from '../instance.js';
 
+/** The oracle's instance storage, as `parseOracleInstance` decodes it. */
 export interface OracleInstanceState {
     /** Chainlink Data Streams verifier contract address. */
     verifier: string;

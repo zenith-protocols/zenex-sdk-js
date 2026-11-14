@@ -63,21 +63,20 @@ describe('VaultContract strategy surface', () => {
         expect(args).toEqual([]);
     });
 
-    it('static deploy builds __constructor with 5 args', () => {
+    it('static deploy builds __constructor with 4 args and no decimals offset', () => {
         const args: VaultConstructorArgs = {
             name: 'Vault Shares',
             symbol: 'vTKN',
             asset: ASSET,
-            decimals_offset: 0,
             strategy: STRATEGY,
         };
         const op = VaultContract.deploy(DEPLOYER, Buffer.alloc(32, 9), args, undefined, 'hex');
         const decoded = xdr.Operation.fromXDR(op, 'base64');
         const createContract = decoded.body().invokeHostFunctionOp().hostFunction().createContractV2();
         const ctorArgs = createContract.constructorArgs();
-        expect(ctorArgs).toHaveLength(5);
+        expect(ctorArgs).toHaveLength(4);
         const native = ctorArgs.map((a) => scValToNative(a));
-        expect(native).toEqual(['Vault Shares', 'vTKN', ASSET, 0, STRATEGY]);
+        expect(native).toEqual(['Vault Shares', 'vTKN', ASSET, STRATEGY]);
     });
 
     it('has none of the removed ERC-4626 methods; LP flows route through trading vault orders', () => {

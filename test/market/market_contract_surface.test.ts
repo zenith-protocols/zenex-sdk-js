@@ -53,6 +53,7 @@ const sidePair = (long: bigint, short: bigint) =>
 const marketDataScVal = () => xdr.ScVal.scvMap([
     entry('accrued_at', u64(3n)),
     entry('borrowing_idx', sidePair(1n, 2n)),
+    entry('borrowing_weight', sidePair(16n, 17n)),
     entry('credit_owed', i128(8n)),
     entry('credit_pool', i128(9n)),
     entry('margin', sidePair(4n, 5n)),
@@ -231,6 +232,7 @@ describe('MarketContract full surface', () => {
             const parsedMarketData = parsers.getMarketData(marketData);
             expect(parsedMarketData.notional).toEqual({ long: 12n, short: 13n });
             expect(parsedMarketData.fundingRate).toBe(10n);
+            expect(parsedMarketData.borrowingWeight).toEqual({ long: 16n, short: 17n });
             expect('lastPriceTime' in parsedMarketData).toBe(false);
             expect(parsers.accrue(marketData).creditOwed).toBe(8n);
 

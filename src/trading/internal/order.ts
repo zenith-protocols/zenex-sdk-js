@@ -3,10 +3,11 @@ import { FULL_CLOSE, MAX_ORDERS_PER_SIDE, OrderKind, Status, VaultOrderKind } fr
 import type { Position, MarketConfig } from '../../contracts/market/types.js';
 import type { i128, u32 } from '../../index.js';
 import { ZenexErrorCode } from '../../errors.js';
-import { checkedI128 } from '../../math/fixed.js';
+import { I128_MAX, checkedI128 } from '../../math/fixed.js';
 import type { PriceData } from './math.js';
 import { decodeLedgerSequence } from './quote.js';
 
+/** The direction a trigger price must be crossed in for an order to become eligible. */
 export type OrderKindCrossing = 'above' | 'below';
 
 function unknownOrderKind(kind: never): never {
@@ -138,6 +139,9 @@ export interface OpenLimitArgs extends OrderIntentBase {
     priceBound: i128;
 }
 
+/** Open a position once the price crosses the trigger adversely; same fields as `OpenLimitArgs`. */
+export type OpenStopArgs = OpenLimitArgs;
+
 /** Fully close a position at market. */
 export interface ClosePositionArgs extends OrderIntentBase {
     /** Fill slippage limit, price_scalar. 0 = unbounded. */
@@ -242,6 +246,25 @@ export function openLimitParams(args: OpenLimitArgs): OrderParams {
         user: args.user,
         isLong: args.isLong,
         kind: OrderKind.LimitIncrease,
+        notional: args.notional,
+        margin: args.margin,
+        triggerPrice: args.triggerPrice,
+        priceBound: args.priceBound,
+        expiration: args.expiration,
+    };
+}
+
+/**
+ * Open a position once the trigger price is crossed adversely
+ * (`StopIncrease`): a breakout entry, where a long buys at-or-above the
+ * trigger and a short sells at-or-below it.
+ */
+export function openStopParams(args: OpenStopArgs): OrderParams {
+    return {
+        market: args.market,
+        user: args.user,
+        isLong: args.isLong,
+        kind: OrderKind.StopIncrease,
         notional: args.notional,
         margin: args.margin,
         triggerPrice: args.triggerPrice,
@@ -526,27 +549,31 @@ function validatePrice(price: PriceData): OrderValidationIssue[] {
  *
  * @param params - The order to check.
  * @param context - The ledger snapshot to check it against.
- * @returns Every failed check, in the order found. Empty when the order is
- * valid at this snapshot. The contract can still reject a valid order at
+ * @returns Every failed check, in the order `create_order` runs them, so
+ * the first issue is the error creation would return. Empty when the order
+ * is valid at this snapshot. The contract can still reject a valid order at
  * submission if the ledger has since moved past `context.ledger`.
  *
- * Each issue's `code` names the market contract error it maps to:
+ * Each issue's `code` names the market contract error it maps to, listed
+ * in check order:
  * - 0: `context.ledger` is not a valid u32 ledger sequence. An input error
  *   the contract never sees.
  * - 704 (`MarketFrozen`): `context.status` is `Frozen` or `Retired`.
+ * - 734 (`UnknownKind`): `kind` is not one of the six `OrderKind` values.
  * - 710 (`NegativeValueNotAllowed`): a magnitude, `triggerPrice`, or
  *   `priceBound` is not a valid i128, or is negative.
- * - 712 (`NotionalAboveMaximum`): an increase's `notional` exceeds
- *   `context.config.maxPositionNotional`.
- * - 731 (`OrderExpired`): `expiration` is not a valid u32 ledger sequence,
- *   or is behind `context.ledger`.
  * - 732 (`InvalidOrder`): a moved `notional` or `margin` is below its dust
  *   floor, the order moves neither, or a trigger kind carries a
  *   `triggerPrice` of zero.
+ * - 712 (`NotionalAboveMaximum`): an increase's `notional` exceeds
+ *   `context.config.maxPositionNotional`.
+ * - 732 (`InvalidOrder`): an increase's `margin + execFee` escrow leaves
+ *   the i128 range.
+ * - 731 (`OrderExpired`): `expiration` is not a valid u32 ledger sequence,
+ *   or is behind `context.ledger`.
  * - 733 (`TooManyOrders`): the order is a decrease kind and
  *   `context.position` already holds `MAX_ORDERS_PER_SIDE` pending
  *   decrease orders.
- * - 734 (`UnknownKind`): `kind` is not one of the six `OrderKind` values.
  * - `ZenexErrorCode.QuoteInvalidInput` (-1001): `context.price` is set and
  *   its `bid` or `ask` is not positive, or `bid` exceeds `ask`. An SDK
  *   sentinel, not a contract code: a malformed price never reaches the
@@ -582,6 +609,10 @@ export function validateOrder(
     const minOrderNotional = context.config.minOrderNotional;
     const minOrderMargin = context.config.minOrderMargin;
     const maxPositionNotional = context.config.maxPositionNotional;
+
+    if (context.status === Status.Frozen || context.status === Status.Retired) {
+        issues.push(issue(704, 'batch', 'market status blocks order creation'));
+    }
 
     const knownKind =
         typeof params.kind === 'number' &&
@@ -664,15 +695,15 @@ export function validateOrder(
             );
         }
         if (
-            isDecreaseOrderKind(kind) &&
-            context.position !== undefined &&
-            context.position.decreaseOrders.length >= MAX_ORDERS_PER_SIDE
+            isIncreaseOrderKind(kind) &&
+            margin !== undefined &&
+            margin > I128_MAX - context.config.execFee
         ) {
             issues.push(
                 issue(
-                    733,
-                    'kind',
-                    'side already holds the maximum pending decrease orders',
+                    732,
+                    'margin',
+                    'margin plus the execution fee overflows the escrow',
                 ),
             );
         }
@@ -692,8 +723,21 @@ export function validateOrder(
         );
     }
 
-    if (context.status === Status.Frozen || context.status === Status.Retired) {
-        issues.push(issue(704, 'batch', 'market status blocks order creation'));
+    // The pending-decrease cap trips after every structural check, when
+    // creation appends the order to the side's list.
+    if (
+        knownKind &&
+        isDecreaseOrderKind(params.kind as OrderKind) &&
+        context.position !== undefined &&
+        context.position.decreaseOrders.length >= MAX_ORDERS_PER_SIDE
+    ) {
+        issues.push(
+            issue(
+                733,
+                'kind',
+                'side already holds the maximum pending decrease orders',
+            ),
+        );
     }
 
     if (context.price !== undefined) {

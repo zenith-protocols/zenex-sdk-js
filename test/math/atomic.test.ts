@@ -59,12 +59,16 @@ describe('exact decimal-text atomic conversion', () => {
         expect(() => formatAtomic(1 as never, 7)).toThrow(TypeError);
     });
 
-    it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
-        'parseAtomic throws naturally for unusable decimal count %s',
+    it.each([-1, -2, 1.5, 2.5, 39, Number.NaN, Number.POSITIVE_INFINITY])(
+        'rejects an unusable decimal count %s in both directions',
         (decimals) => {
-            // No explicit decimals validation remains; BigInt conversion and
-            // exponent semantics reject these with platform RangeErrors.
-            expect(() => parseAtomic('1.1', decimals)).toThrow(RangeError);
+            const message = 'decimals must be an integer in [0, 38]';
+            expect(() => parseAtomic('1.1', decimals)).toThrowError(new RangeError(message));
+            // Without the check these printed plausible but wrong text:
+            // formatAtomic(12345n, -2) read "12.345", and 2.5 read "123.45".
+            expect(() => formatAtomic(12_345n, decimals)).toThrowError(
+                new RangeError(message),
+            );
         },
     );
 });

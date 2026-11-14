@@ -12,11 +12,17 @@ import {
 //   market/src/errors.rs           (MarketError, 600 + 700-772)
 //   oracle/src/error.rs            (OracleError, 600 + 780-793)
 //   factory/src/errors.rs          (FactoryError, 600)
-//   strategy-vault/src/strategy.rs (StrategyVaultError, 800-801)
+//   strategy-vault/src/strategy.rs (StrategyVaultError, 800-803)
 //   governance/src/errors.rs       (GovernanceError, 810-812)
 //   treasury/src/lib.rs            (TreasuryError, 900)
 //   OpenZeppelin ownable           (OwnableError 2100-2102, RoleTransferError 2200-2203)
 //   OpenZeppelin fee-abstraction   (FeeAbstractionError, 5000-5006)
+// and against the zenex-util-contracts v0.0.2 sources and spec-sig output:
+//   fee-forwarder/src/lib.rs       (FeeForwarderError, 6001-6002)
+//   session-policy/src/lib.rs      (SessionPolicyError, 4002-4007)
+//   referral/src/lib.rs            (ReferralError, 7001)
+//   the smart-account wasm the wallet factory pins
+//                                  (SmartAccountError, 3000-3016, no 3001)
 // The namespaces are disjoint, so zenexErrorFromCode takes no hint and
 // every code lives in the one flat ZenexErrorCode enum. UpgradeNotOwner
 // (600) is one shared code raised identically by market, oracle and factory,
@@ -165,9 +171,13 @@ describe('ZenexErrorCode periphery codes (v2 contracts)', () => {
         expect(ZenexErrorCode.TransferExpired).toBe(2203);
     });
 
-    it('strategy-vault is the 800-801 pair from strategy.rs', () => {
+    it('strategy-vault is the 800-803 block from strategy.rs', () => {
         expect(ZenexErrorCode.StrategyInvalidAmount).toBe(800);
         expect(ZenexErrorCode.StrategyPnlExceedsAssets).toBe(801);
+        expect(ZenexErrorCode.StrategySupplyLimitExceeded).toBe(802);
+        expect(ZenexErrorCode.StrategyPayoutExceedsAssets).toBe(803);
+        expect(ZenexErrorCode[802]).toBe('StrategySupplyLimitExceeded');
+        expect(ZenexErrorCode[803]).toBe('StrategyPayoutExceedsAssets');
     });
 
     it('governance moved to 810-812 per governance/src/errors.rs', () => {
@@ -196,6 +206,137 @@ describe('ZenexErrorCode periphery codes (v2 contracts)', () => {
         expect(ZenexErrorCode[770]).toBe('AdlNotTriggered');
         expect(ZenexErrorCode[771]).toBe('AdlOvershoot');
         expect(ZenexErrorCode[772]).toBe('AdlNotEligible');
+    });
+});
+
+describe('util-contract and smart-account codes', () => {
+    it('fee forwarder covers FeeForwarderError (6001-6002)', () => {
+        expect(ZenexErrorCode.FeeForwarderTargetNotAllowed).toBe(6001);
+        expect(ZenexErrorCode.FeeForwarderInvalidRecipient).toBe(6002);
+    });
+
+    it('session policy covers SessionPolicyError (4002-4007)', () => {
+        expect(ZenexErrorCode.SessionContractNotAllowed).toBe(4002);
+        expect(ZenexErrorCode.SessionFunctionNotAllowed).toBe(4003);
+        expect(ZenexErrorCode.SessionTransferNotAllowed).toBe(4004);
+        expect(ZenexErrorCode.SessionApproveNotAllowed).toBe(4005);
+        expect(ZenexErrorCode.SessionForwardNotAllowed).toBe(4006);
+        expect(ZenexErrorCode.SessionSignerNotAuthenticated).toBe(4007);
+    });
+
+    it('referral covers ReferralError (7001)', () => {
+        expect(ZenexErrorCode.ReferralSelfReferral).toBe(7001);
+    });
+
+    it('smart account covers SmartAccountError (3000-3016, 3001 unassigned)', () => {
+        expect(ZenexErrorCode.SmartAccountContextRuleNotFound).toBe(3000);
+        expect(ZenexErrorCode.SmartAccountUnvalidatedContext).toBe(3002);
+        expect(ZenexErrorCode.SmartAccountExternalVerificationFailed).toBe(3003);
+        expect(ZenexErrorCode.SmartAccountNoSignersAndPolicies).toBe(3004);
+        expect(ZenexErrorCode.SmartAccountPastValidUntil).toBe(3005);
+        expect(ZenexErrorCode.SmartAccountSignerNotFound).toBe(3006);
+        expect(ZenexErrorCode.SmartAccountDuplicateSigner).toBe(3007);
+        expect(ZenexErrorCode.SmartAccountPolicyNotFound).toBe(3008);
+        expect(ZenexErrorCode.SmartAccountDuplicatePolicy).toBe(3009);
+        expect(ZenexErrorCode.SmartAccountTooManySigners).toBe(3010);
+        expect(ZenexErrorCode.SmartAccountTooManyPolicies).toBe(3011);
+        expect(ZenexErrorCode.SmartAccountMathOverflow).toBe(3012);
+        expect(ZenexErrorCode.SmartAccountKeyDataTooLarge).toBe(3013);
+        expect(ZenexErrorCode.SmartAccountContextRuleIdsLengthMismatch).toBe(3014);
+        expect(ZenexErrorCode.SmartAccountNameTooLong).toBe(3015);
+        expect(ZenexErrorCode.SmartAccountUnauthorizedSigner).toBe(3016);
+        expect(zenexErrorFromCode(3001).code).toBe(ZenexErrorCode.UnknownError);
+    });
+
+    it('every util and smart-account code resolves with its own message', () => {
+        const codes = [
+            ...Array.from({ length: 17 }, (_, i) => 3000 + i).filter((code) => code !== 3001),
+            4002, 4003, 4004, 4005, 4006, 4007, 6001, 6002, 7001,
+        ];
+        for (const code of codes) {
+            const error = zenexErrorFromCode(code);
+            expect(error.code, `code ${code}`).toBe(code);
+            expect(error.message, `message for ${code}`).not.toBe('Unknown contract error');
+            expect(error.message, `message for ${code}`).not.toBe(`Contract error ${code}`);
+        }
+    });
+
+    it('a session-policy refusal decodes from the simulation diagnostics', () => {
+        const diagnostic = 'HostError: Error(Auth, InvalidAction)\n'
+            + 'Event log (newest first):\n'
+            + '   0: [Diagnostic Event] topics:[error, Error(Contract, #4006)]';
+        const code = parseContractErrorCode(diagnostic);
+        expect(code).toBe(4006);
+        expect(zenexErrorFromCode(code!).code).toBe(ZenexErrorCode.SessionForwardNotAllowed);
+    });
+
+    it('no two members share a code', () => {
+        const values = Object.values(ZenexErrorCode).filter(
+            (value): value is number => typeof value === 'number',
+        );
+        expect(new Set(values).size).toBe(values.length);
+    });
+});
+
+describe('messages state the contract condition', () => {
+    const message = (code: number) => zenexErrorFromCode(code).message;
+
+    it('713 reads posted margin, not equity; 723 owns the maintenance case', () => {
+        expect(message(713)).toMatch(/margin/i);
+        expect(message(713)).not.toMatch(/equity/i);
+        expect(message(723)).toMatch(/maintenance/);
+    });
+
+    it('714 measures a side reserve against half the vault, on increases and redeems', () => {
+        expect(message(714)).toMatch(/half the vault/);
+        expect(message(714)).toMatch(/redeem/);
+        expect(message(714)).not.toMatch(/open interest/i);
+    });
+
+    it('770 names the unflagged side, not the trigger ratio', () => {
+        expect(message(770)).toMatch(/not flagged/);
+        expect(message(770)).not.toMatch(/ratio/);
+    });
+
+    it('760, 705, 740 and 722 carry the conditions the contract lists', () => {
+        expect(message(760)).toMatch(/credit pool is empty/);
+        expect(message(705)).toMatch(/ADL/);
+        expect(message(740)).toMatch(/creation ledger/);
+        expect(message(722)).toMatch(/delist deadline/);
+        expect(message(732)).toMatch(/zero amount/);
+        expect(message(732)).not.toMatch(/missing trigger/);
+    });
+
+    it('801 is the pending-PnL insolvency, not a strategy withdrawal', () => {
+        expect(message(801)).toMatch(/PnL/);
+        expect(message(801)).not.toMatch(/withdrawal/i);
+    });
+
+    it('754 covers the redeem gate and the deposit gate', () => {
+        expect(message(754)).toMatch(/max_pnl_withdraw/);
+        expect(message(754)).toMatch(/redeem/);
+        expect(message(754)).toMatch(/max_pnl_trader/);
+        expect(message(754)).toMatch(/deposit/);
+    });
+
+    it('802 is the share supply limit and 803 the payout past the balance', () => {
+        expect(message(802)).toMatch(/share supply/);
+        expect(message(803)).toMatch(/payout exceeds/);
+    });
+
+    it('810 never claims a queued call expires', () => {
+        expect(message(810)).not.toMatch(/expire/i);
+        expect(message(810)).toMatch(/delay change/);
+    });
+
+    it('2202 is a cancel that names the wrong pending owner', () => {
+        expect(message(2202)).toMatch(/^Cancel/);
+        expect(message(2202)).not.toMatch(/Caller/);
+    });
+
+    it('793 rejects only a window opening past the forward allowance', () => {
+        expect(message(793)).not.toMatch(/window not open/);
+        expect(message(793)).toMatch(/opens/);
     });
 });
 
@@ -235,9 +376,11 @@ describe('zenexErrorFromCode (hint-free resolution)', () => {
         expect(zenexErrorFromCode(812).code).toBe(ZenexErrorCode.GovInvalidDelay);
     });
 
-    it('resolves strategy-vault 800-801 and the oracle feed/clock pair 790/793', () => {
+    it('resolves strategy-vault 800-803 and the oracle feed/clock pair 790/793', () => {
         expect(zenexErrorFromCode(800).code).toBe(ZenexErrorCode.StrategyInvalidAmount);
         expect(zenexErrorFromCode(801).code).toBe(ZenexErrorCode.StrategyPnlExceedsAssets);
+        expect(zenexErrorFromCode(802).code).toBe(ZenexErrorCode.StrategySupplyLimitExceeded);
+        expect(zenexErrorFromCode(803).code).toBe(ZenexErrorCode.StrategyPayoutExceedsAssets);
         expect(zenexErrorFromCode(790).code).toBe(ZenexErrorCode.OracleFeedMismatch);
         expect(zenexErrorFromCode(790).message).toBe(
             'Report prices a different stream than the feed anchor'
@@ -323,14 +466,13 @@ describe('parseContractErrorCode (strict Error(Contract, #N) shape)', () => {
 });
 
 describe('package exports', () => {
-    it('exposes ./errors as a standalone subpath (types + cjs + esm)', () => {
+    it('exposes ./errors as a standalone subpath, typed per module format', () => {
         const packageJson = JSON.parse(
             readFileSync(new URL('../package.json', import.meta.url), 'utf8')
-        ) as { exports: Record<string, Record<string, string>> };
+        ) as { exports: Record<string, unknown> };
         expect(packageJson.exports['./errors']).toEqual({
-            types: './dist/types/errors.d.ts',
-            require: './dist/cjs/errors.js',
-            import: './dist/esm/errors.js',
+            import: { types: './dist/esm/errors.d.ts', default: './dist/esm/errors.js' },
+            require: { types: './dist/cjs/errors.d.ts', default: './dist/cjs/errors.js' },
         });
     });
 

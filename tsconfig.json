@@ -13,8 +13,7 @@
         "types": ["node"]
     },
     "include": [
-        "src/**/*",
-        "jest.config.js"
+        "src/**/*"
     ],
     "exclude": [
         "node_modules",

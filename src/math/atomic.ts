@@ -1,5 +1,12 @@
 const DECIMAL_TEXT = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?$/;
 
+function checkedPlaces(decimals: number): number {
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 38) {
+        throw new RangeError('decimals must be an integer in [0, 38]');
+    }
+    return decimals;
+}
+
 /**
  * Parse canonical base-10 text into atomic units at `decimals` places, with
  * no rounding or floating-point step.
@@ -7,16 +14,18 @@ const DECIMAL_TEXT = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?$/;
  * optional fractional part. Rejects a leading `+`, scientific notation, and a
  * `number` argument.
  * @param value Canonical decimal text, such as `"12.5"` or `"-0.001"`.
- * @param decimals The number of decimal places the atomic result uses.
+ * @param decimals The number of decimal places the atomic result uses, an
+ *   integer in `[0, 38]`.
  * @throws {TypeError} if value is a number instead of text.
  * @throws {SyntaxError} if value is not canonical base-10 text.
- * @throws {RangeError} if value has more fractional digits than `decimals`.
+ * @throws {RangeError} if `decimals` is not an integer in `[0, 38]`, or
+ *   value has more fractional digits than `decimals`.
  */
 export function parseAtomic(value: string, decimals: number): bigint {
     if (typeof value === 'number') {
         throw new TypeError('decimal value must be text, not a number');
     }
-    const places = decimals;
+    const places = checkedPlaces(decimals);
     const match = DECIMAL_TEXT.exec(value);
     if (match === null) {
         throw new SyntaxError('decimal value is not canonical base-10 text');
@@ -41,14 +50,16 @@ export function parseAtomic(value: string, decimals: number): bigint {
  * Trailing zeros in the fraction are dropped, and a whole value has no
  * decimal point.
  * @param value The atomic value to format.
- * @param decimals The number of decimal places `value` is scaled to.
+ * @param decimals The number of decimal places `value` is scaled to, an
+ *   integer in `[0, 38]`.
  * @throws {TypeError} if value is not a bigint.
+ * @throws {RangeError} if `decimals` is not an integer in `[0, 38]`.
  */
 export function formatAtomic(value: bigint, decimals: number): string {
     if (typeof value !== 'bigint') {
         throw new TypeError('atomic value must be a bigint');
     }
-    const places = decimals;
+    const places = checkedPlaces(decimals);
     if (value === 0n) return '0';
     if (places === 0) return value.toString();
 

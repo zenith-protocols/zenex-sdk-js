@@ -2,6 +2,7 @@ import { factorySpec } from '../contract_specs.js';
 import { Address, Contract, contract, xdr, nativeToScVal, scValToNative, Operation } from '@stellar/stellar-sdk';
 import { u32 } from '../../index.js';
 import { MarketConfig, marketConfigToScVal } from '../market/types.js';
+import { Buffer } from 'buffer';
 
 /**
  * Deployment inputs for the markets this factory creates. Replaceable by the
@@ -45,6 +46,7 @@ function initMetaToScVal(initMeta: FactoryInitMeta): xdr.ScVal {
 export interface FactoryConstructorArgs {
     /** Owner of the factory: may upgrade it and replace `init_meta`. */
     owner: string;
+    /** WASM hashes and treasury that future `deployMarket` calls use. */
     init_meta: FactoryInitMeta;
 }
 
@@ -55,8 +57,10 @@ export interface FactoryConstructorArgs {
  * All methods return base64-encoded XDR operations for transaction building.
  */
 export class FactoryContract extends Contract {
+    /** Parsed spec for the factory contract; used to encode and decode invocations. */
     static spec: contract.Spec = new contract.Spec(factorySpec);
 
+    /** Result decoders for each method's simulated result (base64 XDR), keyed by JS method name. */
     static readonly parsers = {
         /** Returns the deployed `[market, vault]` address pair. */
         deployMarket: (result: string): [string, string] =>
@@ -125,21 +129,31 @@ export class FactoryContract extends Contract {
      * @param feedId - 32-byte Data Streams stream id for the market. Fixed
      *   for the life of the deployed market contract.
      * @param config - Initial `MarketConfig` for the deployed market contract.
-     * @param vaultDecimalsOffset - Extra decimals on the vault's share
-     *   token. Higher values reduce inflation-attack risk on share pricing.
+     * @param vaultName - Name of the vault's share token.
+     * @param vaultSymbol - Symbol of the vault's share token. Shares carry
+     *   13 decimals: the token's 7 plus the vault's fixed offset of 6.
      *
      * # Returns
-     * - The `(trading, vault)` address pair. Parse with `parsers.deployMarket`.
+     * - The `(market, vault)` address pair. Parse with `parsers.deployMarket`.
      *
      * # Errors
-     * - Propagates the market contract's constructor validation.
-     * - `InvalidConfig` (700) if `config` fails its bounds, or `feedId` is
-     *   not a V3 (`0x0003…`) stream id.
-     * - `NegativeValueNotAllowed` (710) if a rate, fee, or margin in
+     * A rejected constructor fails the call as `Error(Context,
+     * InvalidAction)`, and its code is in the simulation diagnostics:
+     * - `InvalidConfig` (700) if `config` fails its bounds, `feedId` is not
+     *   a V3 (`0x0003…`) stream id, or `token` does not report exactly 7
+     *   decimals.
+     * - `NegativeValueNotAllowed` (710) if a fee, margin, borrowing, funding,
+     *   ADL or PnL field, `minOrderMargin`, `minDeposit` or `execFee` in
      *   `config` is negative.
      *
+     * A repeated `(admin, salt)` finds a contract at the derived address and
+     * traps in the host as `Error(Storage, ExistingValue)`, which carries no
+     * contract error code.
+     *
      * # Events
-     * - Emits `Deploy` with topics `(market: Address, vault: Address)`.
+     * - Emits `Deploy` with the market and vault addresses as topics. The
+     *   market topic keeps its wire name `trading`; `FactoryDeployEvent` names
+     *   it `market`.
      */
     deployMarket(
         admin: string,
@@ -150,7 +164,6 @@ export class FactoryContract extends Contract {
         config: MarketConfig,
         vaultName: string,
         vaultSymbol: string,
-        vaultDecimalsOffset: u32,
     ): string {
         const saltBuffer = salt instanceof Buffer ? salt : Buffer.from(salt);
         const feedIdBuffer = feedId instanceof Buffer ? feedId : Buffer.from(feedId);
@@ -164,7 +177,6 @@ export class FactoryContract extends Contract {
             marketConfigToScVal(config),
             nativeToScVal(vaultName, { type: 'string' }),
             nativeToScVal(vaultSymbol, { type: 'string' }),
-            xdr.ScVal.scvU32(vaultDecimalsOffset),
         ).toXDR('base64');
     }
 
@@ -201,16 +213,17 @@ export class FactoryContract extends Contract {
     }
 
     /**
-     * Replace the factory's WASM executable (owner only). Instance storage —
-     * including `InitMeta`, so the WASM hashes new markets receive — is
-     * untouched; pair with `setInitMeta` when those should move too. The
-     * host emits a SYSTEM `executable_update` event.
+     * Replace the factory's WASM executable (owner only). Instance storage
+     * stays as is, `InitMeta` included, so new markets keep receiving the
+     * same WASM hashes. Pair the upgrade with `setInitMeta` to move them
+     * too. The host emits a SYSTEM `executable_update` event.
      *
      * @param newWasmHash - Hash of the already-uploaded replacement WASM.
      * @param operator - Must equal the owner. The trait shape mandates the
      *   argument; it carries no authority of its own.
      *
      * # Errors
+     * - `OwnerNotSet` (2100) once ownership is renounced.
      * - `UpgradeNotOwner` (600) if `operator` is not the owner.
      */
     upgrade(newWasmHash: Buffer | Uint8Array, operator: string): string {
@@ -233,8 +246,19 @@ export class FactoryContract extends Contract {
 
     /**
      * Begin a two-step transfer to `newOwner`, who must call `acceptOwnership`
-     * by `liveUntilLedger` (owner only). `liveUntilLedger = 0` cancels any
-     * pending transfer instead.
+     * by `liveUntilLedger` (owner only). A new call replaces any pending
+     * transfer.
+     *
+     * @param liveUntilLedger - Last ledger sequence `newOwner` can accept by.
+     *   `0` cancels the pending transfer to `newOwner` instead, and
+     *   `newOwner` must then equal the pending owner.
+     *
+     * # Errors
+     * - OwnerNotSet (2100) once ownership is renounced.
+     * - TransferInvalidLiveUntilLedger (2201) if `liveUntilLedger` is in the
+     *   past or beyond the maximum entry TTL.
+     * - NoPendingTransfer (2200) on a cancel with no pending transfer.
+     * - InvalidPendingAccount (2202) on a cancel that names another address.
      */
     transferOwnership(newOwner: Address | string, liveUntilLedger: u32): string {
         const addr = typeof newOwner === 'string' ? Address.fromString(newOwner) : newOwner;
@@ -245,14 +269,25 @@ export class FactoryContract extends Contract {
         ).toXDR('base64');
     }
 
-    /** Complete a pending ownership transfer. Only the proposed new owner may call this. */
+    /**
+     * Complete a pending ownership transfer. Only the proposed new owner may
+     * call this.
+     *
+     * # Errors
+     * - NoPendingTransfer (2200) if no transfer is pending.
+     * - TransferExpired (2203) if the transfer's `liveUntilLedger` has passed.
+     */
     acceptOwnership(): string {
         return this.call('accept_ownership').toXDR('base64');
     }
 
     /**
-     * Permanently remove the owner, disabling `upgrade` and `setInitMeta`
-     * for good (owner only). Fails if a transfer is pending.
+     * Permanently remove the owner, disabling `upgrade`, `setInitMeta` and
+     * `transferOwnership` for good (owner only).
+     *
+     * # Errors
+     * - OwnerNotSet (2100) if ownership is already renounced.
+     * - OwnershipTransferInProgress (2101) if an unexpired transfer is pending.
      */
     renounceOwnership(): string {
         return this.call('renounce_ownership').toXDR('base64');

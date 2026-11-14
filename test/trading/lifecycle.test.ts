@@ -120,6 +120,7 @@ function emptyMarket(overrides: Partial<MarketData> = {}): MarketData {
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
+        borrowingWeight: pair(),
         fundingRate: 0n,
         accruedAt: 0n,
         creditPool: 0n,
@@ -268,6 +269,7 @@ describe('position lifecycle state', () => {
             value: {
                 equity: expected.returned,
                 maintenanceRequired: 50_000_000n,
+                forced: false,
                 liquidatable: false,
             },
         });
@@ -289,6 +291,7 @@ describe('position lifecycle state', () => {
             value: {
                 equity: 0n,
                 maintenanceRequired: 5n,
+                forced: false,
                 liquidatable: true,
             },
         });

@@ -32,7 +32,7 @@ export interface OrderParams {
     notional: i128;
     /** Margin change magnitude (>= 0), token-dec. */
     margin: i128;
-    /** Crossing level for a trigger kind (price_scalar, 18-dec); unread for a market kind. */
+    /** Crossing level for a trigger kind (price_scalar, 18-dec). A market kind does not read it, but a negative value still traps (710). */
     triggerPrice: i128;
     /** Fill slippage limit (price_scalar, 18-dec); 0 = unbounded. */
     priceBound: i128;

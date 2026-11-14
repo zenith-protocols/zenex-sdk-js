@@ -1,5 +1,6 @@
 import { xdr, nativeToScVal } from '@stellar/stellar-sdk';
 import { i128, u32, u64 } from '../../index.js';
+import { MarketStateError } from '../../entries.js';
 
 /** Contract operational status (instance storage singleton). */
 export enum Status {
@@ -48,6 +49,12 @@ export const FULL_CLOSE: i128 = 2n ** 127n - 1n;
 /** Maximum pending decrease orders per side; the 9th push traps `TooManyOrders` (733). */
 export const MAX_ORDERS_PER_SIDE = 8;
 
+/** Delist grace window, seconds after the delist: the delist can revert within it, and the terminal price is settable only after it. */
+export const DELIST_GRACE: u64 = 86_400n;
+
+/** Seconds after the delist until any keeper can force-liquidate an open position on a `Delisted` market. */
+export const DELIST_DEADLINE: u64 = 604_800n;
+
 /**
  * A keeper-executed order (persistent user-tier storage, keyed `(user, id)`).
  *
@@ -80,7 +87,7 @@ export interface Order {
 export interface VaultOrder {
     /** This order's kind. See `VaultOrderKind`. */
     kind: VaultOrderKind;
-    /** Escrowed assets (deposit, token-dec) or shares (redeem, vault share decimals = asset decimals + decimalsOffset). */
+    /** Escrowed assets (deposit, token-dec) or shares (redeem, share-dec: 13 decimals, token-dec plus the vault's fixed offset of 6). */
     amount: i128;
     /** Minimum received at fill, net of the vault fee: shares (deposit, share-dec) or assets (redeem, token-dec); 0 = unset. A fill quoted below it rejects the order. */
     minOut: i128;
@@ -96,7 +103,7 @@ export interface Position {
     margin: i128;
     /** Size in quote, token-dec. */
     notional: i128;
-    /** Size in base, base-dec. Not SCALAR_18: entry sizing divides a token-dec notional by a price_scalar price, flooring for a long and ceiling for a short. Entry price is `notional / tokens`. */
+    /** Size in base, base-dec: each fill adds `notional * SCALAR_18 / price`, floored for a long and ceiled for a short. The implied entry price is `notional * SCALAR_18 / tokens` (price_scalar). */
     tokens: i128;
     /** Funding index snapshot at last change (SCALAR_18). */
     fundingIdx: i128;
@@ -132,6 +139,8 @@ export interface MarketData {
     fundingIdx: SidePair;
     /** Cumulative borrowing index per side (SCALAR_18). */
     borrowingIdx: SidePair;
+    /** Borrowing checkpoint weight per side: the sum over open positions of `notional * borrowingIdx` at each position's last checkpoint (token-dec times SCALAR_18, exact). */
+    borrowingWeight: SidePair;
     /** Signed funding rate, + = longs pay (SCALAR_18, per second). */
     fundingRate: i128;
     /** Last accrual timestamp, unix seconds, shared by both indices. */
@@ -144,9 +153,9 @@ export interface MarketData {
 
 /** ADL state (instance storage singleton): the per-side enable flags driving the open-stop. */
 export interface AdlState {
-    /** Long-side ADL enabled: long increases blocked. */
+    /** Long-side ADL enabled: long increases that add notional are blocked. */
     long: boolean;
-    /** Short-side ADL enabled: short increases blocked. */
+    /** Short-side ADL enabled: short increases that add notional are blocked. */
     short: boolean;
 }
 
@@ -155,13 +164,13 @@ export interface AdlState {
  * owner-only `set_config`. Rates are per second.
  */
 export interface MarketConfig {
-    /** Keeper share of trade and vault fill fees, up to 50% (SCALAR_18). */
+    /** Keeper share of trade, liquidation and vault fill fees, up to 50% (SCALAR_18). */
     keeperRate: i128;
     /** Minimum position notional, token-dec; > 0. */
     minPositionNotional: i128;
     /** Maximum position notional, token-dec; > minPositionNotional. */
     maxPositionNotional: i128;
-    /** Per-side open-interest ceiling, token-dec; >= maxPositionNotional. */
+    /** Per-side open-interest ceiling, token-dec; >= maxPositionNotional and at most `MAX_OPEN_INTEREST`, 10^11 tokens (10^18 token-dec). */
     maxOpenInterest: i128;
     /** Minimum |notional| per order, token-dec (dust floor); > 0 and <= minPositionNotional. */
     minOrderNotional: i128;
@@ -175,15 +184,21 @@ export interface MarketConfig {
     feeNonDom: i128;
     /** Impact-fee divisor, token-dec. Fee = `notional * min(notional / impactScalar, MAX_IMPACT_RATE)` on every fill; floored so a minPositionNotional chunk pays at most 0.1%. */
     impactScalar: i128;
-    /** Opens blocked above this, in (0, 1000%]; also each side's borrow-reserve denominator (SCALAR_18; util = open interest / vault). */
+    /**
+     * Cap on a side's utilization after a size-growing increase, in
+     * (0, 1000%] (SCALAR_18). Utilization is the side's reserve over half
+     * the vault: a long reserves its base size marked at the ask, a short
+     * its notional. A side's capacity, `maxUtilOpen * vault / 2`, is also
+     * its borrow-reserve denominator.
+     */
     maxUtilOpen: i128;
-    /** Withdrawals blocked above this; retains min vault liquidity, in [maxUtilOpen, 1000%] (SCALAR_18). */
+    /** Cap on both sides' utilization after a redeem fill, on the `maxUtilOpen` measure; in [maxUtilOpen, 1000%] (SCALAR_18). */
     maxUtilWithdraw: i128;
     /** Initial margin; max leverage = 1/initMargin. In [0.1%, 50%] and > maintenanceMargin (SCALAR_18). */
     initMargin: i128;
     /** Hard liquidation floor; > liqFee and < initMargin (SCALAR_18). */
     maintenanceMargin: i128;
-    /** Liquidation fee rate, charged on every liquidation as min(equity, ceil(liqFee * notional)); up to 25% and < maintenanceMargin (SCALAR_18). */
+    /** Liquidation fee rate, charged on every liquidation as `min(max(equity, 0), ceil(liqFee * notional))`; up to 25% and < maintenanceMargin (SCALAR_18). */
     liqFee: i128;
     /** Decrease lock on newly added notional, seconds; in [15, 86400] (1 day max). */
     notionalLock: u64;
@@ -219,7 +234,7 @@ export interface MarketConfig {
     depositFee: i128;
     /** Redeem fill fee rate on moved assets (SCALAR_18); up to 1%. */
     redeemFee: i128;
-    /** Minimum assets per vault order fill, token-dec; > 0 and <= maxVaultBalance / 100. */
+    /** Minimum assets per deposit order at creation, token-dec; > 0 and <= maxVaultBalance / 100. A redeem has no floor. */
     minDeposit: i128;
     /** Vault balance ceiling enforced on deposit fills, token-dec; > 0. */
     maxVaultBalance: i128;
@@ -320,14 +335,27 @@ export function parsePosition(raw: Record<string, unknown>): Position {
     };
 }
 
-/** Parse a `scValToNative`-decoded `MarketData` into its camelCase interface. */
+/**
+ * Parse a `scValToNative`-decoded `MarketData` into its camelCase interface.
+ *
+ * @throws {MarketStateError} `MISSING_STATE` if the entry has no
+ * `borrowing_weight`: an earlier contract build wrote it, and share pricing
+ * without the weight would misprice.
+ */
 export function parseMarketData(raw: Record<string, unknown>): MarketData {
+    if (raw.borrowing_weight === undefined || raw.borrowing_weight === null) {
+        throw new MarketStateError(
+            'MISSING_STATE',
+            'MarketData has no borrowing_weight: an earlier contract build wrote this market, and this SDK cannot price it',
+        );
+    }
     return {
         notional: parseSidePair(raw.notional as Record<string, unknown>),
         margin: parseSidePair(raw.margin as Record<string, unknown>),
         tokens: parseSidePair(raw.tokens as Record<string, unknown>),
         fundingIdx: parseSidePair(raw.funding_idx as Record<string, unknown>),
         borrowingIdx: parseSidePair(raw.borrowing_idx as Record<string, unknown>),
+        borrowingWeight: parseSidePair(raw.borrowing_weight as Record<string, unknown>),
         fundingRate: big(raw.funding_rate),
         accruedAt: big(raw.accrued_at),
         creditPool: big(raw.credit_pool),

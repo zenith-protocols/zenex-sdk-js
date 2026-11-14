@@ -25,10 +25,11 @@ export function marketDataLedgerKey(contractId: string): xdr.LedgerKey {
 // --- temporary tier ---
 
 /**
- * `DataKey::PriceCache` -> PriceData: newest verified price the market has
- * consumed (monotonic on publish_time). Temporary durability with the
- * network-minimum TTL (16 ledgers), re-extended on every write; lazy, lapses
- * harmlessly, so an absent entry just means no recent consumption.
+ * `DataKey::PriceCache` -> PriceData: the newest verified price the market
+ * has consumed, monotonic on `publish_time`. Temporary storage: a write
+ * extends it to about 1 day (17280 ledgers) when less than about 1 hour
+ * (720 ledgers) is left. A present entry can be up to a day old, so read its
+ * `publish_time`. An absent entry was never written, or it lapsed.
  */
 export function marketPriceCacheLedgerKey(contractId: string): xdr.LedgerKey {
     return temporaryLedgerKey(contractId, [xdr.ScVal.scvSymbol('PriceCache')]);

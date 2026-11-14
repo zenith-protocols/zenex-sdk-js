@@ -13,12 +13,16 @@ import {
     decreasePositionParams,
     openLimitParams,
     openMarketParams,
+    openStopParams,
     stopLossParams,
     takeProfitParams,
     vaultDepositParams,
     vaultRedeemParams,
     withdrawMarginParams,
 } from '../../src/trading/internal/order.js';
+
+import { OrderIntent, previewOrder } from '../../src/trading/order.js';
+import { fixtureMarket, flatPosition, px } from './market_fixture.js';
 
 const TRADING = StrKey.encodeContract(Buffer.alloc(32, 1));
 const USER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
@@ -66,6 +70,13 @@ describe('order intents', () => {
             ...base, notional: 100n, margin: 10n, triggerPrice: 42n, priceBound: 5n,
         });
         expect(encoded(params)).toEqual([USER, true, OrderKind.LimitIncrease, 100n, 10n, 42n, 5n, 99]);
+    });
+
+    it('opens a stop entry carrying the trigger price', () => {
+        const params = openStopParams({
+            ...base, notional: 100n, margin: 10n, triggerPrice: 42n, priceBound: 5n,
+        });
+        expect(encoded(params)).toEqual([USER, true, OrderKind.StopIncrease, 100n, 10n, 42n, 5n, 99]);
     });
 
     it('closes fully with the FULL_CLOSE sentinel and no margin withdrawal', () => {
@@ -132,5 +143,48 @@ describe('order intents', () => {
         for (const value of Object.values(params)) {
             expect(typeof value).not.toBe('function');
         }
+    });
+});
+
+describe('OrderIntent', () => {
+    const market = fixtureMarket();
+    const bounded = new OrderIntent(market, USER, true, 60, 50n);
+
+    it('builds a stop entry that rests until its trigger crosses', () => {
+        const order = new OrderIntent(market, USER, true).openStop({
+            notional: 1_000_000_000n,
+            margin: 200_000_000n,
+            triggerPrice: px(11),
+        });
+        expect(order.kind).toBe(OrderKind.StopIncrease);
+        expect(order.triggerPrice).toBe(px(11));
+        expect(order.priceBound).toBe(0n);
+        expect(previewOrder(market, flatPosition(), order, px(10), 1n).outcome).toBe('rests');
+    });
+
+    it('caps a stop entry above the trigger by the intent slippage', () => {
+        // A long breakout buys, so the bound is a ceiling 0.5% over the trigger.
+        expect(
+            bounded.openStop({ notional: 1n, margin: 1n, triggerPrice: px(11) }).priceBound,
+        ).toBe((px(11) * 10_050n) / 10_000n);
+    });
+
+    it('fills a stop-loss and a take-profit unbounded unless the call bounds them', () => {
+        expect(bounded.stopLoss({ triggerPrice: px(9) }).priceBound).toBe(0n);
+        expect(bounded.takeProfit({ triggerPrice: px(12) }).priceBound).toBe(0n);
+        // A long's stop sells, so the bound is a floor under the trigger.
+        expect(bounded.stopLoss({ triggerPrice: px(9), slippageBps: 50n }).priceBound).toBe(
+            (px(9) * 9_950n) / 10_000n,
+        );
+        expect(bounded.takeProfit({ triggerPrice: px(12), slippageBps: 100n }).priceBound).toBe(
+            (px(12) * 9_900n) / 10_000n,
+        );
+    });
+
+    it('still bounds market orders and limit entries by the intent slippage', () => {
+        expect(bounded.closePosition(px(10)).priceBound).toBe((px(10) * 9_950n) / 10_000n);
+        expect(
+            bounded.openLimit({ notional: 1n, margin: 1n, triggerPrice: px(9) }).priceBound,
+        ).toBe((px(9) * 10_050n) / 10_000n);
     });
 });

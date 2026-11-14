@@ -1,8 +1,9 @@
+import { DELIST_DEADLINE, Status } from '../../contracts/market/types.js';
 import type { MarketData, Position, SidePair, MarketConfig } from '../../contracts/market/types.js';
-import { SCALAR_18, addI128, checkedI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
+import { SCALAR_18, addI128, mulDivCeil, mulDivFloor, subI128 } from '../../math/fixed.js';
 import { advanceMarketAccruals, exactPositionPnl, marketSidePnl, quoteTradeFees, sideCapacity } from './math.js';
 import type { PriceData } from './math.js';
-import { decodeLedgerSequence, estimate, exact, unavailable } from './quote.js';
+import { estimate, exact, unavailable } from './quote.js';
 import type { PositionQuoteContext, QuoteResult } from './quote.js';
 
 /**
@@ -144,6 +145,12 @@ export function quotePositionFees(
 }
 
 const OVERFLOW_MESSAGE = 'value is outside the i128 range';
+const U64_MAX = 2n ** 64n - 1n;
+
+/** A u64 timestamp sum that saturates at the u64 ceiling, as the contract adds deadlines. */
+function saturatingU64Add(left: bigint, right: bigint): bigint {
+    return left > U64_MAX - right ? U64_MAX : left + right;
+}
 
 function side(pair: { long: bigint; short: bigint }, isLong: boolean): bigint {
     return isLong ? pair.long : pair.short;
@@ -242,18 +249,77 @@ export function positionLeverage(
 }
 
 /**
+ * Settled equity of `position` against `market` as given, token-dec: margin
+ * less the pending accruals and the base and impact fee of a full close at
+ * the current book, plus the PnL at `price` after the profit haircut. The
+ * maintenance gate compares it with `ceil(notional * maintenanceMargin)`.
+ * Not floored: it reads negative once the position is underwater.
+ */
+export function settledPositionEquity(
+    position: Position,
+    market: MarketData,
+    config: MarketConfig,
+    price: PriceData,
+    vaultAssets: bigint,
+    isLong: boolean,
+): bigint {
+    const notional = position.notional;
+    const funding = accruedAmount(
+        notional,
+        side(market.fundingIdx, isLong),
+        position.fundingIdx,
+    );
+    const borrowing = accruedAmount(
+        notional,
+        side(market.borrowingIdx, isLong),
+        position.borrowingIdx,
+    );
+    const trade = quoteTradeFees(
+        market,
+        config,
+        isLong,
+        subI128(0n, notional),
+        subI128(0n, position.tokens),
+    );
+    const debit = addI128(
+        addI128(trade.base, trade.impact),
+        addI128(borrowing, funding > 0n ? funding : 0n),
+    );
+    const pnl = haircutPnl(exactPositionPnl(position, price, isLong), {
+        market,
+        config,
+        price,
+        vaultAssets,
+        isLong,
+    });
+    return addI128(subI128(position.margin, debit), pnl);
+}
+
+/**
+ * The wind-down facts `liquidationState` needs for the forced path. Omit
+ * both for a market that is not delisted.
+ */
+export interface LiquidationWindDown {
+    /** Market status at the snapshot. Only `Delisted` can force a liquidation. */
+    status?: Status;
+    /** Unix seconds the wind-down began (`Market.delistedAt`). */
+    delistedAt?: bigint;
+}
+
+/**
  * Exact liquidation check for `position` at `context.ledger`, token-dec.
- * Mirrors `Position::is_liquidatable`: advances the market's funding and
- * borrowing indices to `context.now` (`Market::load`), settles the full
- * position at `context.price` the way `Position::settle` would on a close,
+ * Advances the market's funding and borrowing indices to `context.now`,
+ * settles the full position at `context.price` the way a close settles it,
  * and compares the result to the maintenance line.
  *
  * `equity` is the settled equity floored at `0n`, matching what a close or a
  * liquidation would pay out. `maintenanceRequired` is
- * `ceil(notional * maintenanceMargin / SCALAR_18)` (`Position::margin_requirement`).
- * `liquidatable` is `equity < maintenanceRequired`: `true` is
- * `Position::liquidate`'s eligibility gate, `false` is `Position::decrease`'s
- * solvency gate.
+ * `ceil(notional * maintenanceMargin / SCALAR_18)`. `forced` is the
+ * wind-down waiver: `status` is `Delisted` and `context.now` has reached
+ * `delistedAt + DELIST_DEADLINE`, so a keeper liquidates without the
+ * eligibility check. `liquidatable` is `forced || equity < maintenanceRequired`.
+ * Without the waiver, `true` is the liquidation eligibility gate and `false`
+ * is the voluntary decrease's solvency gate.
  *
  * @returns `unavailable` (`CONTRACT_GATE`, "contract error #720: position not
  *   found") when `position.notional` is `0n`. `unavailable`
@@ -262,10 +328,11 @@ export function positionLeverage(
  */
 export function liquidationState(
     position: Position,
-    context: PositionQuoteContext,
+    context: PositionQuoteContext & LiquidationWindDown,
 ): QuoteResult<{
     equity: bigint;
     maintenanceRequired: bigint;
+    forced: boolean;
     liquidatable: boolean;
 }> {
     try {
@@ -281,45 +348,16 @@ export function liquidationState(
             return unavailable(
                 'CONTRACT_GATE',
                 'contract error #720: position not found',
+                720,
             );
         }
-        const funding = accruedAmount(
-            notional,
-            side(accrued.fundingIdx, context.isLong),
-            position.fundingIdx,
-        );
-        const borrowing = accruedAmount(
-            notional,
-            side(accrued.borrowingIdx, context.isLong),
-            position.borrowingIdx,
-        );
-
-        const trade = quoteTradeFees(
+        const settledEquity = settledPositionEquity(
+            position,
             accrued,
             context.config,
-            context.isLong,
-            subI128(0n, notional),
-            subI128(0n, position.tokens),
-        );
-        const debit = addI128(
-            addI128(trade.base, trade.impact),
-            addI128(borrowing, funding > 0n ? funding : 0n),
-        );
-        const rawPnl = exactPositionPnl(
-            position,
             context.price,
+            context.vaultAssets,
             context.isLong,
-        );
-        const pnl = haircutPnl(rawPnl, {
-            market: accrued,
-            config: context.config,
-            price: context.price,
-            vaultAssets: context.vaultAssets,
-            isLong: context.isLong,
-        });
-        const settledEquity = addI128(
-            subI128(position.margin, debit),
-            pnl,
         );
         const equity = settledEquity > 0n ? settledEquity : 0n;
         const maintenanceRequired = mulDivCeil(
@@ -327,12 +365,17 @@ export function liquidationState(
             context.config.maintenanceMargin,
             SCALAR_18,
         );
+        const forced =
+            context.status === Status.Delisted &&
+            context.delistedAt !== undefined &&
+            context.now >= saturatingU64Add(context.delistedAt, DELIST_DEADLINE);
 
         return exact(
             {
                 equity,
                 maintenanceRequired,
-                liquidatable: equity < maintenanceRequired,
+                forced,
+                liquidatable: forced || equity < maintenanceRequired,
             },
             context.ledger,
         );
@@ -431,8 +474,9 @@ export function pendingBorrowing(
  * The `marketData` indices are as of the market's last on-chain accrual; this
  * does not extrapolate the current rates over the seconds since, whereas the
  * contract advances both indices to `now` before any equity check. Between
- * keeper touches the result slightly overstates equity. Use `liquidationState`
- * for the exact settled equity checked against the maintenance line.
+ * keeper touches the result slightly overstates equity. Use
+ * `settledPositionEquity` for the settled equity the maintenance line
+ * checks.
  *
  * @param priceScalar The scalar baked into `position.tokens` by
  *   `math::to_tokens`. Pass `SCALAR_18`.
@@ -468,19 +512,17 @@ export function unlockedNotional(position: Position, nowSecs: bigint): bigint {
 }
 
 /**
- * Estimated liquidation price for `position`, in price_scalar units; `0` when
- * there is no open size.
+ * Liquidation price for `position`, in price_scalar units; `0` when there is
+ * no open size.
  *
- * The contract has no liquidation-price function: it checks
- * `equity < ceil(maintenance_margin * notional)` directly
- * (`Position::is_liquidatable`, called from `require_valid` and `liquidate`).
- * This inverts that maintenance line against the same equity model as
- * `positionEquity` to solve for the price at which equity meets the
- * maintenance margin. It excludes the incremental base and impact close fee,
- * which is second-order for the threshold estimate, and does not extrapolate
- * accrual rates past the market's last on-chain accrual. Use
- * `liquidationState` for an exact checked result at a declared ledger and
- * authenticated price.
+ * The contract has no liquidation-price function: it checks settled equity
+ * against `ceil(maintenance_margin * notional)` directly. This solves that
+ * line for the price, with the settled equity of `settledPositionEquity`:
+ * margin less the pending accruals and the base and impact fee of a full
+ * close at the current book, plus the PnL. A long is liquidatable below the
+ * result, a short above it. It assumes no profit haircut, which applies only
+ * in profit, and does not extrapolate accrual rates past the market's last
+ * on-chain accrual. Use `liquidationState` for an exact checked result.
  */
 export function liquidationPrice(
     position: Position,
@@ -500,26 +542,25 @@ export function liquidationPrice(
     const funding = pendingFunding(position, marketData, isLong);
     const paidFunding = funding > 0n ? funding : 0n;
     const borrowing = pendingBorrowing(position, marketData, isLong);
+    // A full close's fee depends on the book, not on the price.
+    const close = quoteTradeFees(
+        marketData,
+        config,
+        isLong,
+        -position.notional,
+        -position.tokens,
+    );
+    const debit = paidFunding + borrowing + close.base + close.impact;
 
-    // Solve equity(price) == mm, where equity = margin + pnl - paidFunding
-    // - borrowing and pnl = tokens * price / SCALAR_18 signed by side.
+    // Solve settled(price) == mm, where settled = margin - debit + pnl and
+    // pnl = tokens * price / SCALAR_18 signed by side.
     let target: bigint;
     if (isLong) {
-        // floor(tokens*price/SCALAR_18) = mm + notional - margin + paidFunding + borrowing
-        target =
-            mm +
-            position.notional -
-            position.margin +
-            paidFunding +
-            borrowing;
+        // floor(tokens*price/SCALAR_18) = mm + notional - margin + debit
+        target = mm + position.notional - position.margin + debit;
     } else {
-        // ceil(tokens*price/SCALAR_18) = notional + margin - paidFunding - borrowing - mm
-        target =
-            position.notional +
-            position.margin -
-            paidFunding -
-            borrowing -
-            mm;
+        // ceil(tokens*price/SCALAR_18) = notional + margin - debit - mm
+        target = position.notional + position.margin - debit - mm;
     }
     const price = mulDivFloor(target, SCALAR_18, position.tokens);
     return price < 0n ? 0n : price;

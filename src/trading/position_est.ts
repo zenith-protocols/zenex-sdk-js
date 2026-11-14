@@ -3,7 +3,7 @@ import { formatPrice, formatToken, formatTokenFloor } from '../float.js';
 import type { Market } from './market.js';
 import type { MarketPosition } from './position.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice } from './price.js';
+import { marketPrice, quoteTime } from './price.js';
 import { marketContext } from './order.js';
 import { exitPrice, quoteTradeFees } from './internal/math.js';
 import { maxWithdrawableMargin } from './internal/apply.js';
@@ -14,6 +14,7 @@ import {
     pendingFunding,
     positionEquity,
     positionPnl,
+    settledPositionEquity,
     unlockedNotional,
 } from './internal/position.js';
 
@@ -33,7 +34,7 @@ export interface PositionEstimate {
     margin: number;
     /** Mark-to-market PnL at the close price, token units. */
     pnl: number;
-    /** Margin + PnL - pending accruals, token units. */
+    /** Margin + PnL - pending accruals, token units: the mark before close fees and the profit haircut. */
     equity: number;
     /** Pending funding, token units. Positive is owed by the trader. */
     pendingFunding: number;
@@ -43,9 +44,17 @@ export interface PositionEstimate {
     leverage: number;
     /** Average entry price, or `0` with no open size. */
     entryPrice: number;
-    /** Price at which equity meets the maintenance margin. */
+    /**
+     * Price at which settled equity (net of a full close's fees) meets the
+     * maintenance margin: a long is liquidatable below it, a short above
+     * it. Assumes no profit haircut. `0` with no open size.
+     */
     liquidationPrice: number;
-    /** equity / maintenance requirement; above `1` is healthy, `Infinity` with no requirement. */
+    /**
+     * Settled equity over the maintenance requirement, the measure the
+     * liquidation gate uses (close fees and haircut included): below `1` a
+     * keeper can liquidate. `Infinity` with no requirement.
+     */
     healthFactor: number;
     /** Signed % move from mark to liquidation price; negative once crossed. */
     liquidationDistancePercent: number;
@@ -70,9 +79,10 @@ export interface PositionEstimate {
 /**
  * Compute one position's display estimate at `price` (bare bigint =
  * zero-spread); the side rides in with the position. `now` drives the
- * decrease lock and defaults to the wall clock.
+ * decrease lock and the withdrawal probe. It defaults to the wall clock and
+ * never reads earlier than the market's stored accrual.
  *
- * Measures against `market` as passed — pending accruals reflect the
+ * Measures against `market` as passed: pending accruals reflect the
  * indices as stored on-chain. Pass `market.accrue(price)` for numbers
  * advanced to now.
  */
@@ -86,8 +96,13 @@ export function estimatePosition(
     const config = market.config;
     const data = market.data;
     const isLong = position.isLong;
-    const clock = now ?? BigInt(Math.floor(Date.now() / 1000));
-    const p = resolvePrice(price);
+    const clock = quoteTime(market, now);
+    const p = marketPrice(
+        market,
+        price,
+        clock,
+        position.pricedAt > clock ? position.pricedAt : clock,
+    );
     const mark = exitPrice(p, isLong);
 
     const pnlRaw = positionPnl(position, mark, SCALAR_18, isLong);
@@ -156,7 +171,16 @@ export function estimatePosition(
         healthFactor:
             maintenanceRaw === 0n
                 ? Infinity
-                : Number(equityRaw) / Number(maintenanceRaw),
+                : Number(
+                      settledPositionEquity(
+                          position,
+                          data,
+                          config,
+                          p,
+                          market.vaultAssets,
+                          isLong,
+                      ),
+                  ) / Number(maintenanceRaw),
         liquidationDistancePercent: distance,
         closeFee: formatToken(closeFeeRaw, decimals),
         netPnl: formatToken(netPnlRaw, decimals),

@@ -25,9 +25,9 @@ export interface MarketContext {
     ledger: number;
     /**
      * Ledger close time in whole seconds; the clock every time gate uses.
-     * This value is supplied by the caller. It defaults to the wall clock,
-     * because the ledger entry read returns a sequence number, not a close
-     * time.
+     * The caller supplies it, since a ledger entry read returns a sequence
+     * number, not a close time. `marketContext` defaults it to the wall
+     * clock, never before the market's stored accrual.
      */
     ledgerTime: bigint;
     /** Operational status; only `Active` admits new risk. */
@@ -47,10 +47,19 @@ export interface MarketContext {
     /** Per-side ADL flags; a flagged side is closed-only. */
     adl?: AdlState;
     /**
-     * `(terminalPrice, delistedAt)` once retired. `terminalPrice` is
-     * price_scalar, `delistedAt` is unix seconds.
+     * Flat settlement price of a wound-down market, price_scalar. When set,
+     * every fill prices at it on both sides, observed at `ledgerTime`, and
+     * `price` is ignored.
      */
-    retirement?: readonly [bigint, bigint];
+    terminalPrice?: bigint;
+}
+
+/** The price a context fills at: flat at its terminal price once set, else `price`. */
+function fillPrice(snapshot: MarketContext, price: PriceData): PriceData {
+    const terminal = snapshot.terminalPrice;
+    return terminal === undefined
+        ? price
+        : { bid: terminal, ask: terminal, publishTime: snapshot.ledgerTime };
 }
 
 
@@ -71,8 +80,9 @@ export type OrderApplication =
     | { kind: 'rests'; reason: string; ledger: number }
     | { kind: 'gate'; code: number; reason: string; ledger: number };
 
+/** Overrides for one `applyOrder` or `maxWithdrawableMargin` call. */
 export interface ApplyOrderOptions {
-    /** Evaluate at this price instead of the snapshot price (what-if). */
+    /** Evaluate at this price instead of the snapshot price (what-if). A terminal price still wins. */
     price?: PriceData;
     /** Defaults to the market's configured execution fee. */
     executionFee?: bigint;
@@ -135,7 +145,7 @@ export function applyOrder(
             ledger,
         };
     }
-    const price = options.price ?? snapshot.price;
+    const price = fillPrice(snapshot, options.price ?? snapshot.price);
     const issues = validateOrder(order, {
         ledger: snapshot.ledger,
         now: snapshot.ledgerTime,
@@ -249,6 +259,7 @@ export function maxWithdrawableMargin(
     snapshot: MarketContext,
     options: ApplyOrderOptions = {},
 ): bigint {
+    const price = fillPrice(snapshot, options.price ?? snapshot.price);
     const probe = (amount: bigint): boolean =>
         quotePositionAction({
             ledger: snapshot.ledger,
@@ -257,7 +268,7 @@ export function maxWithdrawableMargin(
             position: snapshot.position,
             market: snapshot.market,
             config: snapshot.config,
-            price: options.price ?? snapshot.price,
+            price,
             vaultAssets: snapshot.vault.totalAssets,
             treasuryRate: snapshot.treasuryRate,
             action: {

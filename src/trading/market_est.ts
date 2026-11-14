@@ -8,7 +8,7 @@ import {
 } from '../float.js';
 import type { Market } from './market.js';
 import type { PriceInput } from './price.js';
-import { resolvePrice } from './price.js';
+import { marketPrice, quoteTime } from './price.js';
 import type { PriceData } from './internal/math.js';
 import { mulDivFloor } from '../math/fixed.js';
 import {
@@ -18,7 +18,7 @@ import {
     marketSidePnl,
 } from './internal/math.js';
 import {
-    cappedNetPnl,
+    lpNetPnl,
     convertVaultAssetsToShares,
     convertVaultSharesToAssets,
     evaluateVaultWithdrawGates,
@@ -26,9 +26,9 @@ import {
 
 /** One side's approximate view of the book and its rates. For display only. */
 export interface SideRatesEstimate {
-    /** Reserve utilization of the side's own half of the vault, percent. */
+    /** Utilization of the side's reserve cap (half the vault times `maxUtilOpen`), percent. */
     utilizationPercent: number;
-    /** Borrowing rate the side would pay, percent of notional per hour. */
+    /** Borrowing rate the side would pay at its utilization, percent of notional per hour. It pays it only while `charged`. */
     borrowRatePercent1h: number;
     /**
      * Funding rate this side's trader pays, percent of notional per hour.
@@ -47,10 +47,11 @@ export interface SideRatesEstimate {
     /** Open interest valued at the estimate price, settlement-token units. */
     openInterestValue: number;
     /**
-     * Notional that can still open on this side before an open gate trips
+     * Notional the side can still take before a side-level open gate trips
      * (`max_util_open` headroom at the estimate price, or `max_open_interest`
-     * headroom), settlement-token units. The "available liquidity" / max-size
-     * number.
+     * headroom), settlement-token units: the side's available liquidity. One
+     * order is also capped at `maxPositionNotional` less the position's own
+     * notional.
      */
     openCapacity: number;
     /**
@@ -83,17 +84,17 @@ export interface MarketEstimate {
     vaultSupply: number;
     /** Max leverage the initial-margin requirement allows (`1 / initMargin`). */
     maxLeverage: number;
-    /** Long-side utilization and borrow APR at the current book. */
+    /** Long-side utilization and rates at the current book. */
     long: SideRatesEstimate;
-    /** Short-side utilization and borrow APR at the current book. */
+    /** Short-side utilization and rates at the current book. */
     short: SideRatesEstimate;
-    /** Vault share price, assets per share (uPnL-aware at the estimate price). */
+    /** Vault share price, assets per share (uPnL-aware at the estimate price, the vault's share of pending borrowing counted). */
     sharePrice: number;
     /** Long-side traders' unrealized PnL, token units. Positive: traders up, vault down. */
     longPnl: number;
     /** Short-side traders' unrealized PnL, token units. */
     shortPnl: number;
-    /** Net unrealized trader PnL across both sides, token units — the quantity share pricing nets out. */
+    /** The NAV adjustment a redeem prices shares against, token units: net unrealized trader PnL, each side's profit capped at `maxPnlTrader` of half the vault, less the vault's share of pending borrowing. */
     netPnl: number;
     /**
      * Largest redeem that clears the exit gates (utilization and pending-PnL
@@ -180,7 +181,7 @@ function maxWithdrawableAssets(market: Market, p: PriceData): bigint {
 
 /**
  * Compute the market's display estimate at `price` (bare bigint =
- * zero-spread), against the market as passed — pass `market.accrue(price)`
+ * zero-spread), against the market as passed. Pass `market.accrue(price)`
  * for numbers advanced to now. Every figure is computed by the exact
  * mirrors and converted to `number` at this boundary only; a keeper reads
  * the same {@link Market} methods directly for exact bigints.
@@ -189,7 +190,7 @@ export function estimateMarket(
     market: Market,
     price: PriceInput,
 ): MarketEstimate {
-    const p = resolvePrice(price);
+    const p = marketPrice(market, price, quoteTime(market));
     const data = market.data;
     const config = market.config;
     const decimals = market.assetDecimals;
@@ -205,9 +206,17 @@ export function estimateMarket(
               : config.fundingMin;
 
     // Share price and max redeem run in the redeem direction: capped uPnL
-    // maximized against the redeemer, mirroring the fill.
+    // maximized against the redeemer, less the vault's share of pending
+    // borrowing, mirroring the fill.
     const vault = market.vaultAtomic();
-    const redeemPnl = cappedNetPnl(data, config, p, market.vaultAssets, true);
+    const redeemPnl = lpNetPnl(
+        data,
+        config,
+        p,
+        market.vaultAssets,
+        market.treasuryRate,
+        true,
+    );
     let sharePrice = 0;
     let maxRedeemableShares = 0;
     try {
@@ -244,10 +253,7 @@ export function estimateMarket(
         sharePrice,
         longPnl: formatToken(longPnl, decimals),
         shortPnl: formatToken(shortPnl, decimals),
-        netPnl: formatToken(
-            cappedNetPnl(data, config, p, market.vaultAssets, true),
-            decimals,
-        ),
+        netPnl: formatToken(redeemPnl, decimals),
         maxRedeemableShares,
     };
 }

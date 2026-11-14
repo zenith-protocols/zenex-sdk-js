@@ -107,7 +107,7 @@ const EXPECTED_CONFIG_ENTRIES: [string, bigint][] = [
 describe('FactoryContract', () => {
     const contract = new FactoryContract(CONTRACT_ID);
 
-    it('deployMarket builds deploy with the exact 9-arg order and config as a map', () => {
+    it('deployMarket builds deploy with the exact 8-arg order and config as a map', () => {
         const salt = Buffer.alloc(32, 7);
         const op = contract.deployMarket(
             ADMIN,
@@ -118,11 +118,10 @@ describe('FactoryContract', () => {
             makeConfig(),
             'Vault Shares',
             'vTKN',
-            0,
         );
         const { fn, args, rawArgs } = decodeInvoke(op);
         expect(fn).toBe('deploy');
-        expect(args).toHaveLength(9);
+        expect(args).toHaveLength(8);
         expect(args[0]).toBe(ADMIN);
         expect(args[1]).toEqual(salt);
         expect(args[2]).toBe(TOKEN);
@@ -131,13 +130,12 @@ describe('FactoryContract', () => {
         expect(Buffer.from(args[4])).toEqual(FEED_ID);
         expect(args[6]).toBe('Vault Shares');
         expect(args[7]).toBe('vTKN');
-        expect(args[8]).toBe(0);
     });
 
     it('deployMarket accepts the feed id as a plain Uint8Array', () => {
         const op = contract.deployMarket(
             ADMIN, Buffer.alloc(32, 7), TOKEN, ORACLE, Uint8Array.from(FEED_ID),
-            makeConfig(), 'Vault Shares', 'vTKN', 0,
+            makeConfig(), 'Vault Shares', 'vTKN',
         );
         const { rawArgs } = decodeInvoke(op);
         expect(rawArgs[4].switch().name).toBe('scvBytes');
@@ -147,7 +145,7 @@ describe('FactoryContract', () => {
     it('encodes the 34-field config map in alphabetical key order with the right values', () => {
         const op = contract.deployMarket(
             ADMIN, Buffer.alloc(32, 7), TOKEN, ORACLE, FEED_ID,
-            makeConfig(), 'Vault Shares', 'vTKN', 0,
+            makeConfig(), 'Vault Shares', 'vTKN',
         );
         const { rawArgs } = decodeInvoke(op);
 

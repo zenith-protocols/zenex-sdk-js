@@ -209,10 +209,16 @@ const marketVaultCases: Record<string, ContractCase> = {
     },
 };
 
+// Shares per asset unit in a vault at the bootstrap rate: the contract's
+// VIRTUAL_SHARES, `10^6`. Every vault here stores the fixed offset of 6 and,
+// unless a test says otherwise, a supply of `SHARE_SCALE` shares per asset
+// unit of backing, so an asset unit prices at exactly `SHARE_SCALE` shares.
+const SHARE_SCALE = 1_000_000n;
+
 // strategy_vault.deposit.i128.result_overflow inputs from the retired
-// strategy-vault-v2 golden vectors.
+// strategy-vault-v2 golden vectors, moved to the fixed offset of 6.
 const strategyOverflowInputs: Record<string, unknown> = {
-    decimals_offset: 0n,
+    decimals_offset: 6n,
     total_assets: 0n,
     total_supply: 1n,
     assets: 170_141_183_460_469_231_731_687_303_715_884_105_727n,
@@ -230,6 +236,7 @@ function market(overrides: Partial<MarketData> = {}): MarketData {
         tokens: pair(),
         fundingIdx: pair(),
         borrowingIdx: pair(),
+        borrowingWeight: pair(),
         fundingRate: 0n,
         accruedAt: 2n,
         creditPool: 0n,
@@ -299,8 +306,8 @@ function context(
         price: price(),
         vault: {
             totalAssets: 1_000_000_000n,
-            totalSupply: 1_000_000_000n,
-            decimalsOffset: 0,
+            totalSupply: 1_000_000_000n * SHARE_SCALE,
+            decimalsOffset: 6,
         },
         treasuryRate: 0n,
         executionFee: 0n,
@@ -375,16 +382,22 @@ function marketContext(id: string): {
             publishTime: inputs.publish_time as bigint,
         }),
         // The trading artifact intentionally uses a 1:1 mock strategy. Match
-        // its exchange rate while the production conversion is tested against
-        // the strategy-vault artifact below.
+        // its exchange rate at the vault's share scale: a supply of
+        // `SHARE_SCALE` shares per unit of backing prices one asset unit at
+        // exactly `SHARE_SCALE` shares, so the vectors' share amounts carry
+        // over times `SHARE_SCALE`.
         vault: {
             totalAssets,
-            totalSupply: totalAssets - netPnl,
-            decimalsOffset: 0,
+            totalSupply: (totalAssets - netPnl) * SHARE_SCALE,
+            decimalsOffset: 6,
         },
         treasuryRate: inputs.treasury_rate as bigint,
         executionFee: inputs.exec_fee as bigint,
-        minOut: inputs.min_out as bigint,
+        // A deposit's bound is in shares, a redeem's in assets.
+        minOut:
+            golden.operation === 'deposit_gate'
+                ? (inputs.min_out as bigint) * SHARE_SCALE
+                : (inputs.min_out as bigint),
     });
 
     const input =
@@ -396,13 +409,34 @@ function marketContext(id: string): {
               }
             : {
                   ...common,
-                  shares: inputs.shares_requested as bigint,
+                  shares: (inputs.shares_requested as bigint) * SHARE_SCALE,
                   createdAt: inputs.created_at as bigint,
               };
     return { input, work, expected };
 }
 
 describe('strategy-vault share conversion', () => {
+    // strategy.rs prices with the constant VIRTUAL_SHARES, not with the
+    // offset the instance stores: 1_000 assets into an empty vault mint
+    // 1_000 * (0 + 1e6) / (0 + 1), and 2e9 shares of a 3e9 supply over 4_000
+    // of assets redeem floor(2e9 * 4_001 / (3e9 + 1e6)) = 2_666.
+    it.each([0, 6])('uses the constant virtual shares at a stored offset of %i', (decimalsOffset) => {
+        expect(
+            convertVaultAssetsToShares(
+                { totalAssets: 0n, totalSupply: 0n, decimalsOffset },
+                1_000n,
+                0n,
+            ),
+        ).toBe(1_000_000_000n);
+        expect(
+            convertVaultSharesToAssets(
+                { totalAssets: 4_000n, totalSupply: 3_000_000_000n, decimalsOffset },
+                2_000_000_000n,
+                0n,
+            ),
+        ).toBe(2_666n);
+    });
+
     it('uses widened multiplication but rejects an i128 result overflow', () => {
         const inputs = strategyOverflowInputs;
 
@@ -549,33 +583,54 @@ describe('trading vault fill sequence', () => {
     });
 
     it('caps each side PnL before pricing shares', () => {
-        const result = quoteVaultDeposit({
-            ...context({
-                market: market({
-                    notional: pair(100n, 0n),
-                    margin: pair(0n, 0n),
-                    tokens: pair(1_000n * SCALAR_18, 0n),
-                }),
-                config: config({
-                    maxPnlTrader: SCALAR_18 / 2n,
-                    maxVaultBalance: 2_000n,
-                }),
-                vault: {
-                    totalAssets: 1_000n,
-                    totalSupply: 750n,
-                    decimalsOffset: 0,
-                },
+        // The long side's profit dwarfs the 1_000 vault, so it counts at
+        // the 50% cap's half: 250.
+        const capped = context({
+            market: market({
+                notional: pair(100n, 0n),
+                margin: pair(0n, 0n),
+                tokens: pair(1_000n * SCALAR_18, 0n),
             }),
-            assets: 100n,
-            createdAt: 1n,
+            config: config({
+                maxPnlTrader: SCALAR_18 / 2n,
+                maxVaultBalance: 2_000n,
+            }),
+            vault: {
+                totalAssets: 1_000n,
+                totalSupply: 750n * SHARE_SCALE,
+                decimalsOffset: 6,
+            },
         });
 
-        expect(result.kind).toBe('exact');
-        if (result.kind !== 'exact') return;
-        expect(result.value.kind).toBe('deposit');
-        if (result.value.kind !== 'deposit') return;
-        expect(result.value.netPnl).toBe(250n);
-        expect(result.value.output).toBe(100n);
+        // A deposit no longer fills while a side's profit sits above the
+        // cap: the order stays resting behind PendingPnlExceeded.
+        expect(
+            quoteVaultDeposit({ ...capped, assets: 100n, createdAt: 1n }),
+        ).toEqual({
+            kind: 'unavailable',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('#754'),
+            contractCode: 754,
+        });
+
+        // The redeem prices on the capped 250: 100 * SHARE_SCALE shares quote
+        // 100e6 * (1_000 - 250 + 1) / (750e6 + 1e6) = 100, one short of the
+        // bound.
+        const redeem = quoteVaultRedeem({
+            ...capped,
+            minOut: 101n,
+            shares: 100n * SHARE_SCALE,
+            createdAt: 1n,
+        });
+        expect(redeem).toEqual({
+            kind: 'exact',
+            ledger: 42,
+            value: expect.objectContaining({
+                kind: 'rejected',
+                quoted: 100n,
+                netPnl: 250n,
+            }),
+        });
     });
 
     it('checks deposit minOut against the shares the post-fee assets mint', () => {
@@ -584,25 +639,26 @@ describe('trading vault fill sequence', () => {
         );
         const base = input as VaultDepositQuoteInput;
 
-        // The 1% fee takes 10 of the 1_001 assets; the 991 left mint 991
-        // shares. A bound at the 991 quote fills.
-        const atBound = quoteVaultDeposit({ ...base, minOut: 991n });
+        // The 1% fee takes 10 of the 1_001 assets; the 991 left mint
+        // 991 * (10_020e6 + 1e6) / (10_020 + 1) = 991e6 shares. A bound at
+        // that quote fills.
+        const atBound = quoteVaultDeposit({ ...base, minOut: 991_000_000n });
         expect(atBound.kind).toBe('exact');
         if (atBound.kind !== 'exact') return;
         expect(atBound.value.kind).toBe('deposit');
         if (atBound.value.kind !== 'deposit') return;
-        expect(atBound.value.output).toBe(991n);
+        expect(atBound.value.output).toBe(991_000_000n);
 
         // A bound cut from the pre-fee 1_001 misses the quote: the order is
         // rejected, the assets come back, and the keeper keeps the exec fee.
-        expect(quoteVaultDeposit({ ...base, minOut: 1_001n })).toEqual({
+        expect(quoteVaultDeposit({ ...base, minOut: 1_001_000_000n })).toEqual({
             kind: 'exact',
             ledger: 42,
             value: {
                 kind: 'rejected',
                 action: 'deposit',
-                quoted: 991n,
-                minOut: 1_001n,
+                quoted: 991_000_000n,
+                minOut: 1_001_000_000n,
                 refund: 1_001n,
                 executionFee: 2n,
                 netPnl: -20n,
@@ -626,7 +682,7 @@ describe('trading vault fill sequence', () => {
             reason: expect.stringContaining('#753'),
             contractCode: 753,
         });
-        const rejected = quoteVaultDeposit({ ...capped, minOut: 992n });
+        const rejected = quoteVaultDeposit({ ...capped, minOut: 991_000_001n });
         expect(rejected.kind === 'exact' && rejected.value.kind).toBe('rejected');
     });
 
@@ -639,7 +695,8 @@ describe('trading vault fill sequence', () => {
             minOut: 992n,
         });
 
-        // The 1_001 shares redeem 1_001 assets gross, 991 after the 1% fee.
+        // The 1_001e6 shares redeem 1_001 assets gross, 991 after the 1% fee;
+        // the refund is the escrowed shares.
         expect(result).toEqual({
             kind: 'exact',
             ledger: 42,
@@ -648,7 +705,7 @@ describe('trading vault fill sequence', () => {
                 action: 'redeem',
                 quoted: 991n,
                 minOut: 992n,
-                refund: 1_001n,
+                refund: 1_001_000_000n,
                 executionFee: 2n,
                 netPnl: 20n,
                 postVaultAssets: 10_000n,
@@ -696,8 +753,9 @@ describe('trading vault fill sequence', () => {
 
     it('rejects a missed redeem minOut before the burn could overdraw the vault', () => {
         // A 50 marked trader loss lifts the backing to 150 over 100 raw
-        // assets, so redeeming every share quotes 149: more than the vault
-        // holds, which the burn cannot pay.
+        // assets, so redeeming every share quotes
+        // 100e6 * (150 + 1) / (100e6 + 1e6) = 149: more than the vault holds,
+        // which the burn cannot pay.
         const overdraw = {
             ...context({
                 market: market({
@@ -707,18 +765,19 @@ describe('trading vault fill sequence', () => {
                 }),
                 vault: {
                     totalAssets: 100n,
-                    totalSupply: 100n,
-                    decimalsOffset: 0,
+                    totalSupply: 100n * SHARE_SCALE,
+                    decimalsOffset: 6,
                 },
             }),
-            shares: 100n,
+            shares: 100n * SHARE_SCALE,
             createdAt: 1n,
         };
 
         expect(quoteVaultRedeem(overdraw)).toEqual({
             kind: 'unavailable',
-            code: 'INVALID_INPUT',
-            reason: 'redeem exceeds raw vault assets',
+            code: 'CONTRACT_GATE',
+            reason: expect.stringContaining('#803'),
+            contractCode: 803,
         });
         const rejected = quoteVaultRedeem({ ...overdraw, minOut: 150n });
         expect(rejected).toEqual({
@@ -743,11 +802,11 @@ describe('trading vault fill sequence', () => {
                 }),
                 vault: {
                     totalAssets: 100n,
-                    totalSupply: 100n,
-                    decimalsOffset: 0,
+                    totalSupply: 100n * SHARE_SCALE,
+                    decimalsOffset: 6,
                 },
             }),
-            shares: 101n,
+            shares: 100n * SHARE_SCALE + 1n,
             createdAt: 1n,
         });
 
@@ -764,7 +823,7 @@ describe('trading vault fill sequence', () => {
                 vault: {
                     totalAssets: 0n,
                     totalSupply: 1n,
-                    decimalsOffset: 0,
+                    decimalsOffset: 6,
                 },
                 config: config({ maxVaultBalance: I128_MAX }),
             }),
@@ -856,7 +915,7 @@ describe('withdrawal gates', () => {
                 vault: {
                     totalAssets: I128_MAX,
                     totalSupply: 0n,
-                    decimalsOffset: 0,
+                    decimalsOffset: 6,
                 },
             }),
             postVaultAssets: I128_MAX,
